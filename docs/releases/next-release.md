@@ -20,6 +20,11 @@ ESP32-S3 最小点灯板已在开发过程中从原始需求跑到两层 PCB 布
 
 升级 CLI/Skill 使用 `easyeda update`；本版新增连接器动作字段，需重新导入 1.11.0 连接器 .eext。
 
+v1.11.0 于 2026-10-13 18:07:43 UTC 正式发布，非草稿、非预发布，附注标签绑定提交 `1f6c920`，main 已快进到该提交。
+十项资产加 checksums.txt 共十一份文件，远端核对后才转正式。ClawHub 同步成功（easyeda-agent@1.11.0）。
+SkillHub [自动发布](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/38444234203) 仍被平台
+"最多 200 个文件"限制拒绝（本包 205 个），未为通过上传删减设计知识。立创连接器市场需人工提交，未在本轮更新。
+
 ## v1.10.0 历史记录
 
 
