@@ -1026,9 +1026,9 @@ NOT line up — re-wire the affected pins, then run ` + "`easyeda sch drc`" + ` 
 		var idsRaw string
 		var allowSheet, noCascade bool
 		c := &cobra.Command{
-			Use:     "prim-delete",
-			Short:   "Delete schematic primitives of ANY type by explicit id",
-			Args:    cobra.NoArgs,
+			Use:   "prim-delete",
+			Short: "Delete schematic primitives of ANY type by explicit id",
+			Args:  cobra.NoArgs,
 			Example: `  easyeda sch prim-delete --ids id1,id2   # delete these (any primitive type)
   easyeda sch prim-delete --ids <partId>  # a deleted part takes its own stub wires/flags with it
   easyeda sch prim-delete --ids <partId> --no-cascade`,

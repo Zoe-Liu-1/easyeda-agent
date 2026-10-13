@@ -1245,7 +1245,10 @@ type healthResult struct {
 	// (the extension API engine). It guides the Skill preflight but does not
 	// authorize or refuse ordinary action dispatch.
 	HostCompatibility *hostCompatibilityReport `json:"hostCompatibility,omitempty"`
-	Checked           []checkedHealth          `json:"checked"`
+	// Checks is the onboarding checklist derived from the fields above
+	// (healthChecks): status + exact next step per setup stage.
+	Checks  []healthCheck   `json:"checks,omitempty"`
+	Checked []checkedHealth `json:"checked"`
 }
 
 type checkedHealth struct {

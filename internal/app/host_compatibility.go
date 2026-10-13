@@ -123,33 +123,3 @@ func hostCompatibilitySummary(rep hostCompatibilityReport) string {
 		return "· EasyEDA 宿主:未判定（无窗口或版本不可读）"
 	}
 }
-
-// hiddenPageWarnings names every connected window whose EasyEDA tab is hidden.
-// A hidden tab throttles timers and stops repainting, which surfaces as
-// RealTimeSync timeouts, reload/open timeouts and stale canvas captures — the
-// fix is visibility, not retries. Windows that report no visibility are skipped.
-func hiddenPageWarnings(raw []byte) []string {
-	var parsed struct {
-		Windows []struct {
-			WindowID string `json:"windowId"`
-			Context  struct {
-				ProjectName    string `json:"projectName"`
-				PageVisibility string `json:"pageVisibility"`
-			} `json:"context"`
-		} `json:"windows"`
-	}
-	if json.Unmarshal(raw, &parsed) != nil {
-		return nil
-	}
-	var out []string
-	for _, w := range parsed.Windows {
-		if w.Context.PageVisibility == "hidden" {
-			name := w.WindowID
-			if w.Context.ProjectName != "" {
-				name += "（" + w.Context.ProjectName + "）"
-			}
-			out = append(out, fmt.Sprintf("⚠ 页面可见性: 窗口 %s 的 EasyEDA 标签页在后台 —— 定时器被节流、画布不重绘，同步等待/重开会超时、截图会过期；请把该标签页切到前台", name))
-		}
-	}
-	return out
-}

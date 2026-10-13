@@ -175,22 +175,13 @@ func newDaemonHealthCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command
 				hostRep := hostCompatibilityFromHealth(result.Found.Raw)
 				result.HostCompatibility = &hostRep
 			}
+			result.Checks = healthChecks(result)
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
 			if err := enc.Encode(result); err != nil {
 				return fmt.Errorf("encode health: %w", err)
 			}
-			if result.VersionGate != nil {
-				fmt.Fprintln(stderr, versionGateSummary(*result.VersionGate))
-			}
-			if result.HostCompatibility != nil {
-				fmt.Fprintln(stderr, hostCompatibilitySummary(*result.HostCompatibility))
-			}
-			if result.Found != nil {
-				for _, line := range hiddenPageWarnings(result.Found.Raw) {
-					fmt.Fprintln(stderr, line)
-				}
-			}
+			printHealthChecklist(stderr, result.Checks)
 			if result.Found == nil {
 				return errActionFailed // daemon absent; response already printed
 			}

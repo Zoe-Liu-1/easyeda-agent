@@ -46,17 +46,3 @@ func TestHostCompatibilityIsSeparateFromExtensionAPIEngine(t *testing.T) {
 		t.Fatalf("unexpected V4 declaration: %+v", rep)
 	}
 }
-
-func TestHiddenPageWarningsNamesOnlyHiddenWindows(t *testing.T) {
-	raw := []byte(`{"windows":[
-		{"windowId":"w-hidden","context":{"projectName":"ceshi","pageVisibility":"hidden"}},
-		{"windowId":"w-visible","context":{"projectName":"demo","pageVisibility":"visible"}},
-		{"windowId":"w-old","context":{"projectName":"legacy"}}]}`)
-	got := hiddenPageWarnings(raw)
-	if len(got) != 1 || !strings.Contains(got[0], "w-hidden") || !strings.Contains(got[0], "前台") {
-		t.Fatalf("want one actionable warning for w-hidden, got %q", got)
-	}
-	if hiddenPageWarnings([]byte(`not json`)) != nil {
-		t.Fatal("unparseable health must not invent warnings")
-	}
-}
