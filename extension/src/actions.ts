@@ -9308,6 +9308,18 @@ function silkOverlap(a: silkRect, b: silkRect, m: number): boolean {
 type silkObs = { rect: silkRect; kind: string; owner: string; m: number; layer?: number };
 const silkCenter = (r: silkRect) => ({ x: (r.minX + r.maxX) / 2, y: (r.minY + r.maxY) / 2 });
 const silkInflate = (r: silkRect, m: number): silkRect => ({ minX: r.minX - m, minY: r.minY - m, maxX: r.maxX + m, maxY: r.maxY + m });
+const silkRectGap = (a: silkRect, b: silkRect): number => {
+	const dx = Math.max(0, a.minX - b.maxX, b.minX - a.maxX), dy = Math.max(0, a.minY - b.maxY, b.minY - a.maxY);
+	return Math.hypot(dx, dy);
+};
+// A designator reads as belonging to the part it is nearest to. Collision-free
+// is not enough: the widening search once accepted C1's label beyond C3, where
+// it named the wrong part. The slot must be strictly nearer its own body than
+// any other part body.
+export const silkLabelOwnedBy = (L: silkRect, own: silkRect, ownerId: string, obstacles: Array<{ kind: string; owner?: string; rect: silkRect }>): boolean => {
+	const mine = silkRectGap(L, own);
+	return obstacles.every(o => o.kind !== 'BODY' || o.owner === ownerId || silkRectGap(L, o.rect) > mine);
+};
 const silkInside = (inner: silkRect, outer: silkRect): boolean => inner.minX >= outer.minX && inner.minY >= outer.minY && inner.maxX <= outer.maxX && inner.maxY <= outer.maxY;
 // min rect-to-rect gap (0 if overlapping/touching).
 function silkGap(a: silkRect, b: silkRect): number {
@@ -9569,7 +9581,12 @@ const pcbSilkAlign: Handler = async (payload) => {
 				const ly = cc.y + dy * ((it.cb.maxY - it.cb.minY) / 2 + baseOffset + it.h / 2);
 				off = !silkInside({ minX: lx - it.w / 2, minY: ly - it.h / 2, maxX: lx + it.w / 2, maxY: ly + it.h / 2 }, safeArea);
 			}
-			const score = off ? -Infinity : 0.50 * Pfree + 0.35 * edgeness * Ppos + 0.15 * Pref + 0.20 * crowdBonus;
+			// An explicit --side must decide among viable slots. As a 0.15-weighted
+			// preference it moved the score by ~0.02 (the default already ranks
+			// below at 0.85), so `--side bottom` still put C1's label above C1.
+			// Blocked or off-board slots are still rejected by the ladder below.
+			const requested = sideDir && sideDir[0] === dx && sideDir[1] === dy ? 1.0 : 0;
+			const score = off ? -Infinity : 0.50 * Pfree + 0.35 * edgeness * Ppos + 0.15 * Pref + 0.20 * crowdBonus + requested;
 			return { dir: [dx, dy], score };
 		});
 		scored.sort((a, b) => b.score - a.score);
@@ -9592,10 +9609,10 @@ const pcbSilkAlign: Handler = async (payload) => {
 				const [dx, dy] = pref[i], lx = cc.x + dx * (hw + d + it.w / 2), ly = cc.y + dy * (hh + d + it.h / 2);
 				const L = silkInflate({ minX: lx - it.w / 2, minY: ly - it.h / 2, maxX: lx + it.w / 2, maxY: ly + it.h / 2 }, HALO);
 				const facts = evaluate(L, it, i < 4 ? i : 3);
-				if (facts.clean && (!best || facts.cost < best.cost)) best = { it, lx, ly, L, cost: facts.cost, x: lx - it.offx, y: ly - it.offy };
+				if (facts.clean && silkLabelOwnedBy(L, it.cb, it.cid, OBS) && (!best || facts.cost < best.cost)) best = { it, lx, ly, L, cost: facts.cost, x: lx - it.offx, y: ly - it.offy };
 			}
 		}
-		if (!best) unresolved.push({ designator: it.desig, primitiveId: it.attrId, reason: 'No collision-free slot within search range' });
+		if (!best) unresolved.push({ designator: it.desig, primitiveId: it.attrId, reason: 'No collision-free slot within search range that sits closer to its own part than to any other part' });
 		else { plans.push(best); LAB[it.attrId] = { rect: best.L, layer: it.targetLayer }; }
 	}
 	// An unresolved label remains in place. Do not partially apply the positional plan.

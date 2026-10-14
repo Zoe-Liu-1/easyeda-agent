@@ -4247,7 +4247,7 @@ read the actual state before recomputing. Snapshot is supplementary evidence.`,
 		}
 		c.Flags().Float64Var(&offset, "offset", 15, "base distance from the footprint edge (mil); ×spacing")
 		c.Flags().Float64Var(&spacing, "spacing", 1.5, "spacing coefficient — scales the label drift for assembly/solder room (bigger = further out)")
-		c.Flags().StringVar(&side, "side", "", "bias which side of the footprint: top|bottom|left|right (soft hint)")
+		c.Flags().StringVar(&side, "side", "", "preferred side of the footprint: top|bottom|left|right — used whenever that side is collision-free and on the board, otherwise the next best side")
 		c.Flags().StringArrayVar(&refs, "refs", nil, "limit to these designators (repeatable); default = all")
 		pcb.AddCommand(c)
 	}

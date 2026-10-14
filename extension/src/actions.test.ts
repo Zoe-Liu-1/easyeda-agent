@@ -2027,7 +2027,7 @@ test('no-connect: noConnected=false clears and persists an existing X marker', a
 });
 
 // ─── pcb.page.clear scope parsing (pure, no eda runtime) ─────────────────
-import { parsePcbClearScopes, settleWithGrace } from './actions';
+import { parsePcbClearScopes, settleWithGrace, silkLabelOwnedBy } from './actions';
 
 test('parsePcbClearScopes: omitted → all five scopes', () => {
 	assert.deepEqual(parsePcbClearScopes(undefined), ['components', 'routing', 'copper', 'regions', 'silk']);
@@ -4614,4 +4614,14 @@ test('settleWithGrace adopts a late host result instead of abandoning it (#208)'
 	assert.equal(rejected.state, 'rejected');
 	const pending: any = await settleWithGrace(new Promise(() => {}), 5, 10);
 	assert.equal(pending.state, 'pending', 'an unsettled create stays unknown — never reported as failed-and-rolled-back');
+});
+
+test('silk label must sit nearer its own part than any other part', () => {
+	const c1 = { minX: -180, minY: -813, maxX: -20, maxY: -736 };
+	const c3 = { minX: -95, minY: -716, maxX: -20, maxY: -670 };
+	const obs = [{ kind: 'BODY', owner: 'C1', rect: c1 }, { kind: 'BODY', owner: 'C3', rect: c3 }, { kind: 'PAD', owner: 'C3', rect: c3 }];
+	const aboveC3 = { minX: -121, minY: -659, maxX: -79, maxY: -614 }; // live 2026-10-13: C1's label landed here
+	assert.equal(silkLabelOwnedBy(aboveC3, c1, 'C1', obs), false, 'a slot beyond C3 names the wrong part');
+	const leftOfC1 = { minX: -228, minY: -796, maxX: -186, maxY: -751 };
+	assert.equal(silkLabelOwnedBy(leftOfC1, c1, 'C1', obs), true);
 });
