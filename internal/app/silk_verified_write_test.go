@@ -123,3 +123,28 @@ func TestSilkApplyCannotRetryVerifyOrContinueAfterUnverifiedPlacement(t *testing
 		}
 	}
 }
+
+func TestSilkAlignUnresolvedWithoutWriteSaysNothingWritten(t *testing.T) {
+	refused := map[string]any{"verified": false, "partial": false, "aligned": 0.0, "appliedIds": []any{},
+		"unresolved": 1.0, "unresolvedDetails": []any{map[string]any{"designator": "C1", "reason": "no slot"}}}
+	err := silkAlignmentError("pcb.silk.align", refused)
+	if err == nil || !strings.Contains(err.Error(), "nothing was written") || !strings.Contains(err.Error(), "C1 (no slot)") {
+		t.Fatalf("want nothing-written message, got %v", err)
+	}
+	// Any sign of a landed write keeps the do-not-retry wording.
+	for _, mutate := range []func(map[string]any){
+		func(m map[string]any) { m["appliedIds"] = []any{"x"} },
+		func(m map[string]any) { m["partial"] = true },
+		func(m map[string]any) { delete(m, "appliedIds") },
+		func(m map[string]any) { m["aligned"] = 1.0 },
+	} {
+		r := map[string]any{}
+		for k, v := range refused {
+			r[k] = v
+		}
+		mutate(r)
+		if err := silkAlignmentError("pcb.silk.align", r); err == nil || strings.Contains(err.Error(), "nothing was written") {
+			t.Fatalf("result %v: got %v", r, err)
+		}
+	}
+}

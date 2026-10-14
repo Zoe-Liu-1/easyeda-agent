@@ -245,9 +245,14 @@ func pourBoundaryError(action string, result map[string]any) error {
 	return nil
 }
 
-type unverifiedSilkAlignmentError struct{}
+// unwritten lists the labels the connector refused to move when it provably
+// wrote nothing; empty means some write may have landed.
+type unverifiedSilkAlignmentError struct{ unwritten []string }
 
-func (*unverifiedSilkAlignmentError) Error() string {
+func (e *unverifiedSilkAlignmentError) Error() string {
+	if len(e.unwritten) > 0 {
+		return "pcb.silk.align: nothing was written; unresolved: " + strings.Join(e.unwritten, "; ")
+	}
 	return "pcb.silk.align: placement not verified; preserve appliedIds, normalization and fresh geometry before recomputing; do not blindly retry"
 }
 
@@ -256,7 +261,7 @@ func silkAlignmentError(action string, result map[string]any) error {
 		return nil
 	}
 	if result["verified"] != true || result["partial"] == true {
-		return &unverifiedSilkAlignmentError{}
+		return &unverifiedSilkAlignmentError{unwritten: silkAlignNothingWritten(result)}
 	}
 	// Counters are mandatory: old connectors could report success without a geometry verification.
 	for _, key := range []string{"unresolved", "skipped"} {
@@ -266,6 +271,31 @@ func silkAlignmentError(action string, result map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// silkAlignNothingWritten returns "C1 (reason)" entries only when the receipt
+// proves no label moved: not partial, nothing aligned, an explicitly empty
+// appliedIds, and every requested label accounted for as unresolved.
+func silkAlignNothingWritten(result map[string]any) []string {
+	ids, ok := result["appliedIds"].([]any)
+	aligned, alignedOK := result["aligned"].(float64)
+	if result["partial"] != false || !ok || len(ids) != 0 || !alignedOK || aligned != 0 {
+		return nil
+	}
+	details, _ := result["unresolvedDetails"].([]any)
+	var out []string
+	for _, d := range details {
+		m, _ := d.(map[string]any)
+		ref := asString(m["designator"])
+		if ref == "" {
+			continue
+		}
+		if reason := asString(m["reason"]); reason != "" {
+			ref += " (" + reason + ")"
+		}
+		out = append(out, ref)
+	}
+	return out
 }
 
 type unverifiedSilkSetError struct{ rawResponse string }
