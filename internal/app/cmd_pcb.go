@@ -839,6 +839,11 @@ write that resets them. Disable with --no-sync-designators.`,
 				if noRecompute {
 					payload["recomputeRatline"] = false
 				}
+				// The import waits for and clicks the confirm dialog on host timers;
+				// live 2026-10-14 a hidden tab made it time out after 18s.
+				if err := refuseIfTabHidden(cfg, window, "the import waits on the confirm dialog and would time out", "nothing was imported"); err != nil {
+					return err
+				}
 				res, err := dispatchCapture(cfg, "pcb.import_changes", window, payload, stdout)
 				if err != nil {
 					return err

@@ -45,7 +45,13 @@ func TestPCBImportEntryPointsKeepUnverifiedResultAndStop(t *testing.T) {
 				if entry != "request" && strings.TrimSpace(out.String()) != reply {
 					t.Fatalf("original response lost: %s", out.String())
 				}
-				if calls := state.snapshot(); len(calls) != 1 || calls[0].Action != "pcb.import_changes" {
+				// The command entry reads document.current first (hidden-tab
+				// refusal, read-only); after the import nothing may follow.
+				calls := state.snapshot()
+				if entry == "command" && len(calls) > 0 && calls[0].Action == "document.current" {
+					calls = calls[1:]
+				}
+				if len(calls) != 1 || calls[0].Action != "pcb.import_changes" {
 					t.Fatalf("must not backfill, repair, or repeat: %+v", calls)
 				}
 			})
@@ -89,6 +95,9 @@ func TestPCBImportApplyCannotVerifyRetryContinueOrPromptPastPartial(t *testing.T
 					t.Fatalf("bypassed partial import: %v", err)
 				}
 				calls := state.snapshot()
+				if len(calls) > 0 && calls[0].Action == "document.current" {
+					calls = calls[1:] // read-only hidden-tab refusal check before the import
+				}
 				if len(calls) != 1 || calls[0].Action != "pcb.import_changes" {
 					t.Fatalf("unexpected verify, replay, or dependent action: %+v", calls)
 				}
@@ -117,5 +126,24 @@ func TestPCBImportAcceptsConfirmedVerifiedResult(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`"verified":true`)) {
 		t.Fatalf("lost success result: %s", out.String())
+	}
+}
+
+func TestPCBImportRefusesHiddenTabBeforeImporting(t *testing.T) {
+	cfg, state, cleanup := newAutolayoutTestDaemon(t, func(_ int, call autolayoutTestCall) string {
+		return `{"ok":true,"result":{"uuid":"pcb1","documentType":"pcb"},"context":{"projectUuid":"p","documentUuid":"pcb1","documentType":"pcb","pageVisibility":"hidden"}}`
+	})
+	defer cleanup()
+	var out, stderr bytes.Buffer
+	cmd := newPcbCmd(cfg, &out, &stderr)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	cmd.SetArgs([]string{"import-changes", "--window", "w1"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "background") {
+		t.Fatalf("a hidden tab must be refused before importing (live: 18s timeout), got %v", err)
+	}
+	for _, c := range state.snapshot() {
+		if c.Action == "pcb.import_changes" {
+			t.Fatal("nothing may be imported while the tab is hidden")
+		}
 	}
 }
