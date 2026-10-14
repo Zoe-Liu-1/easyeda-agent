@@ -405,3 +405,50 @@ func TestPlanAutoPlace_HighPinConnectorIsNotMain(t *testing.T) {
 		t.Errorf("expected an exclude-main diag for U9, got %+v", diags)
 	}
 }
+
+// Live 2026-10-13 (ESP32-S3 blink demo): the one-way packer started C1/C3 at the
+// module's top and pushed them into the full-width antenna keep-out, 200–320mil
+// from the 3V3 pin they decouple.
+func TestPlanAutoPlaceKeepsSatellitesOutOfKeepoutsAndNearTheirPin(t *testing.T) {
+	u1pads := []apPad{
+		p("1", "GND", 29.5, -643), p("2", "3V3", 29.5, -693), p("3", "EN", 29.5, -743), p("4", "LED_CTRL", 29.5, -793),
+		p("27", "IO0", 718.5, -1293), p("40", "GND", 718.5, -643), p("41", "GND", 315, -947),
+		p("5", "", 29.5, -843), p("6", "", 29.5, -893), p("7", "", 29.5, -943),
+	}
+	comps := []apComp{
+		mkComp("u1", "U1", 374, -858, 748, 1030, u1pads),
+		mkComp("c1", "C1", -120, -805, 160.6, 77.2, []apPad{p("1", "3V3", 0, 0), p("2", "GND", 0, 0)}),
+		mkComp("c3", "C3", -120, -690, 74.8, 45.3, []apPad{p("1", "3V3", 0, 0), p("2", "GND", 0, 0)}),
+		mkComp("r1", "R1", -120, -930, 80.4, 45.3, []apPad{p("2", "3V3", 0, 0), p("1", "EN", 0, 0)}),
+		mkComp("c2", "C2", -120, -1045, 74.8, 45.3, []apPad{p("1", "EN", 0, 0), p("2", "GND", 0, 0)}),
+		mkComp("r3", "R3", -120, -1165, 80.4, 45.3, []apPad{p("1", "LED_CTRL", 0, 0), p("2", "LED1_N2", 0, 0)}),
+	}
+	opt := defaultApOptions()
+	keepout := layoutBBox{MinX: -240, MaxX: 940, MinY: -643, MaxY: -343}
+	opt.keepouts = []layoutBBox{keepout}
+	opt.board = &layoutBBox{MinX: -240, MaxX: 940, MinY: -1600, MaxY: -343}
+	moves, diags := planAutoPlace(comps, opt)
+	if len(diags) != 0 {
+		t.Fatalf("every satellite must find a slot: %+v", diags)
+	}
+	size := map[string][2]float64{}
+	for _, c := range comps {
+		size[c.designator] = [2]float64{c.width(), c.height()}
+	}
+	for _, m := range moves {
+		// On a left/right edge a 2-pin part is turned to face the chip, so its
+		// extent along the edge (y) is its short side.
+		half := math.Max(size[m.Designator][0], size[m.Designator][1]) / 2
+		if m.Edge == "left" || m.Edge == "right" {
+			half = math.Min(size[m.Designator][0], size[m.Designator][1]) / 2
+		}
+		if m.NewY+half > keepout.MinY {
+			t.Errorf("%s at y=%.1f reaches into the antenna keep-out (y > %.0f)", m.Designator, m.NewY, keepout.MinY)
+		}
+		if m.Designator == "C1" || m.Designator == "C3" {
+			if d := math.Abs(m.NewY - (-693)); d > 200 {
+				t.Errorf("%s decouples U1.2 (y=-693) but sits %.0fmil away along the edge", m.Designator, d)
+			}
+		}
+	}
+}

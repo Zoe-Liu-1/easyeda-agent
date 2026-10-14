@@ -3056,7 +3056,9 @@ exported DSN contains keepout entries before trusting the result.`,
 'make dev' hot-reloads tweaks with no re-import). Main chips (>= --main-pins
 distinct pins) are anchors and stay put; every small satellite is moved to the
 chip edge nearest the pad it actually connects to, then packed along that edge so
-nothing overlaps:
+nothing overlaps — decoupling parts claim the slot nearest their pin first, every
+part takes the nearest free slot in either direction, and keep-out regions (e.g. the
+antenna) and the board outline are never entered:
   • decoupling caps land by their power pin (3V3/VCC), resistors by their signal pin
   • an LED chains next to its series resistor (shared signal net)
 With 2+ main chips, any that overlap / sit closer than --multi-gap are spread into a
@@ -3121,6 +3123,20 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 				}
 				opt.anchors = designatorSet(anchorCSV)
 				opt.excludeMain = designatorSet(excludeMainCSV)
+				// Keep-out regions (same reader as pcb check's antenna rule) and the
+				// board outline bound every satellite slot.
+				if rres, rerr := requestAction(cfg, "pcb.region.list", window, nil); rerr != nil {
+					fmt.Fprintf(stderr, "warning: keep-out regions unread (%v) — satellites are not kept out of them\n", rerr)
+				} else {
+					for _, r := range parseAntennaKeepRegions(rres.Result) {
+						if r.BBox != nil {
+							opt.keepouts = append(opt.keepouts, *r.BBox)
+						}
+					}
+				}
+				if r, oerr := outlineRect(cfg, window, 0); oerr == nil {
+					opt.board = &layoutBBox{MinX: r[0], MinY: r[1], MaxX: r[2], MaxY: r[3]}
+				}
 				moves, diags := planAutoPlace(comps, opt)
 
 				// 3. Apply (unless --dry-run), one modify per satellite. Re-oriented

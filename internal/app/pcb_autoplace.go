@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"slices"
@@ -229,7 +230,18 @@ type apOptions struct {
 	// excludeMain bars one from it. Explicit beats every heuristic.
 	anchors     map[string]bool
 	excludeMain map[string]bool
+	// keepouts are placement-forbidden rectangles (antenna/keep-out regions);
+	// board, when known, bounds every satellite body. Live 2026-10-13: the old
+	// one-way packer pushed C1/C3 up into the ESP32 antenna keep-out.
+	keepouts []layoutBBox
+	board    *layoutBBox
 }
+
+// Satellite slot search along an edge: step and how far from the target pad.
+const (
+	apSearchStepMil = 5.0
+	apSearchSpanMil = 2000.0
+)
 
 func defaultApOptions() apOptions {
 	return apOptions{mainPins: 8, gap: 40, pitch: 30, rotate: true, multiGap: 150}
@@ -492,14 +504,26 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 
 	for _, k := range keys {
 		group := groups[k]
+		// Power (decoupling) parts claim their slot first, then the rest; each takes
+		// the free position NEAREST its target pad, searching both directions —
+		// a one-way cursor pushed later parts away from their pins and into keep-outs.
+		rank := func(a *assignment) int {
+			if a.via == "power" {
+				return 0
+			}
+			return 1
+		}
 		sort.SliceStable(group, func(i, j int) bool {
+			if ri, rj := rank(group[i]), rank(group[j]); ri != rj {
+				return ri < rj
+			}
 			if group[i].along != group[j].along {
 				return group[i].along < group[j].along
 			}
 			return comps[group[i].sat].designator < comps[group[j].sat].designator
 		})
 		chip := comps[mains[k.main]]
-		cursor := math.Inf(-1)
+		var taken [][2]float64 // occupied along-intervals on this edge, incl. pitch
 		for _, a := range group {
 			sat := comps[a.sat]
 			// Re-orient (2-pin parts) so the connecting pad faces the chip; pack with
@@ -524,11 +548,44 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 				}
 			}
 			half := alongExtent / 2
-			center := a.along
-			if min := cursor + opt.pitch + half; center < min {
-				center = min
+			body := func(center float64) layoutBBox {
+				if k.edge.vertical() {
+					return layoutBBox{MinX: perpCenter - effW/2, MaxX: perpCenter + effW/2, MinY: center - half, MaxY: center + half}
+				}
+				return layoutBBox{MinX: center - half, MaxX: center + half, MinY: perpCenter - effH/2, MaxY: perpCenter + effH/2}
 			}
-			cursor = center + half
+			free := func(center float64) bool {
+				lo, hi := center-half-opt.pitch, center+half+opt.pitch
+				for _, t := range taken {
+					if lo < t[1] && t[0] < hi {
+						return false
+					}
+				}
+				b := body(center)
+				for _, ko := range opt.keepouts {
+					if b.MinX < ko.MaxX && ko.MinX < b.MaxX && b.MinY < ko.MaxY && ko.MinY < b.MaxY {
+						return false
+					}
+				}
+				if opt.board != nil && (b.MinX < opt.board.MinX || b.MaxX > opt.board.MaxX || b.MinY < opt.board.MinY || b.MaxY > opt.board.MaxY) {
+					return false
+				}
+				return true
+			}
+			center, found := 0.0, false
+			for d := 0.0; d <= apSearchSpanMil && !found; d += apSearchStepMil {
+				for _, c := range []float64{a.along - d, a.along + d} {
+					if free(c) {
+						center, found = c, true
+						break
+					}
+				}
+			}
+			if !found {
+				diags = append(diags, apDiag{sat.designator, fmt.Sprintf("no free slot on %s's %s edge within %.0fmil of its pin (keep-outs/board edge/other satellites)", chip.designator, k.edge, apSearchSpanMil)})
+				continue
+			}
+			taken = append(taken, [2]float64{center - half, center + half})
 
 			var cx, cy float64
 			if k.edge.vertical() {
