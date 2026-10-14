@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { armDeadline, pendingDeadlines, sweepDeadlines } from './deadlines';
+import { armDeadline, pendingDeadlines, sleep, sweepDeadlines } from './deadlines';
 
 const FAR = 3_600_000; // 一小时:真实 setTimeout 在测试期内绝不可能自己响
 
@@ -63,4 +63,15 @@ test('登记数随 cancel/触发回落,不泄漏', () => {
 	h1.cancel();
 	h2.cancel();
 	assert.equal(pendingDeadlines(), before);
+});
+
+test('sleep 在主线程定时器被节流时由 worker tick 保底唤醒', async () => {
+	let woke = false;
+	const p = sleep(60_000).then(() => { woke = true; });
+	await Promise.resolve();
+	assert.equal(woke, false);
+	sweepDeadlines(Date.now() + 60_001); // 后台:快路径要一分钟后才响,保底 tick 先到
+	await p;
+	assert.equal(woke, true);
+	assert.equal(pendingDeadlines(), 0);
 });

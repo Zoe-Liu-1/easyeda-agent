@@ -4208,6 +4208,19 @@ test('import confirmation clicks once while a delayed dialog closes', async t =>
 	assert.equal(now, 750);
 });
 
+test('import confirmation counts a changed inventory as applied while the modal lags (background tab)', async t => {
+	const g = globalThis as any, previous = g.document;
+	t.after(() => { g.document = previous; });
+	let now = 0, clicks = 0;
+	const button = { innerText: '应用修改', offsetParent: {}, click: () => { clicks++; } };
+	const modal = { innerText: '确认导入信息', offsetParent: {}, querySelectorAll: () => [button] };
+	g.document = { querySelectorAll: () => [modal] };
+	const landed = async () => now >= 1000;
+	assert.equal(await clickImportConfirm(8000, { now: () => now, pause: async ms => { now += ms; } }, landed), 'applied');
+	assert.equal(clicks, 1);
+	assert.equal(now, 1000);
+});
+
 test('import confirmation that never closes remains unverified without another click', async t => {
 	const g = globalThis as any, previous = g.document;
 	t.after(() => { g.document = previous; });
@@ -4239,7 +4252,7 @@ test('PCB import identity check reports both duplicate instances and permits unl
 	]), [{ uniqueId: 'gge1', primitiveIds: ['first', 'second'] }]);
 });
 
-for (const mode of ['delayed', 'never-closes', 'no-button', 'duplicates', 'unreadable-identities']) {
+for (const mode of ['delayed', 'never-closes', 'lagged-close', 'no-button', 'duplicates', 'unreadable-identities']) {
 	test(`PCB import API true does not hide confirmation or identity failures: ${mode}`, async t => {
 		const g = globalThis as any, previousDocument = g.document, previousEda = g.eda;
 		t.after(() => { g.document = previousDocument; g.eda = previousEda; });
@@ -4250,7 +4263,7 @@ for (const mode of ['delayed', 'never-closes', 'no-button', 'duplicates', 'unrea
 		});
 		const button = { innerText: '应用修改', offsetParent: {}, click: () => { clicks++; } };
 		const modal = { innerText: '确认导入信息', offsetParent: {}, querySelectorAll: () => mode === 'no-button' ? [] : [button] };
-		g.document = { querySelectorAll: () => mode === 'never-closes' || mode === 'no-button' || now < 750 ? [modal] : [] };
+		g.document = { querySelectorAll: () => mode === 'never-closes' || mode === 'lagged-close' || mode === 'no-button' || now < 750 ? [modal] : [] };
 		const components = ['first', 'second'].map((id, index) => ({
 			getState_PrimitiveId: () => id,
 			getState_UniqueId: () => {
@@ -4260,7 +4273,8 @@ for (const mode of ['delayed', 'never-closes', 'no-button', 'duplicates', 'unrea
 		}));
 		g.eda = {
 			dmt_Board: { getCurrentBoardInfo: async () => ({ name: 'board', schematic: { uuid: 'sch' }, pcb: { uuid: 'pcb' } }) },
-			pcb_PrimitiveComponent: { getAll: async () => clicks ? components : [] },
+			// never-closes: nothing lands; lagged-close: parts land while the modal keeps closing.
+			pcb_PrimitiveComponent: { getAll: async () => clicks && mode !== 'never-closes' ? components : [] },
 			pcb_Document: { importChanges: async () => true, startCalculatingRatline: async () => { ratlines++; return true; } },
 		};
 		const reply = await runAction('pcb.import_changes', {});
@@ -4268,9 +4282,11 @@ for (const mode of ['delayed', 'never-closes', 'no-button', 'duplicates', 'unrea
 		assert.equal(result.imported, true, 'preserve the API result without treating it as verification');
 		assert.equal(clicks, mode === 'no-button' ? 0 : 1);
 		assert.equal(result.confirmationClickCount, clicks);
-		assert.equal(result.verified, mode === 'delayed');
-		assert.equal(result.partial, mode !== 'delayed');
-		assert.equal(ratlines, mode === 'delayed' ? 1 : 0);
+		const ok = mode === 'delayed' || mode === 'lagged-close';
+		assert.equal(result.verified, ok);
+		assert.equal(result.partial, !ok);
+		assert.equal(ratlines, ok ? 1 : 0);
+		if (mode === 'lagged-close') { assert.equal(result.confirm, 'applied'); assert.equal(result.dialogLagged, true); }
 		if (mode === 'never-closes') assert.equal(result.confirm, 'dialog-open');
 		if (mode === 'no-button') assert.equal(result.confirm, 'no-button');
 		if (mode === 'duplicates') assert.deepEqual(result.duplicateUniqueIds, [{ uniqueId: 'gge1', primitiveIds: ['first', 'second'] }]);

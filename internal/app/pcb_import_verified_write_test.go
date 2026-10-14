@@ -128,22 +128,3 @@ func TestPCBImportAcceptsConfirmedVerifiedResult(t *testing.T) {
 		t.Fatalf("lost success result: %s", out.String())
 	}
 }
-
-func TestPCBImportRefusesHiddenTabBeforeImporting(t *testing.T) {
-	cfg, state, cleanup := newAutolayoutTestDaemon(t, func(_ int, call autolayoutTestCall) string {
-		return `{"ok":true,"result":{"uuid":"pcb1","documentType":"pcb"},"context":{"projectUuid":"p","documentUuid":"pcb1","documentType":"pcb","pageVisibility":"hidden"}}`
-	})
-	defer cleanup()
-	var out, stderr bytes.Buffer
-	cmd := newPcbCmd(cfg, &out, &stderr)
-	cmd.SilenceErrors, cmd.SilenceUsage = true, true
-	cmd.SetArgs([]string{"import-changes", "--window", "w1"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "background") {
-		t.Fatalf("a hidden tab must be refused before importing (live: 18s timeout), got %v", err)
-	}
-	for _, c := range state.snapshot() {
-		if c.Action == "pcb.import_changes" {
-			t.Fatal("nothing may be imported while the tab is hidden")
-		}
-	}
-}

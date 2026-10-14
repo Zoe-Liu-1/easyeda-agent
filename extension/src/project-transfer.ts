@@ -1,10 +1,11 @@
 /// <reference types="@jlceda/pro-api-types" />
 import { ActionError, type ActionResult, ErrorCodes } from './protocol';
 import { requireString, uint8ToBase64 } from './util';
+import { sleep } from './deadlines';
 
 type Payload = Record<string, unknown>;
 const ARCHIVE_LIMIT = 16 * 1024 * 1024;
-const pause = () => new Promise<void>(resolve => setTimeout(resolve, 250));
+const pause = () => sleep(250);
 function fail(message: string): never {
 	throw new ActionError(ErrorCodes.EDA_CALL_FAILED, message);
 }

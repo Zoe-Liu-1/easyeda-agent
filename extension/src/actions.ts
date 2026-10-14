@@ -12,7 +12,7 @@ import { silkSlotFacts, validSilkRect, type SilkLabel } from './pcb-silk-placeme
  */
 
 import { type BeautifyOptions, runBeautify } from './beautify';
-import { armDeadline } from './deadlines';
+import { armDeadline, sleep } from './deadlines';
 import { exactJSON, preservedInstance } from './preserve-instance';
 import { barePcbRuleConfiguration, pcbRulesEqual, planPcbConfig } from './pcb-config';
 import { pcbNetColorSet } from './pcb-net-color';
@@ -935,7 +935,7 @@ export const schematicTitleBlockModify: Handler = async (payload) => {
 		const settled = wantedKeys.every(key => titleBlockFieldApplied(after!.titleBlockData[key], wanted[key]))
 			&& (showTitleBlock === undefined || after.showTitleBlock === showTitleBlock);
 		if (settled) break;
-		await new Promise<void>(resolve => setTimeout(resolve, 250));
+		await sleep(250);
 		const retry = await readFocusedTitleBlock();
 		if (!retry) break;
 		after = retry;
@@ -1053,7 +1053,7 @@ async function waitSchematicPageSettle(): Promise<boolean> {
 	let sawStableEmpty = 0;
 	for (const wait of delays) {
 		if (wait > 0) {
-			await new Promise<void>(resolve => setTimeout(resolve, wait));
+			await sleep(wait);
 		}
 		let count: number | undefined;
 		try {
@@ -1871,7 +1871,7 @@ export const schematicComponentModify: Handler = async (payload) => {
 		}
 		catch { /* transient — retry once below */ }
 		if (!fresh) {
-			await new Promise<void>(resolve => setTimeout(resolve, 250));
+			await sleep(250);
 			try {
 				fresh = await getComponentOrThrow(primitiveId);
 			}
@@ -2858,7 +2858,7 @@ const schematicPageClear: Handler = async (payload) => {
 			// once more before giving up, but never spin: two consecutive stalls means
 			// something is genuinely undeletable (locked / platform-protected).
 			if (++stalls >= 2) break;
-			await new Promise(resolve => setTimeout(resolve, 600));
+			await sleep(600);
 		}
 		else stalls = 0;
 	}
@@ -3864,8 +3864,9 @@ async function waitForCanvasSettle(): Promise<void> {
 			done = true;
 			resolve();
 		};
-		// Fallback so we never hang if rAF is throttled/unavailable.
-		setTimeout(settle, 120);
+		// Fallback so we never hang if rAF is throttled/unavailable (a hidden tab
+		// runs no frames, and its bare setTimeout can be pushed to once a minute).
+		armDeadline(120, settle);
 		if (raf) {
 			raf(() => raf(settle));
 		}
@@ -5789,7 +5790,7 @@ async function activateLibraryDocument(
 			actual.parentLibraryUuid === libraryUuid &&
 			actual.documentType === expectedDocumentType
 		) return tabId;
-		await new Promise<void>(resolve => setTimeout(resolve, 50));
+		await sleep(50);
 	}
 	const actualSummary = actual
 		? `uuid=${actual.uuid}, parentLibraryUuid=${actual.parentLibraryUuid ?? '<missing>'}, documentType=${actual.documentType}`
@@ -8329,7 +8330,7 @@ export async function settleWithGrace<T>(p: Promise<T>, ms: number, graceMs: num
 		(value) => ({ state: 'resolved' as const, value }),
 		(error) => ({ state: 'rejected' as const, error }),
 	);
-	const wait = (t: number) => new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), Math.max(0, t)));
+	const wait = (t: number) => sleep(Math.max(0, t)).then(() => 'timeout' as const);
 	const first = await Promise.race([settled, wait(ms)]);
 	if (first !== 'timeout') return first.state === 'resolved' ? { ...first, late: false } : first;
 	const second = await Promise.race([settled, wait(graceMs)]);
@@ -8414,7 +8415,7 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	let wire;
 	let wireErr: unknown;
 	for (let attempt = 0; attempt < 2 && !wire; attempt++) {
-		if (attempt > 0) await new Promise((r) => setTimeout(r, 250));
+		if (attempt > 0) await sleep(250);
 		try {
 			wire = await withTimeout(
 				eda.sch_PrimitiveWire.create([pinGX, pinGY, endX, endY]),
@@ -11209,10 +11210,15 @@ export function importConfirmStepSource(
 // "reading 'querySelectorAll' of undefined"), while a `new AsyncFunction`'s
 // scope chain ends at the real global — the exact trick debug.exec_js uses,
 // which is why exec_js probes could always see the dialog.
+//
+// `landed` is the ground-truth fallback after the click: in a background tab the
+// modal's close animation stalls (no rendering) long after the apply has landed
+// (live 2026-10-14: parts imported, modal still open at 10s), so a changed board
+// inventory also counts as applied. It never triggers another click.
 export async function clickImportConfirm(timeoutMs: number, clock = {
 	now: () => Date.now(),
-	pause: (ms: number) => new Promise<void>(r => setTimeout(r, ms)),
-}): Promise<string> {
+	pause: sleep,
+}, landed?: () => Promise<boolean>): Promise<string> {
 	const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as {
 		new (body: string): () => Promise<unknown>;
 	};
@@ -11232,6 +11238,7 @@ export async function clickImportConfirm(timeoutMs: number, clock = {
 			const closeBy = clock.now() + 10_000;
 			while (clock.now() < closeBy) {
 				if ((await observe()) === 'none') return 'applied';
+				if (landed && await landed()) return 'applied';
 				await clock.pause(250);
 			}
 			return 'dialog-open';
@@ -11287,6 +11294,21 @@ const pcbImportChanges: Handler = async (payload) => {
 		catch { return -1; }
 	};
 	const componentsBefore = await countComponents();
+	const inventorySignature = async (): Promise<string | undefined> => {
+		try {
+			return ((await eda.pcb_PrimitiveComponent.getAll()) ?? [])
+				.map(c => c.getState_UniqueId() || c.getState_PrimitiveId()).sort().join('|');
+		}
+		catch { return undefined; }
+	};
+	const inventoryBefore = await inventorySignature();
+	let dialogLagged = false;
+	const inventoryChanged = async (): Promise<boolean> => {
+		if (inventoryBefore === undefined) return false;
+		const now = await inventorySignature();
+		dialogLagged = now !== undefined && now !== inventoryBefore;
+		return dialogLagged;
+	};
 
 	// #124: importChanges' resolution semantics are UNRELIABLE around its
 	// 确认导入信息 dialog — observed both "resolves true when the dialog opens"
@@ -11298,13 +11320,13 @@ const pcbImportChanges: Handler = async (payload) => {
 		.catch(() => false);
 	let confirmOutcome = 'skipped';
 	if (autoConfirm) {
-		confirmOutcome = await clickImportConfirm(8_000);
+		confirmOutcome = await clickImportConfirm(8_000, undefined, inventoryChanged);
 	}
 	let imported: boolean | undefined;
 	let apiTimedOut = false;
 	imported = await Promise.race([
 		importPromise,
-		new Promise<boolean | undefined>(r => setTimeout(() => r(undefined), 12_000)),
+		sleep(12_000).then(() => undefined),
 	]);
 	if (imported === undefined) {
 		apiTimedOut = true;
@@ -11318,9 +11340,11 @@ const pcbImportChanges: Handler = async (payload) => {
 	if (confirmOutcome === 'applied') {
 		const settleBy = Date.now() + 10_000;
 		while (Date.now() < settleBy) {
-			await new Promise(r => setTimeout(r, 1_000));
+			await sleep(1_000);
 			const again = await countComponents();
-			if (again === componentsAfter && again > componentsBefore) break;
+			// Stable across two reads and changed in either direction (an import can
+			// add or remove parts); removals used to wait out the full 10s.
+			if (again === componentsAfter && again !== componentsBefore) break;
 			componentsAfter = again;
 		}
 	}
@@ -11352,6 +11376,9 @@ const pcbImportChanges: Handler = async (payload) => {
 		result: {
 			imported,
 			confirm: confirmOutcome,
+			// true: applied judged by the changed inventory while the modal was
+			// still closing (background tab), not by the modal disappearing.
+			...(dialogLagged && confirmOutcome === 'applied' ? { dialogLagged: true } : {}),
 			noChanges,
 			apiTimedOut,
 			componentsBefore,

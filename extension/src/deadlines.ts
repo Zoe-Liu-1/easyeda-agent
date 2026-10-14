@@ -132,6 +132,19 @@ export function sweepDeadlines(nowMs: number = Date.now()): number {
 	return due.length;
 }
 
+/**
+ * 后台安全的等待:同样走「setTimeout 快路径 + worker tick 保底」。轮询等待
+ * (等确认框、等器件落地、重试间隔)必须用它而不是裸 setTimeout:后台超过约
+ * 5 分钟后 Chrome 把连续的主线程定时器压到一分钟一次(2026-10-14 实测 8 次
+ * 250ms 等待耗时 >118s),裸 setTimeout 轮询会让每个等待都超出处理预算。
+ * 后台时分辨率是一个 worker tick(3s)。
+ *
+ * @param ms - 等待毫秒数
+ */
+export function sleep(ms: number): Promise<void> {
+	return new Promise<void>(resolve => { armDeadline(ms, resolve); });
+}
+
 /** 当前还挂着的截止时间数量(诊断/测试用)。 */
 export function pendingDeadlines(): number {
 	return entries.size;
