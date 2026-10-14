@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSheetBoundaryFindingsCatchWiresAndMarkersTheOldRulersMissed(t *testing.T) {
 	// A4 page shaped like the 2026-10-13 demo: C3's stub ran from the part down
@@ -34,5 +37,23 @@ func TestSheetBoundaryFindingsCatchWiresAndMarkersTheOldRulersMissed(t *testing.
 	}
 	if sheetBoundaryFindings(comps, wires, nil, nil, sheetSourceNone, 0.5) != nil {
 		t.Error("paperless page has no boundary to judge")
+	}
+}
+
+func TestVisibleTextBoundaryFindingsFlagsShownAttributesBelowTheFrame(t *testing.T) {
+	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 1170, MaxY: 825}
+	items := []visibleTextItem{
+		// live 2026-10-13: title-block Name shown → drawn under the frame
+		{ID: "a1", Kind: "attribute", ComponentType: "sheet", Key: "Name", BBox: &layoutBBox{MinX: 0, MinY: -20, MaxX: 120, MaxY: -10}},
+		{ID: "t1", Kind: "text", Content: "MCU", BBox: &layoutBBox{MinX: 20, MinY: 790, MaxX: 200, MaxY: 815}},
+		{ID: "a2", Kind: "attribute", Designator: "R1", Key: "Value", BBox: &layoutBBox{MinX: 300, MinY: 300, MaxX: 330, MaxY: 310}},
+		{ID: "u1", Kind: "text", Content: "unmeasured"},
+	}
+	got := visibleTextBoundaryFindings(items, sheet, 0.5)
+	if len(got) != 1 || got[0].PrimitiveId != "a1" || got[0].Type != "out-of-sheet" || !strings.Contains(got[0].Message, "Name") {
+		t.Fatalf("only the shown title attribute below the frame is out of sheet: %+v", got)
+	}
+	if visibleTextBoundaryFindings(items, nil, 0.5) != nil {
+		t.Fatal("paperless page has no boundary to judge")
 	}
 }

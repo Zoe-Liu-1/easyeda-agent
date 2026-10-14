@@ -7388,6 +7388,50 @@ const schematicTextList: Handler = async () => {
 	return { result: { count: items.length, scope: 'activePage', texts: items } };
 };
 
+// schematic.visible_text.bboxes — official bbox of every VISIBLE text-like
+// object on the active page: free text primitives plus each component's
+// attributes whose key or value is shown (parts AND the sheet frame — showing
+// title-block Name/Description once drew them below the frame, unflagged).
+// Read-only; anything that cannot be measured is listed, never dropped.
+const schematicVisibleTextBBoxes: Handler = async () => {
+	try {
+		const before = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (!before?.uuid) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'No active document.');
+		const items: Array<Record<string, unknown>> = [];
+		const unmeasured: Array<Record<string, unknown>> = [];
+		const measure = async (id: string) => {
+			const b = await eda.sch_Primitive.getPrimitivesBBox([id]) as { minX?: unknown; minY?: unknown; maxX?: unknown; maxY?: unknown } | null;
+			return b && [b.minX, b.minY, b.maxX, b.maxY].every(n => typeof n === 'number' && Number.isFinite(n))
+				? { minX: b.minX, minY: b.minY, maxX: b.maxX, maxY: b.maxY } : null;
+		};
+		const texts = await eda.sch_PrimitiveText.getAll();
+		for (const t of Array.isArray(texts) ? texts : []) {
+			const id = t.getState_PrimitiveId();
+			const bbox = await measure(id);
+			(bbox ? items : unmeasured).push({ id, kind: 'text', content: t.getState_Content(), ...(bbox ? { bbox } : {}) });
+		}
+		const comps = await eda.sch_PrimitiveComponent.getAll(undefined, false);
+		for (const c of Array.isArray(comps) ? comps : []) {
+			const parentId = c.getState_PrimitiveId();
+			const attrs = await eda.sch_PrimitiveAttribute.getAll(parentId);
+			for (const a of Array.isArray(attrs) ? attrs : []) {
+				if (a.getState_ValueVisible() !== true && a.getState_KeyVisible() !== true) continue;
+				const id = a.getState_PrimitiveId();
+				const bbox = await measure(id);
+				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: String(c.getState_ComponentType()),
+					designator: c.getState_Designator?.() ?? null, key: a.getState_Key(), ...(bbox ? { bbox } : {}) });
+			}
+		}
+		const after = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (after?.uuid !== before.uuid) throw new Error('active schematic page changed during measurement');
+		return { result: { documentId: before.uuid, count: items.length, items, unmeasured } };
+	}
+	catch (err) {
+		if (err instanceof ActionError) throw err;
+		throw edaError(err, 'Could not measure visible schematic text.');
+	}
+};
+
 // ─── Replace: swap a placed component's DEVICE(器件标准化「使用推荐器件」)───
 
 /** Pin identity snapshot used for the before/after diff of a device replace. */
@@ -15360,6 +15404,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.replace': schematicComponentReplace,
 	'schematic.component.resolve_lcsc': schematicComponentResolveLcsc,
 	'schematic.text.list': schematicTextList,
+	'schematic.visible_text.bboxes': schematicVisibleTextBBoxes,
 	'pcb.documents.list': pcbDocumentsList,
 	'pcb.components.list': pcbComponentsList,
 	'pcb.layers.list': pcbLayersList,

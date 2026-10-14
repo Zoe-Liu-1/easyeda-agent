@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- 新增只读 `schematic.visible_text.bboxes`：当前页全部可见文字与可见属性（器件与图纸本身）的官方 bbox，量不到的列入 `unmeasured`；`sch check` 据此把越出纸张的可见文字/属性报 `out-of-sheet`（此前显示图签 Name/Description 会画到纸外而无规则发现）。
 - `schematic.power.connect_pin`：网络标识创建超过 7s 后不再立即回滚桩线，而是在处理预算内继续等待同一宿主调用——晚到的标识被采用（`lateSettle:true`），明确失败才回滚；仍未落定时保留桩线并返回 `partial:true/verified:false`，避免晚到标识成为孤儿（#208）。
 - `document.current` 无活动文档（全部标签关闭、doc reload/switch 中途）改报 `PRECONDITION_REFUSED`：这是状态不是宿主故障，不再计入写健康度、不再把连接器误标 DEGRADED；CLI 同时兼容旧连接器的 `EDA_CALL_FAILED`。
 ## [1.11.0] - 2026-10-14

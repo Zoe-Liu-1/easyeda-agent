@@ -1,7 +1,9 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 )
 
@@ -77,6 +79,84 @@ func sheetBoundaryFindings(comps []layoutComp, wires []schGroupWire, sheet, titl
 				})
 			}
 		}
+	}
+	return out
+}
+
+// visibleTextItem is one measured entry of schematic.visible_text.bboxes.
+type visibleTextItem struct {
+	ID            string      `json:"id"`
+	Kind          string      `json:"kind"` // text | attribute
+	Content       string      `json:"content"`
+	ParentID      string      `json:"parentId"`
+	ComponentType string      `json:"componentType"`
+	Designator    string      `json:"designator"`
+	Key           string      `json:"key"`
+	BBox          *layoutBBox `json:"bbox"`
+}
+
+// visibleTextBoundaryFindings extends the sheet-boundary ruler to every visible
+// text: free text and shown attributes (parts' Name/Value…, the sheet's own
+// title-block fields). Live 2026-10-13: showing the title-block Name and
+// Description drew them below the frame and no rule saw it. Text is judged
+// against the PAPER, not the 12-raw placement margin of schUsableArea: frame
+// titles legitimately sit in that margin, text past the paper edge is lost.
+func visibleTextBoundaryFindings(items []visibleTextItem, sheet *layoutBBox, eps float64) []checkFinding {
+	if sheet == nil {
+		return nil
+	}
+	paper := *sheet
+	var out []checkFinding
+	for _, it := range items {
+		b := it.BBox
+		if b == nil || (b.MinX >= paper.MinX-eps && b.MaxX <= paper.MaxX+eps && b.MinY >= paper.MinY-eps && b.MaxY <= paper.MaxY+eps) {
+			continue
+		}
+		what := "文字「" + it.Content + "」"
+		if it.Kind == "attribute" {
+			owner := it.Designator
+			if owner == "" {
+				owner = it.ComponentType
+			}
+			what = fmt.Sprintf("%s 的可见属性 %s", owner, it.Key)
+		}
+		out = append(out, checkFinding{
+			Type: "out-of-sheet", Level: "warn", PrimitiveId: it.ID, Designator: it.Designator, BBox: b,
+			Message: fmt.Sprintf("%s 超出纸张（%.0f..%.0f × %.0f..%.0f）— 打印不出来；移回图内，或不需要显示时关闭该属性的显示",
+				what, b.MinX, b.MaxX, b.MinY, b.MaxY),
+		})
+	}
+	return out
+}
+
+// visibleTextFindings reads the measured visible text and applies the ruler.
+// An older connector without the action is reported once on stderr (no
+// finding: the rule simply does not exist there); a failed read or items the
+// host could not measure are surfaced, never treated as "inside".
+func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, eps float64, stderr io.Writer) []checkFinding {
+	if sheet == nil {
+		return nil
+	}
+	res, err := requestAction(cfg, "schematic.visible_text.bboxes", window, map[string]any{})
+	if err != nil {
+		if res != nil && res.errorCode == "UNKNOWN_ACTION" {
+			fmt.Fprintln(stderr, "sch check: visible-text out-of-sheet skipped — connector predates schematic.visible_text.bboxes")
+			return nil
+		}
+		return []checkFinding{{Type: "visible-text-unverified", Level: "warn", Message: "可见文字/属性是否越出图纸无法核验（读取失败）: " + err.Error()}}
+	}
+	var parsed struct {
+		Items      []visibleTextItem `json:"items"`
+		Unmeasured []visibleTextItem `json:"unmeasured"`
+	}
+	raw, _ := json.Marshal(res.Result)
+	if json.Unmarshal(raw, &parsed) != nil {
+		return []checkFinding{{Type: "visible-text-unverified", Level: "warn", Message: "可见文字/属性测量结果无法解析"}}
+	}
+	out := visibleTextBoundaryFindings(parsed.Items, sheet, eps)
+	if n := len(parsed.Unmeasured); n > 0 {
+		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "info",
+			Message: fmt.Sprintf("%d 个可见文字/属性宿主未给出 bbox，越界情况未核验", n)})
 	}
 	return out
 }

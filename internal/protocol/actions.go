@@ -428,6 +428,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"count", "scope (activePage)", "texts[].primitiveId", "texts[].content", "texts[].x", "texts[].y", "texts[].rotation", "texts[].fontSize", "texts[].color"},
 		},
 		{
+			Name:        "schematic.visible_text.bboxes",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only official bboxes of every VISIBLE text-like object on the ACTIVE schematic page: free text primitives plus each component's attributes whose key or value is shown (parts and the sheet frame). Feeds sch check's out-of-sheet rule; anything unmeasurable is listed in unmeasured, never dropped.",
+			Inputs:      []string{},
+			Outputs:     []string{"documentId", "count", "items[].id", "items[].kind (text|attribute)", "items[].bbox", "items[].parentId", "items[].key", "unmeasured[]"},
+		},
+		{
 			Name:        "schematic.image.create",
 			Domain:      DomainSchematic,
 			Phase:       1,
