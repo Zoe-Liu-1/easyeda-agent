@@ -181,18 +181,18 @@ PATH 上时只打印添加命令，需要自动添加用 `-AddToPath`（下载�
 [最新 GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/latest) 下载
 `easyeda-agent-connector.eext` 后在 EasyEDA Pro 的扩展管理器中导入。
 
-### 3. 启动并连接
+### 3. 打开工程并检查
 
-```bash
-easyeda daemon start
-```
-
-打开目标 EasyEDA 工程，并启用 **设置 → 允许外部交互**。开始操作前运行健康检查；需要安装对账时再显式运行版本检查：
+打开目标 EasyEDA 工程，并启用 **设置 → 允许外部交互**，然后运行：
 
 ```bash
 easyeda health
-easyeda update --check --exit-code  # 可选：安装版本对账
 ```
+
+它逐项列出 daemon、连接器、版本、EasyEDA 宿主、工程与标签页是否就绪，未就绪项直接给出下一步。
+daemon 不用手动常驻：任何 `easyeda` 命令发现它没在运行时会自动在后台启动（日志在
+`~/.easyeda-agent/daemon.log`；`EASYEDA_NO_AUTOSTART=1` 关闭）。需要安装对账时再运行
+`easyeda update --check --exit-code`。
 
 项目主线要求 **EasyEDA Pro V4**，推荐升级到已验证的 **V4.1.60 或更新 V4**。
 `easyeda health` 会在 `hostCompatibility` 中单独报告宿主产品版本；V3 环境应先升级再做现场写入。

@@ -41,7 +41,7 @@ func newDaemonCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 
 func newDaemonStartCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	var autosaveDebounce time.Duration
-	var autoUpdateSkill bool
+	var autoUpdateSkill, background bool
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the daemon (blocks until SIGINT/SIGTERM)",
@@ -81,6 +81,11 @@ extension/src/transport.ts).`,
   easyeda daemon start --autosave-debounce 0   # disable autosave
   easyeda daemon start --auto-update-skill=false # don't sync skill on startup`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if background {
+				extra := []string{"--autosave-debounce", autosaveDebounce.String(), fmt.Sprintf("--auto-update-skill=%v", autoUpdateSkill)}
+				_, err := startDaemonBackground(cfg, stdout, extra...)
+				return err
+			}
 			portStart, _, err := cfg.portRange()
 			if err != nil {
 				return err
@@ -121,6 +126,8 @@ extension/src/transport.ts).`,
 	}
 	c.Flags().DurationVar(&autosaveDebounce, "autosave-debounce", 3*time.Second,
 		"autosave a window this long after its last mutating action (0 = disable)")
+	c.Flags().BoolVar(&background, "background", false,
+		"start detached (log: ~/.easyeda-agent/daemon.log) and return once /health answers; other easyeda commands do this automatically when no daemon runs (EASYEDA_NO_AUTOSTART=1 disables; dev builds never auto-start)")
 	c.Flags().BoolVar(&autoUpdateSkill, "auto-update-skill", true,
 		"on startup, sync installed skill dirs to this daemon's release; skip dev builds (best-effort)")
 	return c

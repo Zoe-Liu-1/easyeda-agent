@@ -641,8 +641,15 @@ func listWindows(cfg *appConfig) ([]healthWindow, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	scan := scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
+	if scan.Found == nil && autoStartAllowed() {
+		if _, err := startDaemonBackground(cfg, os.Stderr); err == nil {
+			scan = scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
+		} else {
+			fmt.Fprintf(os.Stderr, "auto-start failed: %v\n", err)
+		}
+	}
 	if scan.Found == nil {
-		return nil, fmt.Errorf("no easyeda-agent daemon found on %s:%s (start it with `easyeda daemon start`)", cfg.host, scan.Ports)
+		return nil, fmt.Errorf("no easyeda-agent daemon found on %s:%s (start it with `easyeda daemon start --background`)", cfg.host, scan.Ports)
 	}
 	var parsed struct {
 		Windows []healthWindow `json:"windows"`

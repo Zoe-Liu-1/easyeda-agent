@@ -44,8 +44,13 @@ EASYEDA_VERSION='<vX.Y.Z>' bash install.sh          # 锁定发布版，跳过 A
 
 ### 2. 启动 daemon
 
+通常不用手动启动：任何 `easyeda` 命令发现没有 daemon 时会自动在后台启动它（日志
+`~/.easyeda-agent/daemon.log`，`EASYEDA_NO_AUTOSTART=1` 关闭；开发构建不自动启动）。手动方式：
+
 ```bash
-easyeda daemon start        # 前台阻塞运行,Ctrl-C 退出;建议单开一个终端常驻
+easyeda daemon start --background   # 后台启动，就绪后返回
+easyeda daemon start                # 前台运行，Ctrl-C 退出
+easyeda daemon stop
 ```
 
 daemon 默认固定监听 `60832`，连接器重试同一端口；不要额外启动多个 daemon。
