@@ -56,8 +56,9 @@ func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e.c
 
 func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cfg := &appConfig{
-		host:  defaultHost,
-		ports: fmt.Sprintf("%d-%d", defaultPortStart, defaultPortEnd),
+		host:     defaultHost,
+		ports:    fmt.Sprintf("%d-%d", defaultPortStart, defaultPortEnd),
+		docCache: &docGuardCache{},
 	}
 
 	root := &cobra.Command{

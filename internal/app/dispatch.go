@@ -61,6 +61,9 @@ var errActionFailed = errors.New("action returned ok=false")
 // action subcommands. The fields are bound directly to Cobra persistent
 // flags so they are populated before any RunE executes.
 type appConfig struct {
+	// docCache is the --doc guard's per-process memory (doc_pin.go). A pointer so
+	// the `local := *cfg` copies commands make share it; nil until first use.
+	docCache *docGuardCache
 	// command is the invoking CLI command path (e.g. "easyeda sch connect"),
 	// sent with every action so the audit log can attribute calls to the
 	// subcommand that issued them — the evidence for pruning unused commands.
@@ -920,14 +923,20 @@ func ensureActiveDocUUID(cfg *appConfig, window string) (string, error) {
 	// an active PCB while every DMT metadata lookup is empty (#190/#200).
 	// Require both reads inside document.current to agree; response context is
 	// collected after the handler and can reveal a tab switch during that read.
+	// --doc may be a page NAME; once resolved, the fast path compares against
+	// its UUID so a name costs one probe instead of a full document listing.
+	want := cfg.doc
+	if u, ok := cfg.docGuard().names.Load(window + "\x00" + cfg.doc); ok {
+		want = u.(string)
+	}
 	cur, currentErr := requestAction(cfg, "document.current", window, nil)
 	if currentErr == nil && cur.Context != nil &&
-		strField(cur.Result, "uuid") == cfg.doc && cur.Context.DocumentUUID == cfg.doc &&
+		strField(cur.Result, "uuid") == want && cur.Context.DocumentUUID == want &&
 		cur.Context.ProjectUUID != "" &&
 		(strField(cur.Result, "documentType") == "pcb" || strField(cur.Result, "documentType") == "schematic") &&
 		strField(cur.Result, "documentType") == cur.Context.DocumentType &&
 		strField(cur.Result, "parentProjectUuid") == cur.Context.ProjectUUID {
-		return cfg.doc, nil
+		return want, nil
 	}
 	docs, activeUUID, rw, err := discoverDocs(cfg, window)
 	if err != nil {
@@ -937,6 +946,7 @@ func ensureActiveDocUUID(cfg *appConfig, window string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("--doc %q: %w", cfg.doc, err)
 	}
+	cfg.docGuard().names.Store(window+"\x00"+cfg.doc, target.UUID)
 	if activeUUID == target.UUID {
 		return target.UUID, nil
 	}

@@ -17,7 +17,25 @@ import (
 // Writes always keep the live pre-probe: a write on the wrong page cannot be
 // undone after the fact. debug.exec_js keeps it too — its context is known to
 // lag a page switch (it can report the old page), so its context is no proof.
-var docPins sync.Map // key: window + "\x00" + cfg.doc → confirmed document UUID
+// docGuardCache holds, per process (hung off appConfig): pins — the document
+// UUID last confirmed for each window+--doc; names — what a --doc NAME
+// resolved to, so the guard's fast path matches it without re-listing every
+// document (a name used to cost document.current + pages.list +
+// pcb.documents.list on every call).
+type docGuardCache struct {
+	pins, names sync.Map
+}
+
+var docGuardInit sync.Mutex
+
+func (c *appConfig) docGuard() *docGuardCache {
+	docGuardInit.Lock()
+	defer docGuardInit.Unlock()
+	if c.docCache == nil {
+		c.docCache = &docGuardCache{}
+	}
+	return c.docCache
+}
 
 func docPinKey(cfg *appConfig, window string) string { return window + "\x00" + cfg.doc }
 
@@ -25,7 +43,7 @@ func docPinFor(cfg *appConfig, window, action string) (string, bool) {
 	if actionMutates(action) || action == "debug.exec_js" {
 		return "", false
 	}
-	v, ok := docPins.Load(docPinKey(cfg, window))
+	v, ok := cfg.docGuard().pins.Load(docPinKey(cfg, window))
 	if !ok {
 		return "", false
 	}
@@ -34,11 +52,11 @@ func docPinFor(cfg *appConfig, window, action string) (string, bool) {
 
 func rememberDocPin(cfg *appConfig, window, uuid string) {
 	if uuid != "" {
-		docPins.Store(docPinKey(cfg, window), uuid)
+		cfg.docGuard().pins.Store(docPinKey(cfg, window), uuid)
 	}
 }
 
-func forgetDocPin(cfg *appConfig, window string) { docPins.Delete(docPinKey(cfg, window)) }
+func forgetDocPin(cfg *appConfig, window string) { cfg.docGuard().pins.Delete(docPinKey(cfg, window)) }
 
 // responseDocumentUUID is the document the connector reports the action ran
 // on ("" when the response carries no context — treated as drift).

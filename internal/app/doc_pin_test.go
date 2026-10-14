@@ -6,8 +6,6 @@ import (
 )
 
 func TestDocGuardProbesOnceForReadsAndRepinsOnDrift(t *testing.T) {
-	docPins.Range(func(k, _ any) bool { docPins.Delete(k); return true })
-	t.Cleanup(func() { docPins.Range(func(k, _ any) bool { docPins.Delete(k); return true }) })
 	ctx := func(doc string) string {
 		return `"context":{"projectUuid":"p","documentUuid":"` + doc + `","documentType":"pcb"}`
 	}
@@ -64,5 +62,38 @@ func TestDocGuardProbesOnceForReadsAndRepinsOnDrift(t *testing.T) {
 	}
 	if got := count("document.current") - before; got != 2 {
 		t.Fatalf("each write / exec_js keeps its live probe, got %d", got)
+	}
+}
+
+func TestDocGuardResolvesAPageNameOnce(t *testing.T) {
+	ctx := `"context":{"projectUuid":"p","documentUuid":"uuid-p1","documentType":"schematic"}`
+	cfg, state, cleanup := newAutolayoutTestDaemon(t, func(_ int, call autolayoutTestCall) string {
+		switch call.Action {
+		case "document.current":
+			return `{"ok":true,"result":{"uuid":"uuid-p1","documentType":"schematic","parentProjectUuid":"p"},` + ctx + `}`
+		case "schematic.pages.list":
+			return `{"ok":true,"result":{"pages":[{"uuid":"uuid-p1","name":"P1","parentSchematicUuid":"s"}]},` + ctx + `}`
+		case "pcb.documents.list":
+			return `{"ok":true,"result":{"pcbs":[]},` + ctx + `}`
+		}
+		return `{"ok":true,"result":{},` + ctx + `}`
+	})
+	defer cleanup()
+	cfg.doc = "P1"
+	for i := 0; i < 4; i++ {
+		if _, err := ensureActiveDocUUID(cfg, "w1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	lists := 0
+	for _, c := range state.calls {
+		if c.Action == "schematic.pages.list" {
+			lists++
+		}
+	}
+	if lists != 1 {
+		t.Fatalf("a --doc name must be resolved once per process, listed pages %d times", lists)
 	}
 }
