@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-14
+
+- CLI 接入：任何命令发现没有 daemon 时自动在后台启动（仅正式版本号构建，`EASYEDA_NO_AUTOSTART=1` 关闭；并发调用由启动锁保证只拉起一个），新增 `daemon start --background`；`health` 在 stderr 输出逐项体检清单（daemon、连接器、版本、宿主、工程与标签页）并给出下一步。
+- CLI：`--doc` 钉页后读取不再每次前置探测当前文档，改为用回包上下文核对、漂移时重钉重发（`pcb check` 调用 87→19、`sch gate` 67→21）；已同步的 `pcb import-changes` 明确提示"已同步，无需导入"；`decap-too-far` 文案阈值与判据统一；`pcb auto-place` 外围按引脚就近双向找空位并避开禁布区与板外。
+- 文档：快速上手补充排障表；Skill PCB 布局区分可制造间距（焊盘并集）与观感余量，默认包络留 0.5mm。
 - `pcb.silk.align`：显式 `side` 在无碰撞且在板内时必定采用（原先 0.15 权重几乎不起作用）；候选位必须离本器件比离任何其他器件都近，否则判 unresolved 且不写入，不再把位号放到别的器件旁边。
 - 新增只读 `schematic.visible_text.bboxes`：当前页全部可见文字与可见属性（器件与图纸本身）的官方 bbox，量不到的列入 `unmeasured`；`sch check` 据此把越出纸张的可见文字/属性报 `out-of-sheet`（此前显示图签 Name/Description 会画到纸外而无规则发现）。
 - `schematic.power.connect_pin`：网络标识创建超过 7s 后不再立即回滚桩线，而是在处理预算内继续等待同一宿主调用——晚到的标识被采用（`lateSettle:true`），明确失败才回滚；仍未落定时保留桩线并返回 `partial:true/verified:false`，避免晚到标识成为孤儿（#208）。
