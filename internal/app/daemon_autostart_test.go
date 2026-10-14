@@ -19,8 +19,14 @@ func TestAutoStartAllowedOnlyForReleaseBuildsWithoutOptOut(t *testing.T) {
 		t.Fatal("EASYEDA_NO_AUTOSTART=1 must disable auto-start")
 	}
 	t.Setenv("EASYEDA_NO_AUTOSTART", "")
-	version.Version = "v1.11.0-2-gffac5fe-dirty"
-	if autoStartAllowed() {
-		t.Fatal("dev builds (make dev runs the daemon under air) must never auto-start")
+	for _, dev := range []string{"v1.11.0-2-gffac5fe-dirty", "v1.11.0-dirty", "dev"} {
+		version.Version = dev
+		if autoStartAllowed() {
+			t.Fatalf("source build %q (make dev runs the daemon under air) must never auto-start", dev)
+		}
+	}
+	version.Version = "1.12.0-dev.3"
+	if !autoStartAllowed() {
+		t.Fatal("an installed local -dev.N bundle behaves like a release")
 	}
 }

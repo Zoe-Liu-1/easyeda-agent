@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
@@ -34,9 +35,17 @@ func daemonLogPath() string {
 	return filepath.Join(home, ".easyeda-agent", "daemon.log")
 }
 
-// autoStartAllowed reports whether a missing daemon may be started implicitly.
+var releaseVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// autoStartAllowed reports whether a missing daemon may be started implicitly:
+// installed builds only — a tagged release or a local -dev.N bundle. Source
+// builds (git describe "v1.11.0-2-gffac5fe-dirty", "dev") are what `make dev`
+// runs under air; a CLI call during an air rebuild must not race it.
 func autoStartAllowed() bool {
-	return os.Getenv("EASYEDA_NO_AUTOSTART") == "" && !selfupdate.IsLocalVersion(version.Version)
+	if os.Getenv("EASYEDA_NO_AUTOSTART") != "" {
+		return false
+	}
+	return releaseVersionPattern.MatchString(version.Version) || selfupdate.IsLocalVersion(version.Version)
 }
 
 // startDaemonBackground spawns `easyeda daemon start` detached (log appended to
