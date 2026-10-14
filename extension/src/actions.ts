@@ -5756,6 +5756,53 @@ type LibraryBuildInventoryReader = {
 };
 
 /**
+ * Refuse before opening an editor when the asset is not in the named library.
+ * The host opens nothing for a wrong library (INVALID_STATE "did not open"),
+ * and a project-library asset's own record reports the PERSONAL library uuid
+ * in `libraryUuid` — copying that field into `--library` is the #279 trap.
+ * Unreadable lookups proceed (the editor open stays the authority).
+ * Returns the asset record's own libraryUuid — the id the opened editor
+ * reports as parentLibraryUuid — when it was readable.
+ */
+export async function requireLibraryAssetIn(uuid: string, libraryUuid: string, label: string): Promise<string | undefined> {
+	const api = (label === 'symbol' ? eda.lib_Symbol : eda.lib_Footprint) as unknown as
+		{ get?: (uuid: string, libraryUuid?: string) => Promise<unknown> } | undefined;
+	if (typeof api?.get !== 'function') return undefined;
+	let recordLibrary: string | undefined;
+	const found = async (lib: string): Promise<boolean | undefined> => {
+		try {
+			const record = await api.get!(uuid, lib) as { libraryUuid?: unknown } | undefined;
+			if (record && lib === libraryUuid && typeof record.libraryUuid === 'string') recordLibrary = record.libraryUuid;
+			return Boolean(record);
+		}
+		catch { return undefined; }
+	};
+	const here = await found(libraryUuid);
+	if (here === true) return recordLibrary;
+	const candidates = ['project'];
+	try {
+		const personal = await eda.lib_LibrariesList.getPersonalLibraryUuid();
+		if (personal) candidates.push(personal);
+	}
+	catch { /* project library is still checked */ }
+	const elsewhere: string[] = [];
+	for (const lib of candidates) {
+		if (lib !== libraryUuid && await found(lib) === true) elsewhere.push(lib);
+	}
+	// An unreadable lookup alone proves nothing; it is refused only when the
+	// asset was positively found in another library (footprint get THROWS for a
+	// wrong library where symbol get returns undefined — live #279).
+	if (here === undefined && elsewhere.length !== 1) return undefined;
+	const fix = elsewhere.length === 1
+		? ` It is in library "${elsewhere[0]}": pass --library ${elsewhere[0]} (use the top-level libraryUuid from \`lib ${label} create\`; the asset record's own libraryUuid can name the personal library for a project asset).`
+		: ` Create it first with \`lib ${label} create\` and pass the uuid and top-level libraryUuid it returns.`;
+	throw new ActionError(
+		ErrorCodes.PRECONDITION_REFUSED,
+		`${label[0].toUpperCase()}${label.slice(1)} "${uuid}" was not found in library "${libraryUuid}"; no editor was opened and no geometry was created.${fix}`,
+	);
+}
+
+/**
  * Open and focus a library canvas, then prove that subsequent primitive calls
  * will address the requested asset.  `lib_*.openInEditor()` can return a tab id
  * while leaving the previously focused library tab active (observed in the Web
@@ -5769,6 +5816,10 @@ async function activateLibraryDocument(
 	expectedDocumentType: EDMT_EditorDocumentType.SYMBOL_COMPONENT | EDMT_EditorDocumentType.FOOTPRINT,
 	label: string,
 ): Promise<string> {
+	// The editor reports the record's library (the personal uuid for a project
+	// asset), so focus is proven against either name of the same library.
+	const recordLibrary = await requireLibraryAssetIn(uuid, libraryUuid, label);
+	const libraryNames = new Set([libraryUuid, recordLibrary].filter((x): x is string => Boolean(x)));
 	let splitScreenId: string | undefined;
 	try {
 		const before = await eda.dmt_SelectControl.getCurrentDocumentInfo();
@@ -5778,26 +5829,35 @@ async function activateLibraryDocument(
 
 	const tabId = await eda.dmt_EditorControl.openLibraryDocument(libraryUuid, libraryType, uuid, splitScreenId);
 	if (!tabId) throw new ActionError(ErrorCodes.INVALID_STATE, `EasyEDA did not open the ${label} editor.`);
-	const activated = await eda.dmt_EditorControl.activateDocument(tabId);
-	if (!activated) throw new ActionError(ErrorCodes.INVALID_STATE, `EasyEDA opened ${label} "${uuid}" but did not activate its tab.`);
+	// activateDocument's boolean is not evidence either way: it returned false
+	// while the tab did become current moments later (live #279). The focus
+	// readback below is the authority.
+	await eda.dmt_EditorControl.activateDocument(tabId);
 
 	let actual: Awaited<ReturnType<typeof eda.dmt_SelectControl.getCurrentDocumentInfo>> | undefined;
-	for (let attempt = 0; attempt < 20; attempt++) {
+	// Bounded by time, not attempts: a background tab stretches each sleep to a
+	// worker tick (~3s), so 20 attempts overran the action budget (live #279).
+	const focusBy = Date.now() + 4_000;
+	for (;;) {
 		try { actual = await eda.dmt_SelectControl.getCurrentDocumentInfo(); }
 		catch { actual = undefined; }
 		if (
 			actual?.uuid === uuid &&
-			actual.parentLibraryUuid === libraryUuid &&
+			libraryNames.has(actual.parentLibraryUuid ?? '') &&
 			actual.documentType === expectedDocumentType
 		) return tabId;
+		if (Date.now() >= focusBy) break;
 		await sleep(50);
 	}
 	const actualSummary = actual
 		? `uuid=${actual.uuid}, parentLibraryUuid=${actual.parentLibraryUuid ?? '<missing>'}, documentType=${actual.documentType}`
 		: 'no current document';
+	const hidden = pageVisibility() === 'hidden'
+		? ' The EasyEDA tab is in the background, where editor tabs activate late; bring the window forward and retry.'
+		: '';
 	throw new ActionError(
 		ErrorCodes.INVALID_STATE,
-		`EasyEDA did not focus the requested ${label} before mutation (${actualSummary}); no geometry was created.`,
+		`EasyEDA did not focus the requested ${label} before mutation (${actualSummary}); no geometry was created.${hidden}`,
 	);
 }
 

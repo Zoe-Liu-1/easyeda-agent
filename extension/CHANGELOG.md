@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- `library.symbol.build` / `library.footprint.build`（#279）：打开编辑器前先核对资产在 `--library` 指定的库中；不在时若能在工程库/个人库找到，以 `PRECONDITION_REFUSED` 拒绝并给出正确的库（宿主对工程库资产的记录把 `libraryUuid` 写成个人库 uuid，照抄该字段即失败），不再报 `INVALID_STATE` 并被计入退化。焦点确认同时接受该库的两种名称，修复工程库符号 build 在前后台都必然失败；`activateDocument` 的布尔返回不再作为判据，焦点等待改为按 4s 总时长。
+- daemon `health`：写入健康度新增 `lastFailureError`（最后一次失败的错误码与信息）。
 ## [1.12.0] - 2026-10-14
 
 - CLI 接入：任何命令发现没有 daemon 时自动在后台启动（仅正式版本号构建，`EASYEDA_NO_AUTOSTART=1` 关闭；并发调用由启动锁保证只拉起一个），新增 `daemon start --background`；`health` 在 stderr 输出逐项体检清单（daemon、连接器、版本、宿主、工程与标签页）并给出下一步。

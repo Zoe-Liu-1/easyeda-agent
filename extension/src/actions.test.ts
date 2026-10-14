@@ -23,6 +23,7 @@ import { sweepDeadlines } from './deadlines';
 import {
 	connectPinEndpoint,
 	clickImportConfirm,
+	requireLibraryAssetIn,
 	constraintList,
 	detectPolarityConventionOutliers,
 	getComponentOrThrow,
@@ -1220,6 +1221,34 @@ test('unknown device is refused before sch create (create would hang forever)', 
 			(err: any) => err.code === 'PRECONDITION_REFUSED' && /not found/.test(err.message),
 		);
 		assert.equal(placements, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('library build refuses a wrong --library before opening an editor and names the right one (#279)', async () => {
+	const where: Record<string, string> = { SYM1: 'project' };
+	let opened = 0;
+	(globalThis as any).eda = {
+		lib_Symbol: { get: async (uuid: string, lib: string) => (where[uuid] === lib ? { uuid, libraryUuid: 'PERSONAL' } : undefined) },
+		lib_LibrariesList: { getPersonalLibraryUuid: async () => 'PERSONAL' },
+		dmt_EditorControl: { openLibraryDocument: async () => { opened++; return undefined; } },
+	};
+	try {
+		await assert.rejects(() => requireLibraryAssetIn('SYM1', 'PERSONAL', 'symbol'),
+			(err: any) => err.code === 'PRECONDITION_REFUSED' && /pass --library project/.test(err.message));
+		await assert.rejects(() => requireLibraryAssetIn('MISSING', 'project', 'symbol'),
+			(err: any) => err.code === 'PRECONDITION_REFUSED' && /Create it first/.test(err.message));
+		assert.equal(await requireLibraryAssetIn('SYM1', 'project', 'symbol'), 'PERSONAL'); // record names the personal library
+		// footprint-style host: a wrong library THROWS; found elsewhere → still refused with the fix.
+		(globalThis as any).eda.lib_Symbol.get = async (uuid: string, lib: string) => {
+			if (lib !== 'project') throw new Error('not in this library');
+			return { uuid, libraryUuid: 'PERSONAL' };
+		};
+		await assert.rejects(() => requireLibraryAssetIn('SYM1', 'PERSONAL', 'symbol'),
+			(err: any) => err.code === 'PRECONDITION_REFUSED' && /pass --library project/.test(err.message));
+		(globalThis as any).eda.lib_Symbol.get = async () => { throw new Error('read failed'); };
+		assert.equal(await requireLibraryAssetIn('SYM1', 'PERSONAL', 'symbol'), undefined); // unreadable everywhere: the editor open decides
+		assert.equal(opened, 0);
 	}
 	finally { delete (globalThis as any).eda; }
 });
