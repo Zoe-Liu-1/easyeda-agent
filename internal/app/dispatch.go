@@ -903,8 +903,15 @@ func docGuardApplies(doc, action string) bool {
 // cached /health snapshot, which is what fooled the hand-rolled checks), and
 // returns an error rather than proceed on the wrong page.
 func ensureActiveDoc(cfg *appConfig, window string) error {
+	_, err := ensureActiveDocUUID(cfg, window)
+	return err
+}
+
+// ensureActiveDocUUID is ensureActiveDoc returning the UUID it confirmed active
+// (cfg.doc may be a page name), so later reads can be checked against it.
+func ensureActiveDocUUID(cfg *appConfig, window string) (string, error) {
 	if cfg.doc == "" {
-		return nil
+		return "", nil
 	}
 	// A live, exact UUID match needs no name enumeration. The host can render
 	// an active PCB while every DMT metadata lookup is empty (#190/#200).
@@ -917,31 +924,31 @@ func ensureActiveDoc(cfg *appConfig, window string) error {
 		(strField(cur.Result, "documentType") == "pcb" || strField(cur.Result, "documentType") == "schematic") &&
 		strField(cur.Result, "documentType") == cur.Context.DocumentType &&
 		strField(cur.Result, "parentProjectUuid") == cur.Context.ProjectUUID {
-		return nil
+		return cfg.doc, nil
 	}
 	docs, activeUUID, rw, err := discoverDocs(cfg, window)
 	if err != nil {
-		return fmt.Errorf("--doc guard: %w", err)
+		return "", fmt.Errorf("--doc guard: %w", err)
 	}
 	target, err := resolveDoc(docs, cfg.doc)
 	if err != nil {
-		return fmt.Errorf("--doc %q: %w", cfg.doc, err)
+		return "", fmt.Errorf("--doc %q: %w", cfg.doc, err)
 	}
 	if activeUUID == target.UUID {
-		return nil
+		return target.UUID, nil
 	}
 	for i := 0; i < 6; i++ {
 		_, openErr := requestAction(cfg, "document.open", rw, map[string]any{"uuid": target.UUID})
 		time.Sleep(1200 * time.Millisecond)
 		cur, cerr := requestAction(cfg, "document.current", rw, nil)
 		if cerr == nil && cur.Context != nil && cur.Context.DocumentUUID == target.UUID {
-			return nil
+			return target.UUID, nil
 		}
 		if openErr != nil {
-			return fmt.Errorf("--doc guard: open %s: %w; target UUID not confirmed by readback (read error: %v)", target.Name, openErr, cerr)
+			return "", fmt.Errorf("--doc guard: open %s: %w; target UUID not confirmed by readback (read error: %v)", target.Name, openErr, cerr)
 		}
 	}
-	return fmt.Errorf("--doc %q: could not confirm it is the active page after retries — refusing to run a mutating action on the wrong page", cfg.doc)
+	return "", fmt.Errorf("--doc %q: could not confirm it is the active page after retries — refusing to run a mutating action on the wrong page", cfg.doc)
 }
 
 // printCascadeCleanup surfaces a delete response's cascaded cleanup (ADR-0004
@@ -1101,10 +1108,19 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 
 	// --doc guard: pin the action (mutating OR read — see docGuardApplies) to
 	// the requested page first. Skipped for the guard's own navigation actions
-	// (docGuardExempt) so it never recurses.
+	// (docGuardExempt) so it never recurses. Once this process has confirmed the
+	// page, plain reads skip the pre-probe and are checked against the response's
+	// own document context instead (verifyPinnedRead below).
+	var pinnedDoc string
 	if docGuardApplies(cfg.doc, action) {
-		if err := ensureActiveDoc(cfg, window); err != nil {
-			return nil, err
+		if uuid, ok := docPinFor(cfg, window, action); ok {
+			pinnedDoc = uuid
+		} else {
+			uuid, err := ensureActiveDocUUID(cfg, window)
+			if err != nil {
+				return nil, err
+			}
+			rememberDocPin(cfg, window, uuid)
 		}
 	}
 
@@ -1192,6 +1208,12 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 			return respBody, fmt.Errorf("close response: %w", closeErr)
 		}
 		return nil, fmt.Errorf("close response: %w", closeErr)
+	}
+	// A read sent on a remembered pin must prove it ran on that page; if the
+	// foreground drifted, re-pin (live probe) and send it once more.
+	if pinnedDoc != "" && responseDocumentUUID(respBody) != pinnedDoc {
+		forgetDocPin(cfg, window)
+		return postAction(cfg, action, window, payload, timeout)
 	}
 	// Surface a daemon stale-read advisory here — the one choke point all
 	// dispatch paths (dispatch/dispatchCapture/requestAction) share — so every
