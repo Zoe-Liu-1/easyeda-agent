@@ -8260,8 +8260,33 @@ async function appliedRotation(desired: number): Promise<number> {
 // the daemon's dispatch budget so the caller gets a structured error, not a raw
 // dispatch timeout: worst realistic case (one wire retry + flag) ≈ 3×7s < 18s.
 const CONNECT_PIN_OP_TIMEOUT_MS = 7000;
+// Whole-handler budget: stays under the daemon's dispatch wait so a late-flag
+// grace never turns into a raw DISPATCH_FAILED (the reply margin covers it).
+const CONNECT_PIN_HANDLER_BUDGET_MS = 16000;
+const CONNECT_PIN_REPLY_MARGIN_MS = 500;
+
+type GraceOutcome<T> =
+	| { state: 'resolved'; value: T; late: boolean }
+	| { state: 'rejected'; error: unknown }
+	| { state: 'pending' };
+
+// settleWithGrace waits `ms` for p, then up to `graceMs` more for the SAME
+// promise (a timed-out host call is not cancelled and may still land).
+export async function settleWithGrace<T>(p: Promise<T>, ms: number, graceMs: number): Promise<GraceOutcome<T>> {
+	const settled = p.then(
+		(value) => ({ state: 'resolved' as const, value }),
+		(error) => ({ state: 'rejected' as const, error }),
+	);
+	const wait = (t: number) => new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), Math.max(0, t)));
+	const first = await Promise.race([settled, wait(ms)]);
+	if (first !== 'timeout') return first.state === 'resolved' ? { ...first, late: false } : first;
+	const second = await Promise.race([settled, wait(graceMs)]);
+	if (second === 'timeout') return { state: 'pending' };
+	return second.state === 'resolved' ? { ...second, late: true } : second;
+}
 
 const schematicPowerConnectPin: Handler = async (payload) => {
+	const connectPinDeadline = Date.now() + CONNECT_PIN_HANDLER_BUDGET_MS;
 	const pinX = requireNumber(payload, 'pinX');
 	const pinY = requireNumber(payload, 'pinY');
 	const kind = requireString(payload, 'kind');
@@ -8365,42 +8390,61 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 		try { await deleteSchGroup('wires', [wire.getState_PrimitiveId()]); }
 		catch { /* best-effort — bridge-check's orphan-stub rule is the backstop */ }
 	};
-	let flag;
-	try {
-		if (kind in NET_FLAG_KINDS) {
-			// Promise.resolve() collapses the API's overloaded union-of-promises
-			// (Promise<A>|Promise<B>) into a single Promise<A|B> that withTimeout<T> accepts.
-			flag = await withTimeout(
-				Promise.resolve(eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY, applied)),
-				CONNECT_PIN_OP_TIMEOUT_MS,
-				`Netflag create did not settle within ${CONNECT_PIN_OP_TIMEOUT_MS}ms — the platform dropped the request without rejecting (the stuck-at-99% hang). Rolling back the stub wire and failing fast so the caller can retry this pin.`,
-			);
-		}
-		else if (kind in NET_PORT_KINDS) {
-			flag = await withTimeout(
-				Promise.resolve(eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY, applied)),
-				CONNECT_PIN_OP_TIMEOUT_MS,
-				`Netport create did not settle within ${CONNECT_PIN_OP_TIMEOUT_MS}ms — the platform dropped the request without rejecting (the stuck-at-99% hang). Rolling back the stub wire and failing fast so the caller can retry this pin.`,
-			);
-		}
-		else if (kind === NET_LABEL_KIND) {
+	// The flag create is NOT cancelled by withTimeout: the host keeps working on
+	// it. Rolling the wire back while that promise is still pending is how a
+	// late-landing flag became an orphan (#208). So on a timeout keep the same
+	// promise and give it a bounded grace inside the handler deadline: a late
+	// flag is adopted, a rejection still rolls the wire back, and a still-pending
+	// create leaves the wire in place and reports partial/unverified (#151) —
+	// the caller reads back fresh state instead of retrying onto debris.
+	let pendingFlag: Promise<any> | undefined;
+	if (kind in NET_FLAG_KINDS) {
+		// Promise.resolve() collapses the API's overloaded union-of-promises.
+		pendingFlag = Promise.resolve(eda.sch_PrimitiveComponent.createNetFlag(NET_FLAG_KINDS[kind], net, endX, endY, applied));
+	}
+	else if (kind in NET_PORT_KINDS) {
+		pendingFlag = Promise.resolve(eda.sch_PrimitiveComponent.createNetPort(NET_PORT_KINDS[kind], net, endX, endY, applied));
+	}
+	else if (kind === NET_LABEL_KIND) {
+		try {
 			const label = await createVerifiedNetLabel(endX, endY, net, wire.getState_PrimitiveId());
 			return { ...label, result: { ...label.result,
 				wirePrimitiveId: wire.getState_PrimitiveId(), flagPrimitiveId: label.result?.primitiveId,
 				endPoint: { x: endX, y: endY }, direction, offset, rotation, appliedRotation: applied } };
 		}
-		else {
-			throw new ActionError(
-				ErrorCodes.MISSING_PAYLOAD_FIELD,
-				`Unknown kind "${kind}"; expected one of: ${[...Object.keys(NET_FLAG_KINDS), 'ground', ...Object.keys(NET_PORT_KINDS)].join(', ')}.`,
-			);
+		catch (err) {
+			await rollbackWire();
+			if (err instanceof ActionError) throw err;
+			throw edaError(err, 'Failed to create net label at wire end (stub wire rolled back).');
 		}
 	}
-	catch (err) {
+	else {
 		await rollbackWire();
-		if (err instanceof ActionError) throw err;
-		throw edaError(err, 'Failed to create netflag/netport at wire end (stub wire rolled back).');
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			`Unknown kind "${kind}"; expected one of: ${[...Object.keys(NET_FLAG_KINDS), 'ground', ...Object.keys(NET_PORT_KINDS)].join(', ')}.`,
+		);
 	}
+	const flagLabel = kind in NET_FLAG_KINDS ? 'Netflag' : 'Netport';
+	const outcome = await settleWithGrace(pendingFlag, CONNECT_PIN_OP_TIMEOUT_MS,
+		Math.max(0, connectPinDeadline - Date.now() - CONNECT_PIN_REPLY_MARGIN_MS));
+	if (outcome.state === 'rejected') {
+		await rollbackWire();
+		if (outcome.error instanceof ActionError) throw outcome.error;
+		throw edaError(outcome.error, 'Failed to create netflag/netport at wire end (stub wire rolled back).');
+	}
+	if (outcome.state === 'pending') {
+		// Unknown write state: do NOT roll back (a late flag would be orphaned).
+		return {
+			result: {
+				partial: true, verified: false, pending: 'flag-create',
+				wirePrimitiveId: wire.getState_PrimitiveId(), flagPrimitiveId: null,
+				endPoint: { x: endX, y: endY }, direction, offset, rotation, appliedRotation: applied,
+				reason: `${flagLabel} create still pending after ${CONNECT_PIN_OP_TIMEOUT_MS}ms + grace; the stub wire is kept so a late ${flagLabel.toLowerCase()} is not orphaned — read back this endpoint before any retry.`,
+			},
+		};
+	}
+	const flag = outcome.value;
 	if (!flag) {
 		await rollbackWire();
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to create ${kind} (stub wire rolled back).`);
@@ -8415,6 +8459,7 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 			offset,
 			rotation,
 			appliedRotation: applied,
+			...(outcome.late ? { lateSettle: true } : {}),
 		},
 	};
 };

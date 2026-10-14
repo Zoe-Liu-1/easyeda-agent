@@ -2027,7 +2027,7 @@ test('no-connect: noConnected=false clears and persists an existing X marker', a
 });
 
 // ─── pcb.page.clear scope parsing (pure, no eda runtime) ─────────────────
-import { parsePcbClearScopes } from './actions';
+import { parsePcbClearScopes, settleWithGrace } from './actions';
 
 test('parsePcbClearScopes: omitted → all five scopes', () => {
 	assert.deepEqual(parsePcbClearScopes(undefined), ['components', 'routing', 'copper', 'regions', 'silk']);
@@ -4602,4 +4602,16 @@ test('pcb layout ops refuse without primitiveIds and never read the canvas selec
 		assert.equal(selectionReads, 0, 'the user selection must never become a layout target');
 	}
 	finally { delete (globalThis as any).eda; }
+});
+
+test('settleWithGrace adopts a late host result instead of abandoning it (#208)', async () => {
+	const delay = <T>(ms: number, v: T, fail = false) => new Promise<T>((res, rej) => setTimeout(() => (fail ? rej(new Error('host')) : res(v)), ms));
+	const onTime: any = await settleWithGrace(delay(5, 'flag'), 50, 50);
+	assert.deepEqual([onTime.state, onTime.late, onTime.value], ['resolved', false, 'flag']);
+	const late: any = await settleWithGrace(delay(40, 'flag'), 10, 100);
+	assert.deepEqual([late.state, late.late, late.value], ['resolved', true, 'flag'], 'a flag landing after the timeout is adopted, not orphaned');
+	const rejected: any = await settleWithGrace(delay(30, 'x', true), 10, 100);
+	assert.equal(rejected.state, 'rejected');
+	const pending: any = await settleWithGrace(new Promise(() => {}), 5, 10);
+	assert.equal(pending.state, 'pending', 'an unsettled create stays unknown — never reported as failed-and-rolled-back');
 });
