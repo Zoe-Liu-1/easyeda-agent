@@ -362,6 +362,9 @@ type actionContext struct {
 	DocumentUUID string `json:"documentUuid,omitempty"`
 	DocumentType string `json:"documentType,omitempty"`
 	TabID        string `json:"tabId,omitempty"`
+	// PageVisibility is the host tab's visibilityState ("hidden" throttles
+	// timers: reopen/sync waits time out). Empty from older connectors.
+	PageVisibility string `json:"pageVisibility,omitempty"`
 }
 
 // artifactRef is the subset of a response artifact a CLI caller needs to locate

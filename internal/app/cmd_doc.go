@@ -231,6 +231,12 @@ document afterward and reports it as "activeRestored", so the ★ does not drift
 			if target == "" {
 				return failBeforeReload("resolve-target", win, fmt.Errorf("no active document to reload (run `easyeda doc ls`)"))
 			}
+			// #276: reload closes the tab before reopening it. In a hidden browser
+			// tab the reopen waits on throttled timers and times out, leaving NO
+			// document open — refuse before closing anything.
+			if cur, err := requestAction(cfg, "document.current", win, nil); err == nil && cur.Context != nil && cur.Context.PageVisibility == "hidden" {
+				return failBeforeReload("visibility", win, fmt.Errorf("the EasyEDA tab is in the background (hidden): reload would close the document and its reopen would time out — bring the tab to the front, then retry (nothing was closed)"))
+			}
 			receipt, err := reloadDocumentWithReceipt(cfg, win, target, activeUUID)
 			if jsonOut {
 				if writeErr := writeJSON(stdout, receipt); writeErr != nil {
