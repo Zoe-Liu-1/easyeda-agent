@@ -79,9 +79,10 @@ func healthChecks(r healthResult) []healthCheck {
 			continue
 		}
 		c := healthCheck{Name: "project", Status: "ok", Detail: fmt.Sprintf("%s（当前 %s）", name, display(w.Context.DocumentType))}
+		// Hidden is not a fault: reads, writes, import and reload ride the
+		// connector's worker clock. Only the canvas stops repainting.
 		if w.Context.PageVisibility == "hidden" {
-			c.Status, c.Fix = "warn", "EasyEDA 标签页在后台：浏览器会节流定时器、停止重绘，同步/重开会超时。把该标签页切到前台"
-			c.Detail += "，标签页在后台"
+			c.Detail += "，标签页在后台（操作照常；仅 PCB 画布截图需切到前台）"
 		}
 		out = append(out, c)
 	}

@@ -231,11 +231,6 @@ document afterward and reports it as "activeRestored", so the ★ does not drift
 			if target == "" {
 				return failBeforeReload("resolve-target", win, fmt.Errorf("no active document to reload (run `easyeda doc ls`)"))
 			}
-			// #276: reload closes the tab before reopening it; in a hidden tab the
-			// reopen times out and leaves NO document open.
-			if err := refuseIfTabHidden(cfg, win, "reload would close the document and its reopen would time out", "nothing was closed"); err != nil {
-				return failBeforeReload("visibility", win, err)
-			}
 			receipt, err := reloadDocumentWithReceipt(cfg, win, target, activeUUID)
 			if jsonOut {
 				if writeErr := writeJSON(stdout, receipt); writeErr != nil {
@@ -571,16 +566,4 @@ func reloadDocumentObserved(cfg *appConfig, win, target string, receipt *documen
 	receipt.Reloaded = target
 	receipt.FinalContext = ready.Active
 	return docType, nil
-}
-
-// refuseIfTabHidden refuses an operation that waits on the editor's timers
-// (dialogs, reopen, sync) while its browser tab is hidden: the browser throttles
-// hidden-tab timers to ~1/min, so the wait times out mid-operation. Checked
-// before anything is written. Unknown visibility (older connector) proceeds.
-func refuseIfTabHidden(cfg *appConfig, window, consequence, state string) error {
-	cur, err := requestAction(cfg, "document.current", window, nil)
-	if err != nil || cur.Context == nil || cur.Context.PageVisibility != "hidden" {
-		return nil
-	}
-	return fmt.Errorf("the EasyEDA tab is in the background (hidden): %s — bring the tab to the front, then retry (%s)", consequence, state)
 }

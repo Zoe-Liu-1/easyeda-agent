@@ -11980,7 +11980,7 @@ const pcbSnapshot: Handler = async (payload) => {
 	// moved). Refuse before capturing instead of shipping a stale image.
 	if (pageVisibility() === 'hidden') {
 		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
-			'The EasyEDA tab is hidden, so the canvas is not repainted and a capture would be stale. Bring the EasyEDA tab to the foreground and retry, or render from readback data (`easyeda pcb layout render --actual`).');
+			'The EasyEDA tab is hidden, so the canvas is not repainted and a capture would be stale (nothing was captured). Bring the EasyEDA window to the front and retry, or render from fresh readback (no tracks/pours): `easyeda pcb dump --include-copper --out board.json && easyeda pcb layout render --actual --board board.json --out board.svg`. Schematic pages export in the background with `easyeda sch export-image`.');
 	}
 	const tabId = optionalString(payload, 'tabId');
 	const fitMode = pcbSnapshotFitMode(payload);

@@ -9,7 +9,7 @@
 - `schematic.component.place`：器件库里查不到的器件（例如误传元件的 16 位符号 id 而非 32 位器件 uuid）在调用宿主 `create` 之前即以 `PRECONDITION_REFUSED` 拒绝——宿主对未知器件的 `create` 既不报错也不返回，会永久挂起并堵住动作队列。
 - CLI：`pcb silk-align` 全部位号无解且回执证明未写入时，提示「nothing was written」并列出各位号原因，不再误报写入未验证。
 - 后台标签页稳定性：轮询等待（导入确认框、器件落地、重试间隔、画布稳定兜底）改走 `deadlines` 的「setTimeout 快路径 + worker tick 保底」新增 `sleep()`；此前后台超过约 5 分钟后 Chrome 把连续主线程定时器压到一分钟一次，导入等轮询必然超时。
-- `pcb.import_changes`：点击「应用修改」后以器件清单变化为准判定已应用（后台标签页里确认框关闭动画会拖过 10s，原先误报 `dialog-open`/未核验，新增 `dialogLagged:true` 标注）；导入后的稳定等待同时接受器件减少，删除型导入不再白等 10s。CLI 不再在后台拒绝 `pcb import-changes`（`doc reload` 仍拒绝）。
+- `pcb.import_changes`：点击「应用修改」后以器件清单变化为准判定已应用（后台标签页里确认框关闭动画会拖过 10s，原先误报 `dialog-open`/未核验，新增 `dialogLagged:true` 标注）；导入后的稳定等待同时接受器件减少，删除型导入不再白等 10s。CLI 不再在后台拒绝 `pcb import-changes` 与 `doc reload`（后台实测：重载原理图/PCB 各 3 次全部通过，语义哈希不变，#276）；`health` 对后台标签页只作备注不再告警；`pcb.snapshot` 后台拒绝时给出可直接执行的回读渲染命令（原理图用 `sch export-image`，后台可用）。
 ## [1.11.0] - 2026-10-14
 
 - `pcb.import_changes`：已同步的板子不弹确认框、导入接口直接返回 true 且器件清单不变时，判为已核验的空操作（新增 `noChanges:true`），不再按"未核验的部分导入"失败退出。

@@ -163,27 +163,3 @@ func TestReloadReceiptAcceptsBypassCurrentWithOrderedInventory(t *testing.T) {
 		t.Fatalf("bypass identity observation rejected: receipt=%+v err=%v", r, err)
 	}
 }
-
-func TestReloadCLIRefusesHiddenTabBeforeClosing(t *testing.T) {
-	fx, cfg := newReloadFixture(t, false)
-	fx.responseChange = func(action string, resp map[string]any) {
-		if ctx, ok := resp["context"].(map[string]any); ok {
-			ctx["pageVisibility"] = "hidden"
-		}
-	}
-	var stdout, stderr bytes.Buffer
-	cmd := newDocCmd(cfg, &stdout, &stderr)
-	cmd.SetArgs([]string{"reload", "pcb-target", "--window", "w1", "--json"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "background") {
-		t.Fatalf("hidden tab must be refused before closing, got %v", err)
-	}
-	for _, a := range fx.actions {
-		if a == "pcb.save" || a == "document.close" || a == "document.open" {
-			t.Fatalf("nothing may be saved/closed/opened on a hidden tab, saw %v", fx.actions)
-		}
-	}
-	var got documentReloadReceipt
-	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || got.FailedStage != "visibility" || got.Closed {
-		t.Fatalf("receipt must name the visibility stage: %+v (%v)", got, err)
-	}
-}

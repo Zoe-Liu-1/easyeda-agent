@@ -162,7 +162,7 @@ easyeda daemon health
 | 症状 | 原因 | 处理 |
 |---|---|---|
 | 动作全部超时、连不上 | 没开「允许外部交互」 | 设置里打开 |
-| `doc reload` 或截图被拒绝，`health` 提示标签页在后台 | 后台页面不重绘；窗口最小化或被**完全**遮挡也算后台 | 让 EasyEDA 窗口露出来（读写与 `pcb import-changes` 在后台也能完成，只是稍慢） |
+| `pcb snapshot` 被拒绝，`health` 注明标签页在后台 | 后台页面不重绘画布；窗口最小化或被**完全**遮挡也算后台 | 让 EasyEDA 窗口露出来再截；或改用回读渲染 `pcb layout render --actual`。读写、导入、`doc reload`、DRC 与 `sch export-image` 在后台照常 |
 | 反复断连重连、`health` 报 EasyEDA 宿主 ✗ | 宿主低于 V4（如 3.2.x） | 升级 EasyEDA Pro 到 V4（推荐 4.1.60+） |
 | 不确定谁落后了 | CLI / skill / 连接器版本不一致 | `easyeda update --check` 一次列清三方 |
 | `connectorVersionOk:false` | `.eext` 落后 / 旧窗口没重启 | 重导 `.eext` + 彻底重启 EasyEDA |

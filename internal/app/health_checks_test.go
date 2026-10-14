@@ -31,11 +31,11 @@ func TestHealthChecksGiveANextStepPerSetupStage(t *testing.T) {
 	got = healthChecks(healthResult{Found: &daemonHealth{Port: 60832, Raw: raw}})
 	var hidden, empty bool
 	for _, c := range got {
-		hidden = hidden || (c.Name == "project" && c.Status == "warn" && strings.Contains(c.Fix, "前台"))
+		hidden = hidden || (c.Name == "project" && c.Status == "ok" && strings.Contains(c.Detail, "后台"))
 		empty = empty || (c.Name == "project" && strings.Contains(c.Detail, "w-empty"))
 	}
 	if !hidden || !empty || byName(got)["connector"].Status != "warn" {
-		t.Fatalf("hidden tab / empty window / multi-window must each be actionable: %+v", got)
+		t.Fatalf("hidden tab is noted (not a fault); empty window / multi-window must each be actionable: %+v", got)
 	}
 	var buf bytes.Buffer
 	printHealthChecklist(&buf, got)
