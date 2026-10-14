@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- `document.current` 无活动文档（全部标签关闭、doc reload/switch 中途）改报 `PRECONDITION_REFUSED`：这是状态不是宿主故障，不再计入写健康度、不再把连接器误标 DEGRADED；CLI 同时兼容旧连接器的 `EDA_CALL_FAILED`。
 ## [1.11.0] - 2026-10-14
 
 - `pcb.import_changes`：已同步的板子不弹确认框、导入接口直接返回 true 且器件清单不变时，判为已核验的空操作（新增 `noChanges:true`），不再按"未核验的部分导入"失败退出。
