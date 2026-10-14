@@ -189,7 +189,7 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 stored rotation 把 body 按 **up → right → down → left** 每 +90° 循环。各类型 rot=0 时的 body 朝向：power=下、ground=上、net_port=右；这些是 `orientation.json` 的已校准视觉真值，与端点坐标的正负号独立。
 
-> **整张表只由 4 个事实决定，单一真源不会漂移**：上面的循环顺序 + 三个 rot=0 锚点（power=下 / ground=上 / port=右）。这 4 个事实存放在本 skill 的 [`orientation.json`](./orientation.json)，由它**推导**出 12 项表——`connect_pin`（`extension/src/actions.ts` 的 `deriveBodyRotation()`）与 linter（`scripts/orient.py`）**推导同一张表**，二者不可能各写各的。校验由 `make lint-test`（`tests/run.py`）保证：① 结构上 `orientation.json` 必须推回自己的 `frozenTable`、循环律成立；② 锚点的活体 ground truth 由 [`calibrate.js`](../scripts/calibrate.js) 对 `getPrimitivesBBox` 中心偏移实测复核（导入新 .eext 后跑一次）。**永远不要手改那 12 个数字**——改锚点 / 循环后重跑 `tests/run.py --update`。
+> **整张表只由 4 个事实决定，单一真源不会漂移**：上面的循环顺序 + 三个 rot=0 锚点（power=下 / ground=上 / port=右）。这 4 个事实存放在本 skill 的 [`orientation.json`](./orientation.json)，由它**推导**出 12 项表——`connect_pin`（`extension/src/actions.ts` 的 `deriveBodyRotation()`）与 linter（`scripts/orient.py`）**推导同一张表**，二者不可能各写各的。校验由仓库的 `make lint-test`（`scripts/skill-lint-tests/run.py`）保证：① 结构上 `orientation.json` 必须推回自己的 `frozenTable`、循环律成立；② 锚点的活体 ground truth 由 [`calibrate.js`](../scripts/calibrate.js) 对 `getPrimitivesBBox` 中心偏移实测复核（导入新 .eext 后跑一次）。**永远不要手改那 12 个数字**——改锚点 / 循环后在仓库重跑 `scripts/skill-lint-tests/run.py --update`。
 
 > ⚠️ **createNetFlag / createNetPort 存储时取反**（2026-06 build）：传 `R` → 存储/渲染是 `(360-R)`。**坑**：建完**立即** `getState_Rotation()` 会回显 `R`（看着像恒等），**重新拉取**（`getAll`）才看到真正的取反值。`connect_pin` 已**运行时自探测并补偿**（`detectRotationNegation`），所以**经 connect_pin 传下表的值就能得到正确朝向**，对调用者透明;若直接调 raw `eda.createNetFlag`（debug.exec_js），需自己传取反值 `(360-表值)`。
 >

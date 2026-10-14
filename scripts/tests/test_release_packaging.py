@@ -82,6 +82,16 @@ class TrackedSkillPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing|not included"):
             pack.check_skill(self.repo)
 
+    def test_file_count_over_skillhub_limit_fails(self):
+        self.assertEqual(len(pack.check_skill(self.repo)), 2)
+        for i in range(pack.MAX_FILES - 1):
+            (self.skill / f"references/n{i}.md").write_text("x\n")
+        self.run_git("add", ".agents/skills")
+        with self.assertRaisesRegex(ValueError, "exceed the 200-file SkillHub package limit"):
+            pack.check_skill(self.repo)
+        self.run_git("rm", "-q", "--cached", ".agents/skills/easyeda-agent/references/n0.md")
+        self.assertEqual(len(pack.check_skill(self.repo)), pack.MAX_FILES)
+
     def test_web_links_and_anchors_need_no_network(self):
         (self.skill / "references/guide.md").write_text("[Web](https://example.invalid/docs) [Here](#part)\n")
         self.assertEqual(len(pack.check_skill(self.repo)), 2)

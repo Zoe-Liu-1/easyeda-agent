@@ -12,8 +12,8 @@ Two guards keep the linter's verdicts trustworthy:
    frozen expected output in golden/. A rule that starts mis-firing on a
    known-good board, or stops catching a known-bad one, fails here.
 
-    python3 tests/run.py            # check (exit 1 on any mismatch)
-    python3 tests/run.py --update   # re-freeze goldens after an intended change
+    python3 scripts/skill-lint-tests/run.py            # check (exit 1 on any mismatch)
+    python3 scripts/skill-lint-tests/run.py --update   # re-freeze goldens after an intended change
 """
 import importlib.util
 import json
@@ -23,7 +23,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)  # tools/schematic-lint
+# The linter ships in the public Skill; its rule-trust harness stays in the repo
+# (dev-only fixtures/goldens are not part of the installed Skill package).
+ROOT = os.path.join(os.path.dirname(os.path.dirname(HERE)), '.agents', 'skills', 'easyeda-agent', 'scripts')
 LINT = os.path.join(ROOT, 'lint.py')
 DIFF = os.path.join(ROOT, 'diff.py')
 FIXTURES = os.path.join(HERE, 'fixtures')

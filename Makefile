@@ -48,7 +48,7 @@ mcp-test: build ## install MCP deps and run unit + stdio protocol tests
 # (orientation.json derives to its frozenTable; matches the connector) +
 # fixture goldens (known-good board stays clean, known-bad cases still fire).
 lint-test: ## linter rule-trust harness (orientation + fixtures)
-	python3 .agents/skills/easyeda-agent/scripts/tests/run.py
+	python3 scripts/skill-lint-tests/run.py
 
 blocks-audit: ## check every block pin ref against real symbol pins (offline; --probe to refresh)
 	python3 .agents/skills/easyeda-agent/scripts/blocks-pin-audit.py

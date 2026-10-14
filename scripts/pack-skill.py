@@ -12,6 +12,9 @@ import tarfile
 from urllib.parse import unquote, urlsplit
 
 SKILL = Path(".agents/skills/easyeda-agent")
+# skillhub.cn rejects packages with more than 200 files (live 400 at v1.11.0/v1.12.0).
+# Fail here instead of at publish time; repo-only fixtures/tests belong outside the skill.
+MAX_FILES = 200
 
 
 def tracked_skill_files(repo: Path) -> list[Path]:
@@ -26,6 +29,9 @@ def check_skill(repo: Path) -> list[Path]:
     repo = repo.resolve()
     root = repo / SKILL
     files = tracked_skill_files(repo)
+    if len(files) > MAX_FILES:
+        raise ValueError(f"{len(files)} tracked files exceed the {MAX_FILES}-file SkillHub package limit; "
+                         "move repo-only material (tests, fixtures) out of the skill or merge references")
     tracked = {repo / file for file in files}
     for file in files:
         path = repo / file

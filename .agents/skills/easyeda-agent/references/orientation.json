@@ -7,7 +7,7 @@
     "Both consumers derive the same table:",
     "  - .agents/skills/easyeda-agent/scripts/orient.py  (the linter's check)",
     "  - extension/src/actions.ts deriveBodyRotation()  (what connect_pin writes)",
-    "tests/run.py asserts derive(cycle, anchors) == frozenTable, so the two",
+    "scripts/skill-lint-tests/run.py (repo) asserts derive(cycle, anchors) == frozenTable, so the two",
     "language copies can never drift. calibrate.js re-validates the 3 anchors +",
     "cycle against live getPrimitivesBBox ground truth (run after importing a new",
     ".eext). See docs/schematic-layout-conventions.md §3.5.",

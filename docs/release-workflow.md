@@ -86,7 +86,8 @@ Changelog；中版本还检查上述验收材料。`release-build` 生成五平�
 `make eext` 仍是开发期升 patch 的快捷入口，不代替发布准备所需的完整版本同步。
 
 Skill 包只包含 Git 已跟踪/已暂存文件的当前内容；新公共参考须先审阅并暂存，本地
-草稿不入包。`make skill-check` 验证链接在仅安装 Skill 的目录中仍然成立。
+草稿不入包。`make skill-check` 验证链接在仅安装 Skill 的目录中仍然成立，并在文件数超过
+SkillHub 上限（200）时失败：仅仓库使用的测试、夹具放在 Skill 目录之外（如 `scripts/skill-lint-tests/`）。
 GitHub、ClawHub 和 SkillHub 共用此受控打包器，不直接上传夹带草稿的工作目录。
 
 完成验收并提交已审阅源码后，只有得到发布指令才运行：

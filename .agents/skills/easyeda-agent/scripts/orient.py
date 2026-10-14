@@ -8,7 +8,7 @@ body direction at rotation 0 for each family (power=down, ground=up, port=right)
 rotation mapping is independent of the schematic endpoint coordinate signs.)
 ``derive`` reconstructs the table; ``load_body_rotation`` reads the canonical
 spec next to this file. The lint check and the connector's connect_pin both
-derive from these same facts, so they can never drift — tests/run.py asserts it.
+derive from these same facts, so they can never drift — scripts/skill-lint-tests/run.py (repo) asserts it.
 """
 import json
 import os

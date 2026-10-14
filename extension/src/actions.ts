@@ -8174,7 +8174,7 @@ function defaultDirection(kind: string): Direction {
  * The whole table is DERIVED from four facts — the +90° body cycle and the body
  * direction at rotation 0 for each family. These are the SINGLE SOURCE OF TRUTH
  * mirrored in orientation.json; the lint harness
- * (tests/run.py) asserts that file derives the identical
+ * (scripts/skill-lint-tests/run.py) asserts that file derives the identical
  * table, so this writer and the linter's check can never drift. Re-validate the
  * anchors against live getPrimitivesBBox via calibrate.js
  * after importing a new .eext. See schematic-layout-conventions.md §3.5.
