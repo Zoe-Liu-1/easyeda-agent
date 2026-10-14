@@ -6,6 +6,8 @@
 - 新增只读 `schematic.visible_text.bboxes`：当前页全部可见文字与可见属性（器件与图纸本身）的官方 bbox，量不到的列入 `unmeasured`；`sch check` 据此把越出纸张的可见文字/属性报 `out-of-sheet`（此前显示图签 Name/Description 会画到纸外而无规则发现）。
 - `schematic.power.connect_pin`：网络标识创建超过 7s 后不再立即回滚桩线，而是在处理预算内继续等待同一宿主调用——晚到的标识被采用（`lateSettle:true`），明确失败才回滚；仍未落定时保留桩线并返回 `partial:true/verified:false`，避免晚到标识成为孤儿（#208）。
 - `document.current` 无活动文档（全部标签关闭、doc reload/switch 中途）改报 `PRECONDITION_REFUSED`：这是状态不是宿主故障，不再计入写健康度、不再把连接器误标 DEGRADED；CLI 同时兼容旧连接器的 `EDA_CALL_FAILED`。
+- `schematic.component.place`：器件库里查不到的器件（例如误传元件的 16 位符号 id 而非 32 位器件 uuid）在调用宿主 `create` 之前即以 `PRECONDITION_REFUSED` 拒绝——宿主对未知器件的 `create` 既不报错也不返回，会永久挂起并堵住动作队列。
+- CLI：`pcb silk-align` 全部位号无解且回执证明未写入时，提示「nothing was written」并列出各位号原因，不再误报写入未验证。
 ## [1.11.0] - 2026-10-14
 
 - `pcb.import_changes`：已同步的板子不弹确认框、导入接口直接返回 true 且器件清单不变时，判为已核验的空操作（新增 `noChanges:true`），不再按"未核验的部分导入"失败退出。
