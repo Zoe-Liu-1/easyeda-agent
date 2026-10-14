@@ -157,12 +157,16 @@ easyeda daemon health
 
 ## 常见卡点速查
 
+先跑 `easyeda health`：它逐项列出 daemon、连接器、版本、EasyEDA 宿主、工程与标签页，未就绪项直接给出下一步。
+
 | 症状 | 原因 | 处理 |
 |---|---|---|
 | 动作全部超时、连不上 | 没开「允许外部交互」 | 设置里打开 |
+| 同步/重开/截图超时，`health` 提示标签页在后台 | 浏览器节流后台标签的定时器 | 把 EasyEDA 标签页切到前台 |
+| 反复断连重连、`health` 报 EasyEDA 宿主 ✗ | 宿主低于 V4（如 3.2.x） | 升级 EasyEDA Pro 到 V4（推荐 4.1.60+） |
 | 不确定谁落后了 | CLI / skill / 连接器版本不一致 | `easyeda update --check` 一次列清三方 |
 | `connectorVersionOk:false` | `.eext` 落后 / 旧窗口没重启 | 重导 `.eext` + 彻底重启 EasyEDA |
-| 重导 `.eext` 后没生效 | EasyEDA 按 uuid 去重,旧的没卸载 | 「已安装」里先卸载旧的再导入 |
+| 重导 `.eext` 后没生效 | EasyEDA 按 uuid 去重,旧的没卸载；部分宿主版本的卸载会界面显示成功、实际仍在（#250/#252） | 「已安装」里先卸载旧的再导入，刷新/重开 EasyEDA 后以 `easyeda health` 显示的连接器版本为准，不以扩展管理器界面为准 |
 | `easyeda: command not found` | `PATH` 没含安装目录 | 把 `/usr/local/bin` 加进 `~/.zshrc` |
 | registry 安装的 Skill 版本不同 | registry 审核或同步有延迟 | 用一键脚本,或从同一 Release 下 `skills.tar.gz` 解压到 skills 目录 |
 
