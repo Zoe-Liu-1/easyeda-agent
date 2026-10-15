@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- `pcb.route.delete`：封装内嵌对象改按「父器件 primitiveId + 自身 `e<数字>` id」判定，不再只看 ID 前缀；顶层走线/过孔的 ID 恰好以某器件 ID 开头（如器件 `e2`、走线 `e200`）时不再被误拒为 footprint-embedded。真正的 EPAD 热过孔仍拒删（ceshi 实测 ESP32-S3R8 九颗热过孔）。
+- daemon 原理图几何守卫：放件、换件、位姿修改、重绑定、整组移动与导线/连接一样只按本次写入的几何差分判定，页面上未改变的历史问题保留为诊断（`baselineFindings` + 警告），不再让局部 ECO 写后被判失败；新增、改变或重复次数增加的问题与缺测仍失败。
 - `library.symbol.build` / `library.footprint.build`（#279）：打开编辑器前先核对资产在 `--library` 指定的库中；不在时若能在工程库/个人库找到，以 `PRECONDITION_REFUSED` 拒绝并给出正确的库（宿主对工程库资产的记录把 `libraryUuid` 写成个人库 uuid，照抄该字段即失败），不再报 `INVALID_STATE` 并被计入退化。焦点确认同时接受该库的两种名称，修复工程库符号 build 在前后台都必然失败；`activateDocument` 的布尔返回不再作为判据，焦点等待改为按 4s 总时长。
 - `library.footprint.build`（#279）：焊盘 `shape` 写入前按官方元组校验（类型须为 `"RECT"`/`"ELLIPSE"`/`"OVAL"`/`"NGON"`/`"POLYGON"` 字符串，元素个数与尺寸正确），数字类型 `[1, w, h]` 不再在写入中途失败；Skill 示例同步改为官方写法。工程库封装的编辑器 API 打不开（4.1.71 实测），build 改为明确拒绝并指引建在个人库。
 - CLI：新增 PCB 虚拟编组 `pcb group create/add/remove/ungroup/list/move`（#173，`mode: virtual`——官方 API 不暴露原生组合）：按 PCB 文档 uuid 持久保存、与原理图组共用数据模型；`pcb group move` 整组刚性平移并逐件回读核验；`pcb modify`/`move`/`align`/`distribute`/`grid-snap`/`arrange` 部分覆盖组时拒绝（`--break-group` 放行），`auto-place`/`place-constrained`/`refine` 把组成员当固定件；`pcb delete` 删除后把成员从组里摘除。
