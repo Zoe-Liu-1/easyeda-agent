@@ -94,6 +94,18 @@
 
 **结案**:不再需要报告人向 pro-api-sdk 单独提单 —— 用「升级到 ≥3.2.186」代替「等官方修复」。
 
+### P-04 `dmt_Schematic.modifySchematicPageName` 恒返回 false,页名不变(#55)
+
+| 栏 | 内容 |
+|---|---|
+| 现象 | Web 4.1.60 / 4.1.71 上对新建的原理图页调用 `modifySchematicPageName(pageUuid, name)` 返回 `false`,fresh 页名保持 `P2`;先 `doc switch` 到该页再调用结果相同(2026-10-15 实测,名称 ASCII/中文都一样)。 |
+| 最小复现 | `const id = await eda.dmt_Schematic.createSchematicPage(schUuid); await eda.dmt_Schematic.modifySchematicPageName(id, 'X'); (await eda.dmt_Schematic.getCurrentSchematicInfo()).page.map(p => p.name)` → 返回 `false`,名称仍为 `P2`。**待以纯 `eda.*` 片段单独复核**(当前证据来自 typed 动作 `schematic.page.rename`,该动作只做这一个调用加回读)。 |
+| 我方绕行 | `sch page-rename` 如实失败(`EDA_CALL_FAILED: Host did not confirm schematic page rename`),不重试、不报成功;图签 `@Page Name` 是平台投影字段,typed 写入拒绝(#186 图框损毁教训),不作为替代路径。 |
+| 绕行的残余风险 | 无法通过 API 给原理图页命名:多页设计只能保留 `P1/P2…` 默认页名,需要用户在 GUI 里手动改。 |
+| 需要官方给什么 | `modifySchematicPageName` 生效,或给出合法参数形状(若需要 `uuid@project` 之类的 tabId 形式请在类型声明中写明);或者 `createSchematicPage` 支持传入页名。 |
+
+---
+
 ## 官方对「AI 提单」的态度(重要方法论)
 
 维护者 **yanranxiaoxi** 已 **3 次**对 AI 味 issue pushback:
