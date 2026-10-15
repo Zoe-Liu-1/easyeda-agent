@@ -2,7 +2,6 @@ package app
 
 import (
 	"math"
-	"sort"
 	"testing"
 
 	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
@@ -65,23 +64,60 @@ func checkBlockAttachDemo(t *testing.T, anchor layoutBBox) {
 			t.Errorf("%s leaves only %.1f between its host-facing end and the host (need ≥ %.0f)", s.Role, body.MinY-anchor.MaxY, bslMarkerVReach)
 		}
 	}
-	near := map[string]float64{"C_VDD": 305, "C_BULK": 305, "R_EN": 305, "C_EN": 305, "R_IO0": 395}
-	for role, px := range near {
-		if d := math.Abs(at[role].X - px); d > 100 {
-			t.Errorf("%s is %.0f from its pin column (want ≤100)", role, d)
+	// #43 (2026-10-15): members of a left/right-column pin go OUTWARD past every
+	// connected host pin's stub + marker lane (no longer above/below the host),
+	// and stay near their pin: within that side's lane depth plus their own
+	// marker cluster.
+	nets := bslBlockNets(blk)
+	lanes := bslHostPinLanes(nets, "U", pins, anchor, bslRoleReach(nets, "U"))
+	hull := bslHostHull(anchor, pins)
+	pinOf := map[string]string{"C_VDD": "3V3", "C_BULK": "3V3", "R_EN": "EN", "C_EN": "EN", "R_IO0": "IO0"}
+	for role, pn := range pinOf {
+		s, pin := at[role], pins[pn]
+		box := bslPartBox(blk.Parts[role].Part)
+		body := layoutBBox{MinX: s.X + box.MinX, MinY: s.Y + box.MinY, MaxX: s.X + box.MaxX, MaxY: s.Y + box.MaxY}
+		for _, l := range lanes {
+			if boxesGapOverlap(body, l, 0) {
+				t.Errorf("%s %+v sits in a host pin lane %+v", role, body, l)
+			}
+		}
+		depth := 0.0
+		for _, l := range lanes {
+			depth = math.Max(depth, l.MaxX-l.MinX)
+		}
+		v := math.Max(bslMarkerVReach, bslRoleReach(nets, role))
+		if d := math.Hypot(s.X-pin.X, s.Y-pin.Y); d > depth+2*(box.MaxY+v)+bslPartGap {
+			t.Errorf("%s is %.0f from its pin %s (want ≤ lane depth %.0f + its own cluster)", role, d, pn, depth)
+		}
+		switch outwardDirection(pin) {
+		case "left":
+			if body.MaxX >= hull.MinX {
+				t.Errorf("%s (left-column pin %s) is not outward-left of the host: x=%.0f", role, pn, s.X)
+			}
+		case "right":
+			if body.MinX <= hull.MaxX {
+				t.Errorf("%s (right-column pin %s) is not outward-right of the host: x=%.0f", role, pn, s.X)
+			}
 		}
 	}
-	// Each pin's parts are contiguous in the row (no other group in between).
-	order := append([]bslSolved(nil), solved...)
-	sort.Slice(order, func(i, j int) bool { return order[i].X < order[j].X })
-	groupOf := map[string]string{"C_VDD": "3V3", "C_BULK": "3V3", "R_EN": "EN", "C_EN": "EN", "R_IO0": "IO0"}
-	seen := map[string]bool{}
-	prev := ""
-	for _, s := range order {
-		g := groupOf[s.Role]
-		if g != prev && seen[g] {
-			t.Errorf("group %s is split in the row: %+v", g, order)
+	// Each pin's parts are contiguous: no other group's part between them.
+	groups := map[string][]bslSolved{}
+	for role, g := range pinOf {
+		groups[g] = append(groups[g], at[role])
+	}
+	for g, members := range groups {
+		if len(members) < 2 {
+			continue
 		}
-		seen[g], prev = true, g
+		a, b := members[0], members[1]
+		lo := layoutBBox{MinX: math.Min(a.X, b.X), MinY: math.Min(a.Y, b.Y), MaxX: math.Max(a.X, b.X), MaxY: math.Max(a.Y, b.Y)}
+		for _, s := range solved {
+			if pinOf[s.Role] == g {
+				continue
+			}
+			if s.X >= lo.MinX && s.X <= lo.MaxX && s.Y >= lo.MinY && s.Y <= lo.MaxY {
+				t.Errorf("group %s is split by %s: %+v", g, s.Role, solved)
+			}
+		}
 	}
 }

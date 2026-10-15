@@ -58,13 +58,23 @@ const bslMarkerVReach = schStubLen + 4*schAnchorGrid
 // 紧密 —— 用 50 会把 0402 去耦推到离芯片 79 远,视觉上完全不像"贴"。分立件的 10 是
 // ceshi 实测值(0402 符号 20×16),不是估的。
 func bslTightHalf(partKey string) float64 {
+	if bslIsDiscrete(partKey) {
+		return 10
+	}
+	return bapRoleHalfExtent(partKey)
+}
+
+// bslIsDiscrete 报告件是不是分立小件(R/C/L/二极管/单管)—— 只有它们没写 orient
+// 时才默认竖放;IC、晶振这类多脚符号转 270° 只会让字侧躺、估算 box 也对不上
+// (box 不随旋转换轴),作者没声明就保持 0°。
+func bslIsDiscrete(partKey string) bool {
 	k := strings.ToLower(partKey)
 	for _, pre := range []string{"cap.", "res.", "ind.", "diode.", "led.", "tvs.", "esd.", "bjt.", "mos."} {
 		if strings.HasPrefix(k, pre) {
-			return 10
+			return true
 		}
 	}
-	return bapRoleHalfExtent(partKey)
+	return false
 }
 
 // bslPartBox 是件的判定 box(以件中心为原点)。放置前它只有下限,落地后由硬门
@@ -230,6 +240,11 @@ func bslCrossNets(nets [][]string, a, b string) int {
 
 // bslAttachSide 决定贴上去的件放在宿主的哪一侧,以及它自己该竖放还是横放。
 //
+// **2026-10-15 起这只是左/右列引脚的回退侧**:attach 先走 fitOutward,把件放到引脚
+// 引出方向那一侧、越过宿主所有有连接的脚的通道(bslHostPinLanes)—— 下文 A 方案担心的
+// 「同侧 marker 横扫」正是那些通道,现在被显式让开了;外带被图纸边/别的图元占满时才
+// 回到这里给的上/下侧(#43 E2E:两列 56 脚的 ESP32-S3R8 上下两头装不下 15 件)。
+//
 // **引脚在左/右列时,件放到宿主的上/下侧,不是同侧**(2026-08-15 用户拍板的 A 方案,
 // ADR-0003 §2.5)。旧推导是「引脚在左列 → 该件沿 x 推出去,方向正交天然不撞」——
 // 那只比了「该件自己的 marker」与「宿主该脚的 marker」两支,漏了真正的杀手:
@@ -306,6 +321,135 @@ func bslAttachSeed(pinX, pinY float64, host layoutBBox, side string, ownHalf flo
 	}
 }
 
+// bslHostPinLanes 是宿主上**每一只有连接的引脚**的桩线 + marker 通道(绝对坐标)。
+//
+// block-apply 之后给宿主每只脚各挂一支自己的 marker:贴脚件只要坐进任何一只脚的通道,
+// 那只脚的桩线就被件挡住(#43 E2E:FLASH 贴着 SPI 那一列,25 处连接被几何守卫拒)。
+// 通道深度与 bslExpandForMarkers 同一把尺:同侧 marker 的 lane 数(bslMarkerLanes,
+// 跨轴区间来自 predictedMarkerBBox —— 评分器判碰撞用的就是它)× bslSideDepth;
+// 跨轴宽度是那只脚自己的 marker 判定盒。只有块里真有连接的脚才有通道 —— 空脚不挂
+// marker,那里可以放件。
+//
+// reach 是这一侧 marker 的伸出上限(调用方传宿主角色的 reachOf);网名用代理口径:
+// 有 PORT 用 PORT 名,否则用宿主自己的脚名(与 bslRoleReach 同口径)。
+func bslHostPinLanes(nets [][]string, anchorRole string, pins map[string]acPin, host layoutBBox, reach float64) []layoutBBox {
+	if len(pins) == 0 {
+		return nil
+	}
+	netOf := map[string]string{} // 宿主脚(名或号)→ 代理网名
+	for _, net := range nets {
+		port := ""
+		for _, m := range net {
+			if strings.HasPrefix(m, "PORT:") {
+				port = strings.TrimPrefix(m, "PORT:")
+				break
+			}
+		}
+		for _, m := range net {
+			r, pin, ok := splitBlockPinRef(m)
+			if !ok || r != anchorRole {
+				continue
+			}
+			pin = strings.TrimSuffix(pin, acPinFanoutSuffix)
+			name := port
+			if name == "" {
+				name = pin
+			}
+			if _, seen := netOf[pin]; !seen {
+				netOf[pin] = name
+			}
+		}
+	}
+	// pins 按名和号各索引一次,同名多脚(VDDA×2)只留最后一个 —— 逐只去重后按名或号匹配。
+	type hostPin struct {
+		p    acPin
+		net  string
+		side string
+	}
+	seen := map[string]bool{}
+	var hp []hostPin
+	cx := (host.MinX + host.MaxX) / 2
+	for _, p := range pins {
+		key := fmt.Sprintf("%s|%.3f|%.3f", p.PinNumber, p.X, p.Y)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		net, ok := netOf[p.PinNumber]
+		if !ok {
+			if net, ok = netOf[p.PinName]; !ok {
+				continue
+			}
+		}
+		side := outwardDirection(p)
+		if side == "" {
+			side = "right"
+			if p.X < cx {
+				side = "left"
+			}
+		}
+		hp = append(hp, hostPin{p, net, side})
+	}
+	sort.Slice(hp, func(i, j int) bool {
+		a, b := hp[i].p, hp[j].p
+		if a.X != b.X {
+			return a.X < b.X
+		}
+		if a.Y != b.Y {
+			return a.Y < b.Y
+		}
+		return a.PinNumber < b.PinNumber
+	})
+	judge := func(h hostPin) layoutBBox {
+		return predictedMarkerBBox(h.p.X, h.p.Y, bapFlagKind(h.net), h.side, h.net)
+	}
+	spans := map[string][][2]float64{}
+	for _, h := range hp {
+		b := judge(h)
+		if h.side == "left" || h.side == "right" {
+			spans[h.side] = append(spans[h.side], [2]float64{b.MinY, b.MaxY})
+		} else {
+			spans[h.side] = append(spans[h.side], [2]float64{b.MinX, b.MaxX})
+		}
+	}
+	depth := map[string]float64{}
+	for side, s := range spans {
+		depth[side] = bslSideDepth(reach, bslMarkerLanes(s))
+	}
+	out := make([]layoutBBox, 0, len(hp))
+	for _, h := range hp {
+		b, d, p := judge(h), depth[h.side], h.p
+		switch h.side {
+		case "left":
+			out = append(out, layoutBBox{MinX: p.X - d, MinY: math.Min(b.MinY, p.Y), MaxX: p.X, MaxY: math.Max(b.MaxY, p.Y)})
+		case "right":
+			out = append(out, layoutBBox{MinX: p.X, MinY: math.Min(b.MinY, p.Y), MaxX: p.X + d, MaxY: math.Max(b.MaxY, p.Y)})
+		case "down":
+			out = append(out, layoutBBox{MinX: math.Min(b.MinX, p.X), MinY: p.Y - d, MaxX: math.Max(b.MaxX, p.X), MaxY: p.Y})
+		default: // up
+			out = append(out, layoutBBox{MinX: math.Min(b.MinX, p.X), MinY: p.Y, MaxX: math.Max(b.MaxX, p.X), MaxY: p.Y + d})
+		}
+	}
+	return out
+}
+
+// bslHostHull 是宿主本体 ∪ 它所有引脚端点 —— 平台回读的 bbox 不含引脚线(ESP32-S3R8
+// 实测 bbox 半宽 76、脚尖在 ±85),贴件不能坐到引脚线上。
+func bslHostHull(host layoutBBox, pins map[string]acPin) layoutBBox {
+	for _, p := range pins {
+		host.MinX, host.MaxX = math.Min(host.MinX, p.X), math.Max(host.MaxX, p.X)
+		host.MinY, host.MaxY = math.Min(host.MinY, p.Y), math.Max(host.MaxY, p.Y)
+	}
+	return host
+}
+
+func bslAbsInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 // bslSnapOutward snaps a seed to the anchor grid in the direction of its side,
 // so snapping never moves it toward the host it must keep its gap from.
 func bslSnapOutward(x, y float64, side string) (float64, float64) {
@@ -365,6 +509,34 @@ func bslBlockNets(b blocks.Block) [][]string {
 	return doc.InternalNets
 }
 
+// bslBlockNetsWithPorts 是 internal_nets 再补上「只在 ports 里声明、没进 internal_nets」
+// 的单脚边界(validate 允许直接的一脚端口不出现在 internal_nets)—— block-apply 照样
+// 给这种脚挂一支 port marker(planBlockApply 的 uncovered 分支),它的通道也得让出来。
+func bslBlockNetsWithPorts(b blocks.Block) [][]string {
+	nets := bslBlockNets(b)
+	used := map[string]bool{}
+	for _, net := range nets {
+		for _, m := range net {
+			if strings.HasPrefix(m, "PORT:") {
+				used[strings.TrimPrefix(m, "PORT:")] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(b.Ports))
+	for name := range b.Ports {
+		if !used[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if at := b.Ports[name].At; at != "" {
+			nets = append(nets, []string{at, "PORT:" + name})
+		}
+	}
+	return nets
+}
+
 // ── 活求解器:放锚件 → 回读实测 → 求解其余件(issue #180 P2 第二步)──────────
 //
 // 两阶段的理由:attach(去耦贴电源脚)需要**目标引脚的真实坐标**,而引脚坐标只有
@@ -395,12 +567,29 @@ func bslSolveAround(
 	blk blocks.Block,
 	rel bslRelations,
 	nets [][]string,
+	roleReach map[string]float64,
+	anchorRole string,
+	anchorPins map[string]acPin,
+	anchorBBox layoutBBox,
+	obstacles []layoutBBox,
+	usable *layoutBBox,
+) ([]bslSolved, []string) {
+	return bslSolveAroundOpt(blk, rel, nets, roleReach, anchorRole, anchorPins, anchorBBox, obstacles, usable, false)
+}
+
+// bslSolveAroundOpt 是 bslSolveAround 的本体;failFast 时第一个贴不下的件就返回
+// (锚件平移搜索只关心「整块解不解得开」,不必把注定失败的候选算完)。
+func bslSolveAroundOpt(
+	blk blocks.Block,
+	rel bslRelations,
+	nets [][]string,
 	roleReach map[string]float64, // 角色 → marker 伸出上限(用实例真网名算;nil 退回模板代理名)
 	anchorRole string,
 	anchorPins map[string]acPin, // "PIN名/编号" → 实测引脚(锚件的)
 	anchorBBox layoutBBox,
 	obstacles []layoutBBox,
 	usable *layoutBBox,
+	failFast bool,
 ) ([]bslSolved, []string) {
 
 	var out []bslSolved
@@ -451,6 +640,46 @@ func bslSolveAround(
 		}
 		return r, bslMarkerVReach
 	}
+	// clusterOf 是件 ∪ 它自己的 marker(以中心为原点)—— 与 free() 判图纸边界、
+	// sch clusters 判组重叠同一口径。竖放件的 marker 挂在两端:横向只占 marker 宽
+	// (不叠本体半宽,标识就在件的轴线上),纵向是本体 + 整支 marker。
+	clusterOf := func(role string) layoutBBox {
+		b := boxOf(role)
+		h, v := extentOf(role)
+		hx := b.MaxX + h
+		if verticalRole[role] {
+			hx = math.Max(b.MaxX, h)
+		}
+		return layoutBBox{MinX: -hx, MinY: b.MinY - v, MaxX: hx, MaxY: b.MaxY + v}
+	}
+	// attach 阶段的额外约束(其余阶段为空,行为不变):贴脚件连同自己的 marker 不许
+	// 压进宿主任何一只有连接的脚的桩线/marker 通道(hostLanes),也不许与已贴好的件的
+	// marker 簇相压(memberClusters)、不许把 marker 印到页面已有图元上(live)。
+	var hostLanes, memberClusters []layoutBBox
+	attachPhase := false
+	clusterFree := func(role string, cx, cy float64) bool {
+		if !attachPhase {
+			return true
+		}
+		c := clusterOf(role)
+		abs := layoutBBox{MinX: cx + c.MinX, MinY: cy + c.MinY, MaxX: cx + c.MaxX, MaxY: cy + c.MaxY}
+		for _, set := range [][]layoutBBox{hostLanes, memberClusters, live} {
+			for _, o := range set {
+				if boxesGapOverlap(abs, o, bslPartGap) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	commit := func(role string, cx, cy float64) {
+		b := boxOf(role)
+		live = append(live, layoutBBox{MinX: cx + b.MinX, MinY: cy + b.MinY, MaxX: cx + b.MaxX, MaxY: cy + b.MaxY})
+		if attachPhase {
+			c := clusterOf(role)
+			memberClusters = append(memberClusters, layoutBBox{MinX: cx + c.MinX, MinY: cy + c.MinY, MaxX: cx + c.MaxX, MaxY: cy + c.MaxY})
+		}
+	}
 	free := func(cx, cy float64, b layoutBBox, reach, vreach float64) bool {
 		cand := layoutBBox{MinX: cx + b.MinX, MinY: cy + b.MinY, MaxX: cx + b.MaxX, MaxY: cy + b.MaxY}
 		if usable != nil {
@@ -482,8 +711,8 @@ func bslSolveAround(
 		for i := 0; i <= tries; i++ {
 			cx := snapAnchor(seedX + float64(i)*dx*step)
 			cy := snapAnchor(seedY + float64(i)*dy*step)
-			if free(cx, cy, b, reach, vreach) {
-				live = append(live, layoutBBox{MinX: cx + b.MinX, MinY: cy + b.MinY, MaxX: cx + b.MaxX, MaxY: cy + b.MaxY})
+			if free(cx, cy, b, reach, vreach) && clusterFree(role, cx, cy) {
+				commit(role, cx, cy)
 				return cx, cy, true
 			}
 		}
@@ -499,9 +728,68 @@ func bslSolveAround(
 			for _, sgn := range []float64{firstDir, -firstDir} {
 				cx := snapAnchor(seedX + sgn*float64(k)*step)
 				cy := snapAnchor(seedY)
-				if free(cx, cy, b, reach, vreach) {
-					live = append(live, layoutBBox{MinX: cx + b.MinX, MinY: cy + b.MinY, MaxX: cx + b.MaxX, MaxY: cy + b.MaxY})
+				if free(cx, cy, b, reach, vreach) && clusterFree(role, cx, cy) {
+					commit(role, cx, cy)
 					return cx, cy, true
+				}
+			}
+		}
+		return 0, 0, false
+	}
+
+	// fitOutward 把左/右列引脚的贴件放进**该脚引出方向那一侧的外带**:件连同自己的
+	// marker 整体落在宿主引脚列之外(带内沿 = 宿主本体 ∪ 引脚 + 间隙),且不压任何一只
+	// 有连接的脚的通道、不压别的贴件的 marker 簇(clusterFree 管)。
+	//
+	// 搜索按「离参考点的曼哈顿步数」由近到远:参考点是目标脚正对的带内沿;同一只脚的
+	// 后续件改以**上一件**为参考点,于是一只脚的件挨在一起、别的脚的件插不进中间。
+	// 同一步数先取靠里的(离宿主近),再取离参考点纵向近的,纵向先朝宿主中心走(包络
+	// 收得紧)。窗口是可用区(没有图纸时是宿主四周各外扩它自己的高度),步长是连接网格的两倍
+	// (bslLanePitch);带内沿落格向外取整,判定坐标 = 落地坐标,且永远不会被吸回宿主那侧。
+	fitOutward := func(role string, refX, refY float64, follow bool, side string, hull layoutBBox) (float64, float64, bool) {
+		b := boxOf(role)
+		reach, vreach := extentOf(role)
+		c := clusterOf(role)
+		dir, inner := 1.0, hull.MaxX+bslPartGap-c.MinX
+		if side == "left" {
+			dir, inner = -1, hull.MinX-bslPartGap-c.MaxX
+		}
+		inner, _ = bslSnapOutward(inner, 0, side)
+		if !follow || dir*(refX-inner) < 0 {
+			refX = inner
+		}
+		refX, refY = snapAnchor(refX), snapAnchor(refY)
+		step := float64(bslLanePitch)
+		win := bapGrow(hull, hull.MaxY-hull.MinY) // 没有图纸:四周各让出宿主自己的高度
+		if usable != nil {
+			win = *usable
+		}
+		maxD := int((win.MaxX-win.MinX)/step) + int((win.MaxY-win.MinY)/step)
+		toward := 1.0
+		if refY > (hull.MinY+hull.MaxY)/2 {
+			toward = -1
+		}
+		// 一圈(曼哈顿距离 d)内按「靠里优先(dir·dx 小)→ 朝宿主中心」的固定顺序走,
+		// 同输入同输出;dx 定了 |dy| 也就定了,不必排序。
+		for d := 0; d <= maxD; d++ {
+			for t := -d; t <= d; t++ {
+				cx := refX + dir*float64(t)*step
+				if dir*(cx-inner) < 0 || cx < win.MinX || cx > win.MaxX {
+					continue
+				}
+				r := float64(d - bslAbsInt(t))
+				for _, sgn := range []float64{toward, -toward} {
+					if r == 0 && sgn != toward {
+						continue
+					}
+					cy := refY + sgn*r*step
+					if cy < win.MinY || cy > win.MaxY {
+						continue
+					}
+					if free(cx, cy, b, reach, vreach) && clusterFree(role, cx, cy) {
+						commit(role, cx, cy)
+						return cx, cy, true
+					}
 				}
 			}
 		}
@@ -529,16 +817,37 @@ func bslSolveAround(
 	// and which way that pin's row is growing, so a pin's parts stay contiguous.
 	groupLast := map[string][2]float64{}
 	groupDir := map[string]float64{}
+	// Pin groups with a big member go first, biggest first: the flash and the
+	// crystal need the widest free slot, and the small parts still find room
+	// around them (#43 E2E, 2026-10-15: placed last, the flash found no slot).
+	// A pin's members stay consecutive so its followers grow next to the first
+	// one (groupLast); inside a group the big member leads.
+	groupHalf := map[string]float64{}
+	for _, r := range attachRoles {
+		if h := tightHalf(r); h > groupHalf[rel.Attach[r]] {
+			groupHalf[rel.Attach[r]] = h
+		}
+	}
 	sort.SliceStable(attachRoles, func(i, j int) bool {
 		a, b := attachRoles[i], attachRoles[j]
+		ta, tb := rel.Attach[a], rel.Attach[b]
+		if ga, gb := groupHalf[ta], groupHalf[tb]; ga != gb {
+			return ga > gb
+		}
 		if pa, pb := pinX(a), pinX(b); pa != pb {
 			return pa < pb
 		}
-		if ta, tb := rel.Attach[a], rel.Attach[b]; ta != tb {
+		if ta != tb {
 			return ta < tb
+		}
+		if ha, hb := tightHalf(a), tightHalf(b); ha != hb {
+			return ha > hb
 		}
 		return a < b
 	})
+	hull := bslHostHull(anchorBBox, anchorPins)
+	hostLanes = bslHostPinLanes(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole))
+	attachPhase = true
 	for _, role := range attachRoles {
 		target := rel.Attach[role]
 		tRole, tPin, ok := splitBlockPinRef(target)
@@ -553,12 +862,33 @@ func bslSolveAround(
 			notes = append(notes, fmt.Sprintf("%s: 锚件上找不到引脚 %q(实测引脚表里没有这个名字/编号)—— 该件走网格", role, tPin))
 			continue
 		}
-		side := outwardDirection(pin)
-		if side == "" {
-			side = "right"
+		pinSide := outwardDirection(pin)
+		if pinSide == "" {
+			pinSide = "right"
 		}
-		side, vertical := bslAttachSide(side, rel.Orient[role])
+		side, vertical := bslAttachSide(pinSide, rel.Orient[role])
+		if rel.Orient[role] == "" && !bslIsDiscrete(partKey(role)) {
+			vertical = false // 多脚符号没声明 orient 就不转(见 bslIsDiscrete)
+		}
 		verticalRole[role] = vertical
+		rot := 0.0
+		if vertical {
+			rot = 270 // 竖放:pin1 朝上(电)、pin2 朝下(地),与 orientation 真值表一致
+		}
+		// 左/右列的脚:先沿引出方向放到外带(越过宿主所有有连接的脚的通道),外带被
+		// 图纸边/别的图元占满时才回退到宿主上/下侧(bslAttachSide 给的那条路)。
+		if pinSide == "left" || pinSide == "right" {
+			refX, refY := pin.X, pin.Y
+			last, follow := groupLast[target]
+			if follow {
+				refX, refY = last[0], last[1]
+			}
+			if x, y, ok := fitOutward(role, refX, refY, follow, pinSide, hull); ok {
+				groupLast[target] = [2]float64{x, y}
+				out = append(out, bslSolved{Role: role, X: x, Y: y, Rotation: rot, Source: "attach"})
+				continue
+			}
+		}
 		// 上/下是**二选一的启发式**(走离引脚最近的那一头),不是电气语义 —— 所以首选
 		// 那头被占/顶出图纸时要回退到对侧,而不是直接降级走网格。降级不是中性的:
 		// 网格坐标由 planner 预先算好、**不避让刚落地的锚件**,大件必然重叠 → 落地前
@@ -664,15 +994,15 @@ func bslSolveAround(
 		if !fitted {
 			notes = append(notes, fmt.Sprintf("%s: 贴 %s 的位置放不下(%s 侧都被占或出图纸)—— 该件走网格",
 				role, target, strings.Join(sides, "/")))
+			if failFast {
+				return out, notes
+			}
 			continue
 		}
 		groupLast[target] = [2]float64{x, y}
-		rot := 0.0
-		if vertical {
-			rot = 270 // 竖放:pin1 朝上(电)、pin2 朝下(地),与 orientation 真值表一致
-		}
 		out = append(out, bslSolved{Role: role, X: x, Y: y, Rotation: rot, Source: "attach"})
 	}
+	attachPhase = false
 
 	// ② flow:沿 +x 顺链排,以锚件为基准。锚件左边的逆序向 −x 长,右边的顺序向 +x 长。
 	if len(rel.Flow) > 0 {
@@ -880,8 +1210,10 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 	// **18 秒**,踩在默认 20s 预算的边界上随机超时 —— 一超时就"求解跳过、全走网格",
 	// 网格坐标又不避让锚件,整块落地前硬门失败(2026-08-15 esp32Mini E2E 连踩三次)。
 	// 这类重回读要自己的预算,不能吃默认值。
+	// includePinNets:false —— 求解只用引脚几何(网取自块定义),不跑 netlist 导出;
+	// 导出后紧跟的锚件平移(component.modify)会被宿主以 cmdKey 拒掉(#256)。
 	res, rerr := requestActionTimed(cfg, "schematic.components.list", window,
-		map[string]any{"includeBBox": true, "includePins": true}, 90*time.Second)
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, 90*time.Second)
 	if rerr != nil {
 		return nil, []string{fmt.Sprintf("关系求解跳过:回读页面几何失败(%v)—— 中止放置并清理本次新建对象", rerr)}
 	}
@@ -921,11 +1253,16 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 		return nil, []string{fmt.Sprintf("关系求解跳过:锚件 %s 读不到引脚 —— 中止放置并清理本次新建对象", anchorDesig)}
 	}
 
-	// 障碍表:页面上除本块未落地件之外的一切(含刚落地的锚件)。
+	// 障碍表:页面上除本块未落地件之外的一切(含刚落地的锚件)。锚件自己的那一项
+	// 单独记下 —— 锚件平移搜索时它要跟着平移,不能当成原地不动的墙。
 	var obstacles []layoutBBox
+	anchorObs := -1
 	for _, c := range comps {
 		if c.BBox == nil || c.ComponentType == "sheet" {
 			continue
+		}
+		if c.ID == anchor.PrimitiveID {
+			anchorObs = len(obstacles)
 		}
 		obstacles = append(obstacles, markerJudgeBBox(c))
 	}
@@ -943,8 +1280,36 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 		}
 	}
 
-	solved, notes := bslSolveAround(blk, rel, bslBlockNets(blk), bslRoleReachFrom(plan), plan.AnchorRole,
+	nets, roleReach := bslBlockNetsWithPorts(blk), bslRoleReachFrom(plan)
+	solved, notes := bslSolveAround(blk, rel, nets, roleReach, plan.AnchorRole,
 		pins, anchorBBox, obstacles, usable)
+
+	// 锚件落地的位置是预检按**估算包络**挑的(那时还没有引脚);实测引脚下解不开时,
+	// 在可用区里找离它最近、能整块解开的平移,把锚件挪过去再解 —— 此刻页面上只有锚件,
+	// 挪它是一次 component.modify(ADR-0003 时间窗,没有任何桩线可被合并)。挪不动就
+	// 原样返回未解成员,调用方照旧中止并清理。
+	if usable != nil && anchorObs >= 0 && !bslSolveComplete(rel, plan.AnchorRole, solved) {
+		others := append(append([]layoutBBox(nil), obstacles[:anchorObs]...), obstacles[anchorObs+1:]...)
+		if dx, dy, s2, n2, ok := bslRelocateAnchor(blk, rel, nets, roleReach, plan.AnchorRole,
+			pins, anchorBBox, obstacles[anchorObs], others, *usable); ok {
+			nx, ny := plan.Placements[0].X+dx, plan.Placements[0].Y+dy
+			if err := bslMoveComponentX(cfg, window, anchor.PrimitiveID, nx, ny, stderr); err != nil {
+				notes = append(notes, fmt.Sprintf("锚件 %s 需平移 (%.0f,%.0f) 才能整块解开,但平移失败(%v)—— 保持未解", anchorDesig, dx, dy, err))
+			} else {
+				fmt.Fprintf(stderr, "relational: 锚 %s 原位解不开(%s),平移 (%.0f,%.0f) → (%.0f,%.0f) 后整块解开\n",
+					anchorDesig, strings.Join(notes, ";"), dx, dy, nx, ny)
+				plan.Placements[0].X, plan.Placements[0].Y = nx, ny
+				if plan.Origin != nil { // 原点就是锚件:报告与清单要说真话
+					plan.Origin.X, plan.Origin.Y, plan.Origin.Relocated = nx, ny, true
+					plan.Origin.Reason = "预检按估算包络选的原点在实测引脚下解不开,锚件已平移到最近的可整块解开的位置"
+				}
+				anchorBBox = bslShiftBox(anchorBBox, dx, dy)
+				pins = bslShiftPins(pins, dx, dy)
+				obstacles[anchorObs] = bslShiftBox(obstacles[anchorObs], dx, dy)
+				solved, notes = s2, append(n2, fmt.Sprintf("锚件 %s 已平移 (%.0f,%.0f):预检原点按估算包络选,实测引脚下原位解不开", anchorDesig, dx, dy))
+			}
+		}
+	}
 
 	byRole := map[string]bslSolved{}
 	for _, s := range solved {
@@ -965,6 +1330,175 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 		anchorDesig, anchorBBox.MinX, anchorBBox.MinY, anchorBBox.MaxX, anchorBBox.MaxY, len(pins), n)
 	notes = append(notes, bslExpandForMarkers(plan, rel, anchorBBox, pins, obstacles, usable, stderr)...)
 	return &bslAnchorGeom{BBox: anchorBBox, Pins: pins}, notes
+}
+
+// bslSolveComplete 报告求解器负责的成员(贴锚件的 attach、flow、pair)是否全部解出。
+func bslSolveComplete(rel bslRelations, anchorRole string, solved []bslSolved) bool {
+	got := map[string]bool{anchorRole: true}
+	for _, s := range solved {
+		got[s.Role] = true
+	}
+	for role, target := range rel.Attach {
+		if tRole, _, ok := splitBlockPinRef(target); ok && tRole == anchorRole && !got[role] {
+			return false
+		}
+	}
+	for _, r := range rel.Flow {
+		if !got[r] {
+			return false
+		}
+	}
+	for _, g := range rel.Pair {
+		for _, r := range g {
+			if !got[r] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// bslOutwardMisses 数左/右列引脚的贴件里有几件没落在引脚引出那一侧(上/下回退的)。
+func bslOutwardMisses(blk blocks.Block, rel bslRelations, anchorRole string, pins map[string]acPin, hull layoutBBox, solved []bslSolved) int {
+	n := 0
+	for _, s := range solved {
+		tRole, tPin, ok := splitBlockPinRef(rel.Attach[s.Role])
+		if !ok || tRole != anchorRole {
+			continue
+		}
+		pin, found := pins[tPin]
+		if !found {
+			continue
+		}
+		b := bslPartBox(blk.Parts[s.Role].Part)
+		switch outwardDirection(pin) {
+		case "right":
+			if s.X+b.MinX <= hull.MaxX {
+				n++
+			}
+		case "left":
+			if s.X+b.MaxX >= hull.MinX {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func bslShiftBox(b layoutBBox, dx, dy float64) layoutBBox {
+	return layoutBBox{MinX: b.MinX + dx, MinY: b.MinY + dy, MaxX: b.MaxX + dx, MaxY: b.MaxY + dy}
+}
+
+func bslShiftPins(pins map[string]acPin, dx, dy float64) map[string]acPin {
+	out := make(map[string]acPin, len(pins))
+	for k, p := range pins {
+		p.X, p.Y = p.X+dx, p.Y+dy
+		if p.OwnerBBox != nil {
+			ob := bslShiftBox(*p.OwnerBBox, dx, dy)
+			p.OwnerBBox = &ob
+		}
+		out[k] = p
+	}
+	return out
+}
+
+// bslRelocateAnchor 找锚件离原位最近的平移,使整块在实测引脚下解得开 —— 纯函数。
+//
+// 预检只有估算包络(落地前没有引脚坐标),对两列高脚 MCU 这种「外带要比本体宽得多」
+// 的锚件,它挑的原点可能根本放不下外围件(#43 E2E:ESP32-S3R8 落在 (400,520),右列
+// 外带容不下 FLASH + 晶振 + 6 颗贴件)。平移只在解不开时才考虑。
+//
+// 候选按离原位的距离由近到远,步长一个视觉间隙(bslPartGap —— 再细的平移改变不了哪些
+// 槽位空着);每个候选先过廉价几何:宿主(本体 ∪ 引脚)与它每只有连接的脚的通道都得在
+// 可用区内、不压页面已有图元(others),再跑一次 failFast 求解。优先取「左/右列的贴件
+// 全部落在引出那一侧」的最近解,没有就取最近的完整解。
+func bslRelocateAnchor(blk blocks.Block, rel bslRelations, nets [][]string, roleReach map[string]float64,
+	anchorRole string, pins map[string]acPin, anchorBBox, anchorObs layoutBBox, others []layoutBBox,
+	usable layoutBBox) (dx, dy float64, solved []bslSolved, notes []string, ok bool) {
+
+	reach := bslRoleReach(nets, anchorRole)
+	if r, has := roleReach[anchorRole]; has && r > 0 {
+		reach = r
+	}
+	hull := bslHostHull(anchorBBox, pins)
+	lanes := bslHostPinLanes(nets, anchorRole, pins, anchorBBox, reach)
+	foot := append([]layoutBBox{hull}, lanes...)
+	lo, hi := hull, hull
+	for _, l := range lanes {
+		lo.MinX, lo.MinY = math.Min(lo.MinX, l.MinX), math.Min(lo.MinY, l.MinY)
+		hi.MaxX, hi.MaxY = math.Max(hi.MaxX, l.MaxX), math.Max(hi.MaxY, l.MaxY)
+	}
+	step := float64(bslPartGap)
+	minI, maxI := int(math.Ceil((usable.MinX-lo.MinX)/step)), int(math.Floor((usable.MaxX-hi.MaxX)/step))
+	minJ, maxJ := int(math.Ceil((usable.MinY-lo.MinY)/step)), int(math.Floor((usable.MaxY-hi.MaxY)/step))
+	type cand struct {
+		i, j int
+		d    float64
+	}
+	var cands []cand
+	for i := minI; i <= maxI; i++ {
+		for j := minJ; j <= maxJ; j++ {
+			if i == 0 && j == 0 {
+				continue // 原位已经解过
+			}
+			cands = append(cands, cand{i, j, math.Hypot(float64(i), float64(j))})
+		}
+	}
+	sort.Slice(cands, func(a, b int) bool {
+		if cands[a].d != cands[b].d {
+			return cands[a].d < cands[b].d
+		}
+		if cands[a].j != cands[b].j {
+			return cands[a].j < cands[b].j
+		}
+		return cands[a].i < cands[b].i
+	})
+	found := false
+	var bestDX, bestDY float64
+	for _, c := range cands {
+		tx, ty := float64(c.i)*step, float64(c.j)*step
+		clear := true
+		for _, f := range foot {
+			fb := bslShiftBox(f, tx, ty)
+			if !boxInside(fb, usable) {
+				clear = false
+				break
+			}
+			for _, o := range others {
+				if boxesGapOverlap(fb, o, bslPartGap) {
+					clear = false
+					break
+				}
+			}
+			if !clear {
+				break
+			}
+		}
+		if !clear {
+			continue
+		}
+		ab := bslShiftBox(anchorBBox, tx, ty)
+		obs := append(append([]layoutBBox(nil), others...), bslShiftBox(anchorObs, tx, ty))
+		sp := bslShiftPins(pins, tx, ty)
+		s, _ := bslSolveAroundOpt(blk, rel, nets, roleReach, anchorRole, sp, ab, obs, &usable, true)
+		if !bslSolveComplete(rel, anchorRole, s) {
+			continue
+		}
+		if bslOutwardMisses(blk, rel, anchorRole, sp, bslShiftBox(hull, tx, ty), s) == 0 {
+			bestDX, bestDY, found = tx, ty, true
+			break
+		}
+		if !found {
+			bestDX, bestDY, found = tx, ty, true
+		}
+	}
+	if !found {
+		return 0, 0, nil, nil, false
+	}
+	ab := bslShiftBox(anchorBBox, bestDX, bestDY)
+	obs := append(append([]layoutBBox(nil), others...), bslShiftBox(anchorObs, bestDX, bestDY))
+	solved, notes = bslSolveAround(blk, rel, nets, roleReach, anchorRole, bslShiftPins(pins, bestDX, bestDY), ab, obs, &usable)
+	return bestDX, bestDY, solved, notes, true
 }
 
 // bslDirVec 把方向名翻成单位向量(y-UP)。
@@ -1165,7 +1699,8 @@ func bslExpandLive(cfg *appConfig, window string, plan *bapPlan, anchor *bslAnch
 	// 墙:页面上一切**推不动**的实测图元 —— 别的块的件,以及本块的 attach 件。
 	//
 	// attach 件从前既不推**也不当墙**(理由是"它占自己那条脚的 lane")。那条理由错了,
-	// 且已按 ADR-0003 §2.5 改掉:去耦现在贴在宿主上/下侧,不在左右通道带里,当墙零代价 ——
+	// 且已按 ADR-0003 §2.5 改掉:去耦现在落在宿主所有脚的通道之外(外带或上/下侧),
+	// 不在左右通道带里,当墙零代价 ——
 	// 万一哪个模板还是把它放进了带里,当墙才能挡住链把它压过去。
 	notWall := map[string]bool{} // 锚件(它是基准)+ 会被推的件
 	for _, p := range plan.Placements {
@@ -1730,6 +2265,14 @@ func bslPushSolve(units []bslPushUnit, walls []layoutBBox, usable *layoutBBox,
 // It deliberately has no pin coordinates: flow/pair can be estimated from the
 // topology, while attach members reserve a separate row until real pins exist.
 // Every source stays *-seed so dry-run never claims measured relation solving.
+//
+// The reservation is a compact lower bound, not the solved shape: attach
+// members land in the outward bands beyond the host pins' lanes, which only
+// exist once the anchor's pins are read back. When the estimated origin cannot
+// host those bands, bslResolveLive translates the anchor (bslRelocateAnchor,
+// same lanes/cluster rulers, same page obstacles) before any member lands —
+// a rectangle cannot express the L-shaped room left by the title block, so a
+// "full" reservation here would refuse blocks that do fit (#43 E2E).
 func bslSeedOffsets(blk blocks.Block, rel bslRelations, anchor string, roles []string) map[string]bapRoleOffset {
 	nets := bslBlockNets(blk)
 	half := func(r string) float64 { return math.Max(bapRoleHalfExtent(blk.Parts[r].Part), bapPartMargin) }
