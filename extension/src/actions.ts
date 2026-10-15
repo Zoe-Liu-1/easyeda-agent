@@ -2398,6 +2398,26 @@ async function schematicAttributeInspect(payload: Payload): Promise<ActionResult
 	} };
 }
 
+/**
+ * Pins of each schematic part through the official per-component enumeration.
+ * Pin-owned attributes (Name/Number/Type) have the PIN as parent, so a parent
+ * closure that stops at components misfiles them as orphans (#267). An
+ * unreadable pin list is refused: protection cannot be proven without it.
+ */
+async function schPartPinIds(partIds: Array<string>): Promise<Array<{ primitiveId: string; componentId: string }>> {
+	const out: Array<{ primitiveId: string; componentId: string }> = [];
+	for (const componentId of partIds) {
+		const pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(componentId);
+		if (!Array.isArray(pins)) throw new Error(`Pins of part ${componentId} are unreadable; pin-owned attributes cannot be classified.`);
+		for (const pin of pins) {
+			const primitiveId = pin.getState_PrimitiveId();
+			if (typeof primitiveId !== 'string' || !primitiveId) throw new Error(`A pin of part ${componentId} has no primitive ID.`);
+			out.push({ primitiveId, componentId });
+		}
+	}
+	return out.sort((a, b) => a.primitiveId.localeCompare(b.primitiveId));
+}
+
 async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<string, unknown>>>> {
 	const out: Record<string, Array<Record<string, unknown>>> = {};
 	const components = await eda.sch_PrimitiveComponent.getAll();
@@ -2435,8 +2455,10 @@ async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<
 		}
 	}
 	const globalSet = new Set([...globalAttributes.map(a => a.getState_PrimitiveId()), ...globalAttributeIds]);
-	for (const component of components) {
-		const owned = await eda.sch_PrimitiveAttribute.getAll(component.getState_PrimitiveId());
+	const pins = await schPartPinIds(components.filter(c => String(c.getState_ComponentType()) === 'part').map(c => c.getState_PrimitiveId()));
+	out.pins = pins;
+	for (const parentId of [...components.map(c => c.getState_PrimitiveId()), ...pins.map(p => p.primitiveId)]) {
+		const owned = await eda.sch_PrimitiveAttribute.getAll(parentId);
 		if (!Array.isArray(owned)) throw new Error('Page per-component attribute inventory unavailable.');
 		for (const attribute of owned) {
 			const id = attribute.getState_PrimitiveId();
@@ -2470,7 +2492,7 @@ async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<
 }
 
 function independentSchPagePrimitives(page: Record<string, Array<Record<string, unknown>>>): { orphanAttributes: Array<string>; objects: Array<string> } {
-	const parents = new Set(page.components.map(c => String(c.primitiveId)));
+	const parents = new Set([...page.components, ...(page.pins ?? [])].map(c => String(c.primitiveId)));
 	return {
 		orphanAttributes: page.attributes.filter(a => !parents.has(String(a.ParentPrimitiveId))).map(a => String(a.primitiveId)),
 		objects: page.objects.map(o => String(o.primitiveId)),
@@ -2701,6 +2723,9 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 	const dryRun = optionalBoolean(payload, 'dryRun') === true;
 	let source: Record<string, Record<string, unknown>> | undefined;
 	let protectedAttributes: Array<string> | undefined;
+	let protectedPins: Array<string> | undefined;
+	let protectedAttributeState: Array<Record<string, unknown>> | undefined;
+	let nativePromise: Promise<Map<string, NativeSchematicAttribute>> | undefined;
 	let attributeCoverage = 'existing-parents';
 	const collect = async (): Promise<Record<string, Array<string>>> => {
 		const components = await eda.sch_PrimitiveComponent.getAll();
@@ -2724,7 +2749,10 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 		if (warnings.length) throw new Error(warnings.join('; '));
 		if (exactJSON([...(groups.components ?? [])].sort()) !== exactJSON(ids)) throw new Error('preserveParts: part set changed during enumeration');
 		delete groups.components;
-		const protectedParents = new Set([...ids, sheets[0].getState_PrimitiveId()]);
+		const pins = (await schPartPinIds(ids)).map(p => p.primitiveId);
+		if (protectedPins && exactJSON(protectedPins) !== exactJSON(pins)) throw new Error('preserveParts: preserved pin set changed during clear');
+		if (!protectedPins) protectedPins = pins;
+		const protectedParents = new Set([...ids, ...pins, sheets[0].getState_PrimitiveId()]);
 		const protectedIds = new Set(protectedParents);
 		// Component-owned attributes are preserved; all other attributes are
 		// part of the authorized drawing rebuild, including orphan remnants.
@@ -2734,8 +2762,8 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 		// Some official builds return [] for unscoped getAll despite populated
 		// component properties. Enumerate every actual parent; [] globally is
 		// never sufficient evidence that protected attributes do not exist.
-		for (const component of components) {
-			for (const attribute of await eda.sch_PrimitiveAttribute.getAll(component.getState_PrimitiveId())) attributes.set(attribute.getState_PrimitiveId(), attribute);
+		for (const parentId of [...components.map(c => c.getState_PrimitiveId()), ...pins]) {
+			for (const attribute of await eda.sch_PrimitiveAttribute.getAll(parentId)) attributes.set(attribute.getState_PrimitiveId(), attribute);
 		}
 		const globalIds = new Set(globalAttributes.map(a => a.getState_PrimitiveId()));
 		attributeCoverage = attributes.size > 0 && [...attributes.keys()].every(id => globalIds.has(id)) ? 'global-and-existing-parents' : 'existing-parents';
@@ -2748,6 +2776,13 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 		owned.sort();
 		if (protectedAttributes && exactJSON(protectedAttributes) !== exactJSON(owned)) throw new Error('preserveParts: original owned attribute IDs changed during clear');
 		if (!protectedAttributes) protectedAttributes = owned;
+		// IDs alone cannot show a preserved attribute was rewritten (value,
+		// visibility, geometry): compare the full state record every pass.
+		const nativeReader = () => nativePromise ??= readCurrentNativePageAttributes();
+		const ownedState: Array<Record<string, unknown>> = [];
+		for (const id of owned) ownedState.push(await schAttributeStateRecord(attributes.get(id)!, nativeReader));
+		if (protectedAttributeState && exactJSON(protectedAttributeState) !== exactJSON(ownedState)) throw new Error('preserveParts: a preserved attribute changed (value, visibility or geometry) during clear');
+		if (!protectedAttributeState) protectedAttributeState = ownedState;
 		// Object.getAll is the embedded-object inventory, NOT an inventory of
 		// all schematic primitives. An empty result makes no broader claim.
 		for (const object of await eda.sch_PrimitiveObject.getAll()) {
@@ -2791,7 +2826,7 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 	for (const [key, group] of Object.entries(first)) deleted[key] = dryRun ? group.length : group.length - (live[key]?.length ?? 0);
 	return { result: { preserveParts: true, preserveSheet: true, preservedPartIds: ids, instancesPreserved: true,
 		deleted, deletedIds: first, total: dryRun ? countIds(first) : countIds(first) - remaining, remaining, passes, dryRun,
-		attributeCoverage, preservedAttributeIds: protectedAttributes,
+		attributeCoverage, preservedAttributeIds: protectedAttributes, preservedPinIds: protectedPins,
 		...(attributeCoverage === 'existing-parents' ? { coverageNotes: ['Unscoped attribute inventory is not proven complete; attributes without a discoverable existing parent remain unverified.'] } : {}),
 		...(!dryRun && remaining ? { partial: true, notApplied: ['remaining-primitives'], warnings: [`${remaining} drawing primitives remain`] } : {}) } };
 };

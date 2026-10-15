@@ -2851,7 +2851,7 @@ test('guarded schematic clear refuses changed wire, flag and graphic before dele
 	let deletes = 0;
 	const klass = (name?: string) => ({ getAll: async () => name ? [primitive(name)] : [], delete: async () => { deletes++; return true; } });
 	(globalThis as any).eda = {
-		sch_PrimitiveComponent: { ...klass(), getAll: async () => [primitive('part'), primitive('component'), primitive('sheet')] }, sch_PrimitiveWire: klass('wire'), sch_PrimitiveText: klass('text'),
+		sch_PrimitiveComponent: { ...klass(), getAll: async () => [primitive('part'), primitive('component'), primitive('sheet')], getAllPinsByPrimitiveId: async () => [] }, sch_PrimitiveWire: klass('wire'), sch_PrimitiveText: klass('text'),
 		sch_PrimitiveBus: klass(), sch_PrimitiveArc: klass(), sch_PrimitiveCircle: klass(), sch_PrimitiveRectangle: klass(), sch_PrimitivePolygon: klass(),
 		sch_PrimitiveAttribute: { getAll: async (parent?: string) => parent ? [] : [primitive('attribute')], getAllPrimitiveId: async () => ['orphan-attr'], get: async () => primitive('attribute') },
 		sch_PrimitiveObject: { getAll: async () => [primitive('object')] },

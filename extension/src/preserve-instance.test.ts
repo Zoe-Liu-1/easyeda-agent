@@ -18,14 +18,22 @@ function primitive(record: Record<string, any>): any {
  return p;
 }
 
-function install(t: { after(fn: () => void): void }, options: { drop?: string; failReadback?: boolean; enumerationFails?: boolean; residual?: boolean; lostOnClear?: boolean; globalAttributesEmpty?: boolean } = {}) {
+function attr(primitiveId: string, parentPrimitiveId: string, key = 'Value', value = 'v'): Record<string, any> {
+ return { primitiveId, parentPrimitiveId, key, value, x: 0, y: 0, rotation: 0, color: null, fontName: null, fontSize: null,
+  bold: false, italic: false, underLine: false, alignMode: 0, fillColor: null, keyVisible: false, valueVisible: true };
+}
+
+function install(t: { after(fn: () => void): void }, options: { drop?: string; failReadback?: boolean; enumerationFails?: boolean; residual?: boolean; lostOnClear?: boolean; globalAttributesEmpty?: boolean; pinsUnreadable?: boolean; pinAttributeRewritten?: boolean } = {}) {
  const globals = globalThis as any, old = globals.eda;
  t.after(() => { globals.eda = old; });
  const part = fixture(), sheet = { ...fixture(), primitiveId: 'sheet', componentType: 'sheet', designator: '', uniqueId: 'sheet-uid' };
  let parts = [part, sheet, { ...fixture(), primitiveId: 'flag', componentType: 'netflag', uniqueId: 'flag-uid' }];
  let wires = ['wire'], texts = ['text'], objects = ['object'], attributes = [
-  { primitiveId: 'part-value', parentPrimitiveId: 'p1' }, { primitiveId: 'sheet-title', parentPrimitiveId: 'sheet' }, { primitiveId: 'orphan', parentPrimitiveId: 'old-marker' },
+  attr('part-value', 'p1'), attr('sheet-title', 'sheet'), attr('orphan', 'old-marker'),
+  // #267: pin-owned attributes have the PIN as parent, not the part.
+  attr('pin1-name', 'p1-pin1', 'Name', 'IN'), attr('pin1-number', 'p1-pin1', 'Number', '1'),
  ];
+ const pins: Record<string, string[]> = { p1: ['p1-pin1'] };
  const deletes: string[] = [], patches: any[] = [];
  const remove = async (ids: string[]) => {
   deletes.push(...ids);
@@ -33,6 +41,7 @@ function install(t: { after(fn: () => void): void }, options: { drop?: string; f
    parts = parts.filter(p => !ids.includes(p.primitiveId)); wires = wires.filter(id => !ids.includes(id)); texts = texts.filter(id => !ids.includes(id)); objects = objects.filter(id => !ids.includes(id)); attributes = attributes.filter(a => !ids.includes(a.primitiveId));
   }
   if (options.lostOnClear) part.otherProperty.Value = 'lost';
+  if (options.pinAttributeRewritten) { const a = attributes.find(a => a.primitiveId === 'pin1-name'); if (a) a.value = 'REWRITTEN'; }
   return true;
  };
  const eda: any = {
@@ -41,10 +50,14 @@ function install(t: { after(fn: () => void): void }, options: { drop?: string; f
    get: async (id: string) => { if (options.failReadback && patches.length) throw new Error('readback unavailable'); const p = parts.find(p => p.primitiveId === id); return p && primitive(p); },
    modify: async (_id: string, patch: any) => { patches.push(patch); Object.assign(part, JSON.parse(JSON.stringify(patch))); if (options.drop === 'uniqueId') part.uniqueId = 'reset'; else if (options.drop) delete part.otherProperty[options.drop]; return primitive(part); },
    delete: remove,
+   getAllPinsByPrimitiveId: async (id: string) => options.pinsUnreadable ? undefined : (pins[id] ?? []).map(pid => primitive({ primitiveId: pid })),
   },
   sch_PrimitiveWire: { getAll: async () => wires.map(id => primitive({ primitiveId: id })), delete: remove },
   sch_PrimitiveText: { getAll: async () => { if (options.enumerationFails) throw new Error('text inventory unavailable'); return texts.map(id => primitive({ primitiveId: id })); }, delete: remove },
-  sch_PrimitiveAttribute: { getAll: async (parent?: string) => (parent ? attributes.filter(a => a.parentPrimitiveId === parent) : options.globalAttributesEmpty ? [] : attributes).map(primitive) },
+  sch_PrimitiveAttribute: {
+   getAll: async (parent?: string) => (parent ? attributes.filter(a => a.parentPrimitiveId === parent) : options.globalAttributesEmpty ? [] : attributes).map(primitive),
+   get: async (id: string) => { const a = attributes.find(a => a.primitiveId === id); return a && primitive(a); },
+  },
   sch_PrimitiveObject: { getAll: async () => objects.map(id => primitive({ primitiveId: id })), delete: remove },
  };
  for (const kind of ['Bus', 'Arc', 'Circle', 'Rectangle', 'Polygon']) eda['sch_Primitive' + kind] = { getAll: async () => [], delete: remove };
@@ -109,7 +122,7 @@ test('preserveParts clear deletes only drawing content and orphan attributes', a
  assert.equal(result.result.instancesPreserved, true);
  assert.deepEqual(result.result.preservedPartIds, ['p1']);
  assert.deepEqual(fx.getParts().map(p => p.primitiveId), ['p1', 'sheet']);
- assert.deepEqual(fx.getAttributes().map(p => p.primitiveId), ['part-value', 'sheet-title']);
+ assert.deepEqual(fx.getAttributes().map(p => p.primitiveId), ['part-value', 'sheet-title', 'pin1-name', 'pin1-number']);
  assert.equal(exactJSON(preservedInstance(fx.part, true)), exactJSON(original));
  assert.deepEqual([...fx.deletes].sort(), ['flag', 'object', 'orphan', 'text', 'wire']);
 });
@@ -131,7 +144,7 @@ test('preserveParts requires complete inventory before any deletion', async t =>
 test('preserveParts enumerates protected attributes by parent when global API returns empty', async t => {
  const fx = install(t, { globalAttributesEmpty: true });
  const result: any = await runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['p1'] });
- assert.deepEqual(result.result.preservedAttributeIds, ['part-value', 'sheet-title']);
+ assert.deepEqual(result.result.preservedAttributeIds, ['part-value', 'pin1-name', 'pin1-number', 'sheet-title']);
  assert.equal(result.result.attributeCoverage, 'existing-parents');
  assert.ok(result.result.coverageNotes.length);
  assert.ok(fx.getAttributes().some(a => a.primitiveId === 'part-value'));
@@ -157,3 +170,30 @@ for (const options of [{ residual: true }, { lostOnClear: true }]) {
   assert.ok(result.result.notApplied.length);
  });
 }
+
+test('preserveParts protects pin-owned attributes and reports preserved pins (#267)', async t => {
+ const fx = install(t);
+ const dry: any = await runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['p1'], dryRun: true });
+ assert.deepEqual(dry.result.deletedIds.orphanAttributes, ['orphan']);
+ assert.deepEqual(dry.result.preservedPinIds, ['p1-pin1']);
+ assert.ok(dry.result.preservedAttributeIds.includes('pin1-name') && dry.result.preservedAttributeIds.includes('pin1-number'));
+ assert.deepEqual(fx.deletes, []);
+ const run: any = await runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['p1'] });
+ assert.equal(run.result.instancesPreserved, true);
+ const deleted: string[] = [...fx.deletes];
+ assert.ok(!deleted.includes('pin1-name') && !deleted.includes('pin1-number'));
+});
+
+test('preserveParts refuses before any deletion when pins are unreadable (#267)', async t => {
+ const fx = install(t, { pinsUnreadable: true });
+ await assert.rejects(runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['p1'] }), /No primitives deleted.*[Pp]ins of part p1 are unreadable/);
+ assert.deepEqual(fx.deletes, []);
+});
+
+test('preserveParts detects a preserved pin attribute rewritten during clear (#267)', async t => {
+ install(t, { pinAttributeRewritten: true });
+ const result: any = await runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['p1'] });
+ assert.equal(result.result.instancesPreserved, false);
+ assert.equal(result.result.partial, true);
+ assert.match(result.result.warnings.join(' '), /preserved attribute changed/);
+});
