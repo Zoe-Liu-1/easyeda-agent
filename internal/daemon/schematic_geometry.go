@@ -106,8 +106,11 @@ func (s *Server) readSchematicGeometry(ctx context.Context, req protocol.Request
 	if err != nil {
 		return nil, err
 	}
-	if res == nil || !res.OK {
-		return nil, fmt.Errorf("geometry read failed: %+v", res)
+	if res == nil {
+		return nil, fmt.Errorf("geometry read failed: no response")
+	}
+	if !res.OK {
+		return nil, fmt.Errorf("geometry read failed: %s", responseErrorMsg(res))
 	}
 	s.audit.Append(fromResponse(started, &read, res))
 	// A late response may contain valid geometry, but cannot turn an expired

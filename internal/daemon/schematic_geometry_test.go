@@ -246,3 +246,17 @@ func TestGeometryFailureDetailTruncatesAndToleratesNoFindings(t *testing.T) {
 		t.Errorf("detail must be untouched without findings: %q", plain.Error.Detail)
 	}
 }
+
+// A failed guard read names the host's error instead of dumping the response
+// struct (whose Error field printed as a bare pointer).
+func TestSchematicGeometryReadFailureNamesHostError(t *testing.T) {
+	s := New(Options{})
+	failing := func(ctx context.Context, req protocol.Request) (*protocol.Response, error) {
+		r := errorResponse(req.ID, "NO_ACTIVE_SCHEMATIC", "active document is a PCB", "")
+		return &r, nil
+	}
+	_, err := s.readSchematicGeometry(context.Background(), geometryRequest(`[]`), failing, "before")
+	if err == nil || !strings.Contains(err.Error(), "NO_ACTIVE_SCHEMATIC: active document is a PCB") || strings.Contains(err.Error(), "0x") {
+		t.Fatalf("read failure must name the host error, got %v", err)
+	}
+}
