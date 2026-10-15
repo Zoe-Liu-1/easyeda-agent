@@ -96,3 +96,46 @@ func TestIssue273RouteNamingProbeReplaysCompleteVerdict(t *testing.T) {
 		t.Fatal("changed geometry must not reuse the cached verdict")
 	}
 }
+
+// Issue #273 budget accounting: the relocation target share and the first
+// terminal slice were fractions of maxCandidates, so the boost zone succeeded
+// with 18,994 candidates at 100,000 but failed at 80,000 (its accepted C21 +10
+// pose received only 6,348 of the 8,022 candidates it needs). Slice sizes are
+// now fixed and truncated only by the real remainder: every sufficient total
+// follows the same trajectory and spends the same candidates, while the frozen
+// 3,000 cap still stops with an explicit budget reason.
+func TestIssue273SufficientBudgetIsNotDefeatedBySlicing(t *testing.T) {
+	used := -1
+	for _, budget := range []int{20000, 80000, 100000} {
+		input := loadIssue273Fixture(t, "boost-input")
+		input.MaxCandidates = budget
+		start := time.Now()
+		result, err := planLibLayoutZones(input, "")
+		if elapsed := time.Since(start); elapsed > 60*time.Second {
+			t.Fatalf("budget %d took %s", budget, elapsed)
+		}
+		if err != nil {
+			t.Fatalf("budget %d: sufficient total defeated: %v", budget, err)
+		}
+		if used >= 0 && result.CandidatesUsed != used {
+			t.Fatalf("budget %d changed the search trajectory: %d vs %d candidates", budget, result.CandidatesUsed, used)
+		}
+		used = result.CandidatesUsed
+		if used > budget {
+			t.Fatalf("spent %d over cap %d", used, budget)
+		}
+		layout := result.Zones[0].Layout
+		if len(layout.Placements) != len(input.Measurements) {
+			t.Fatal("lost components")
+		}
+		if findings := layoutContractRuntimeFindings(t, layout); len(findings) != 0 {
+			t.Fatalf("runtime guard: %+v", findings)
+		}
+	}
+	frozen := loadIssue273Fixture(t, "boost-input")
+	_, err := planLibLayout(frozen)
+	var failure *SchematicLayoutSearchFailure
+	if !errors.As(err, &failure) || failure.RemainingCandidates != 0 || !errors.Is(err, errLibLayoutBudget) {
+		t.Fatalf("frozen 3000 cap must stop with an explicit budget reason: %v", err)
+	}
+}

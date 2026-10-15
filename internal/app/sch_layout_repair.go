@@ -608,13 +608,16 @@ func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []
 	if len(namingErrors) > 0 {
 		errors.As(namingErrors[0], &namingConflict)
 	}
-	for targetIndex, ref := range refs {
+	for _, ref := range refs {
+		// The per-target cap is a fixed slice, truncated only by the actual
+		// shared remainder. Dividing the remainder among the targets made the
+		// trajectory depend on maxCandidates itself (issue #273: the accepted
+		// C21 +10 pose needs 8,022 candidates but received 6,348 at 80,000 and
+		// failed, while 100,000 succeeded after 18,994). A sufficient total
+		// budget must reach the same poses as any larger one.
 		targetAllowance := *s.budget
-		if trigger == "naming-island" {
-			targetAllowance /= len(refs) - targetIndex
-			if targetAllowance > 32768 {
-				targetAllowance = 32768
-			}
+		if trigger == "naming-island" && targetAllowance > schematicRelocationTargetSlice {
+			targetAllowance = schematicRelocationTargetSlice
 		}
 		targetSpent := 0
 		namingQuota := 4096
@@ -906,19 +909,27 @@ func (s *schematicRepairSearch) terminalSliceBudget() int {
 	if s.initial <= 4096 {
 		return *s.budget
 	}
-	quota := s.sliceBudget()
-	// A coordinated pose can receive a smaller slice than the measured pose.
-	// Keep one complete bounded naming pass possible before backtracking the
-	// placement: repeatedly retrying a truncated pass cannot discover a legal
-	// incumbent. This still debits, and never exceeds, the shared remainder.
-	if quota < 4096 {
-		quota = 4096
+	// A complete terminal pass costs the same candidates whatever the total
+	// allowance is. Size the first slice from that fixed need rather than from
+	// maxCandidates/8: a fractional slice made a smaller but sufficient total
+	// pay for a truncated pass and then repeat it from scratch (issue #273:
+	// 4,096 wasted at 20,000 before the conclusive 6,144-candidate pass). The
+	// slice still never exceeds the shared remainder and leaves the existing
+	// repair reserve whenever that reserve still permits one 4,096 pass.
+	quota := schematicTerminalSlice
+	if usable := *s.budget - s.initial/8; usable >= 4096 && quota > usable {
+		quota = usable
 	}
 	if quota > *s.budget {
 		quota = *s.budget
 	}
 	return quota
 }
+
+const (
+	schematicTerminalSlice         = 16384
+	schematicRelocationTargetSlice = 32768
+)
 
 // A bare candidate stop has observed no complete terminal conflict. Retry the
 // same immutable placement with a larger slice only after it used its entire
