@@ -5624,10 +5624,7 @@ const libraryFootprintDelete: Handler = async (payload) => {
 		if (!before) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Footprint "${uuid}" was not found; nothing was deleted.`);
 		if (before.name !== expectedName) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Footprint name mismatch: expected "${expectedName}", found "${before.name}".`);
 		if (!await eda.lib_Footprint.delete(uuid, libraryUuid)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `EasyEDA refused to delete footprint "${expectedName}".`);
-		let after;
-		try { after = await eda.lib_Footprint.get(uuid, libraryUuid); }
-		catch { after = undefined; /* SDK throws an opaque object for a missing footprint. */ }
-		if (after) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Footprint "${expectedName}" still exists after delete returned success.`);
+		if (!await libraryAssetGone(() => eda.lib_Footprint.get(uuid, libraryUuid))) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Footprint "${expectedName}" still exists after delete returned success.`);
 		return { result: { uuid, libraryUuid, name: expectedName, deleted: true, verified: true } };
 	}
 	catch (err) { if (err instanceof ActionError) throw err; throw edaError(err, 'Failed to delete footprint library asset.'); }
@@ -5699,6 +5696,28 @@ async function verifyFootprintApertures(primitive: unknown, id: string, expected
 	}
 }
 
+/**
+ * Validate a pad-shape tuple against the official TPCB_PrimitivePadShape before
+ * any write: the host rejects a malformed tuple only mid-build ("无法创建焊盘图元"),
+ * after earlier pads may exist (live #279: numeric type `[1, w, h]` from an old
+ * example). Returns why it is invalid, or undefined.
+ */
+export function padShapeTupleError(shape: unknown): string | undefined {
+	const format = 'must be an official pad-shape tuple: ["RECT", width, height, cornerRadius%], ["ELLIPSE"|"OVAL"|"NGON", width, height] or ["POLYGON", polygonSource]';
+	if (!Array.isArray(shape) || typeof shape[0] !== 'string') return format;
+	const positive = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+	switch (shape[0]) {
+		case 'RECT':
+			return shape.length === 4 && positive(shape[1]) && positive(shape[2]) && typeof shape[3] === 'number' && Number.isFinite(shape[3]) && shape[3] >= 0 ? undefined : format;
+		case 'ELLIPSE': case 'OVAL': case 'NGON':
+			return shape.length === 3 && positive(shape[1]) && positive(shape[2]) ? undefined : format;
+		case 'POLYGON':
+			return shape.length === 2 && Array.isArray(shape[1]) && shape[1].length > 0 ? undefined : format;
+		default:
+			return format;
+	}
+}
+
 function parseFootprintBuildSpec(payload: Record<string, unknown>): { pads: FootprintPadSpec[]; lines: FootprintLineSpec[] } {
 	const rawPads = payload.pads ?? [];
 	const rawLines = payload.lines ?? [];
@@ -5711,7 +5730,8 @@ function parseFootprintBuildSpec(payload: Record<string, unknown>): { pads: Foot
 		}
 		const p = value as Record<string, unknown>;
 		if (typeof p.number !== 'string' || !p.number) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `pads[${index}].number is required.`);
-		if (!Array.isArray(p.shape) || p.shape.length < 3) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `pads[${index}].shape must be an official pad-shape tuple.`);
+		const shapeError = padShapeTupleError(p.shape);
+		if (shapeError) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `pads[${index}].shape ${shapeError}`);
 		if (p.hole !== undefined && p.hole !== null && !Array.isArray(p.hole)) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `pads[${index}].hole must be null or a hole tuple.`);
 		return {
 			number: p.number,
@@ -5828,6 +5848,13 @@ async function activateLibraryDocument(
 	catch { /* opening without a split id is supported */ }
 
 	const tabId = await eda.dmt_EditorControl.openLibraryDocument(libraryUuid, libraryType, uuid, splitScreenId);
+	if (!tabId && label === 'footprint' && libraryNames.has('project')) {
+		// Live 4.1.71 (#279): the API opens no editor for a PROJECT-library
+		// footprint under either library name, foreground or background; the same
+		// footprint in the personal library builds fine.
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			`EasyEDA does not open project-library footprints for API editing; no geometry was created. Create the footprint in the personal library (\`lib footprint create --scope personal\`) and build it there.`);
+	}
 	if (!tabId) throw new ActionError(ErrorCodes.INVALID_STATE, `EasyEDA did not open the ${label} editor.`);
 	// activateDocument's boolean is not evidence either way: it returned false
 	// while the tab did become current moments later (live #279). The focus
@@ -6295,10 +6322,7 @@ const librarySymbolDelete: Handler = async (payload) => {
 		if (!before) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Symbol "${uuid}" was not found; nothing was deleted.`);
 		if (before.name !== expectedName) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Symbol name mismatch: expected "${expectedName}", found "${before.name}".`);
 		if (!await eda.lib_Symbol.delete(uuid, libraryUuid)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `EasyEDA refused to delete symbol "${expectedName}".`);
-		let after;
-		try { after = await eda.lib_Symbol.get(uuid, libraryUuid); }
-		catch { after = undefined; }
-		if (after) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Symbol "${expectedName}" still exists after delete returned success.`);
+		if (!await libraryAssetGone(() => eda.lib_Symbol.get(uuid, libraryUuid))) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Symbol "${expectedName}" still exists after delete returned success.`);
 		return { result: { uuid, libraryUuid, name: expectedName, deleted: true, verified: true } };
 	}
 	catch (err) { if (err instanceof ActionError) throw err; throw edaError(err, 'Failed to delete symbol library asset.'); }
@@ -6404,8 +6428,7 @@ const libraryModel3DDelete: Handler = async (payload) => {
 		const before = await eda.lib_3DModel.get(uuid, libraryUuid);
 		if (!before || before.name !== expectedName) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `3D model name mismatch or missing: expected "${expectedName}".`);
 		if (!await eda.lib_3DModel.delete(uuid, libraryUuid)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `EasyEDA refused to delete 3D model "${expectedName}".`);
-		let after; try { after = await eda.lib_3DModel.get(uuid, libraryUuid); } catch { after = undefined; }
-		if (after) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `3D model "${expectedName}" still exists after delete returned success.`);
+		if (!await libraryAssetGone(() => eda.lib_3DModel.get(uuid, libraryUuid))) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `3D model "${expectedName}" still exists after delete returned success.`);
 		return { result: { uuid, libraryUuid, name: expectedName, deleted: true, verified: true } };
 	}
 	catch (err) { if (err instanceof ActionError) throw err; throw edaError(err, 'Failed to delete 3D model library asset.'); }
@@ -6513,6 +6536,25 @@ async function preflightV4DeviceVariant(libraryUuid: string, uuid: string): Prom
 	}
 }
 
+/**
+ * Library deletes land asynchronously: an immediate read can still return the
+ * asset although it is gone a moment later (live #279: two footprint deletes
+ * reported "still exists", both absent on re-read). Poll a fresh read for a
+ * bounded time; a throwing read counts as absent (the SDK throws an opaque
+ * object for a missing footprint).
+ */
+async function libraryAssetGone(read: () => Promise<unknown>): Promise<boolean> {
+	const deadline = Date.now() + 5_000;
+	for (;;) {
+		let present: unknown;
+		try { present = await read(); }
+		catch { present = undefined; }
+		if (!present) return true;
+		if (Date.now() >= deadline) return false;
+		await sleep(500);
+	}
+}
+
 const libraryDeviceGet: Handler = async (payload) => {
 	const uuid = requireString(payload, 'uuid');
 	const libraryUuid = optionalString(payload, 'libraryUuid');
@@ -6536,10 +6578,7 @@ const libraryDeviceDelete: Handler = async (payload) => {
 		if (!before) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Device "${uuid}" was not found; nothing was deleted.`);
 		if (before.name !== expectedName) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Device name mismatch: expected "${expectedName}", found "${before.name}".`);
 		if (!await eda.lib_Device.delete(uuid, libraryUuid)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `EasyEDA refused to delete Device "${expectedName}".`);
-		let after;
-		try { after = await eda.lib_Device.get(uuid, libraryUuid); }
-		catch { after = undefined; }
-		if (after) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Device "${expectedName}" still exists after delete returned success.`);
+		if (!await libraryAssetGone(() => eda.lib_Device.get(uuid, libraryUuid))) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Device "${expectedName}" still exists after delete returned success.`);
 		return { result: { uuid, libraryUuid, name: expectedName, deleted: true, verified: true } };
 	}
 	catch (err) { if (err instanceof ActionError) throw err; throw edaError(err, 'Failed to delete Device library asset.'); }

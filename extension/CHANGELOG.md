@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 - `library.symbol.build` / `library.footprint.build`（#279）：打开编辑器前先核对资产在 `--library` 指定的库中；不在时若能在工程库/个人库找到，以 `PRECONDITION_REFUSED` 拒绝并给出正确的库（宿主对工程库资产的记录把 `libraryUuid` 写成个人库 uuid，照抄该字段即失败），不再报 `INVALID_STATE` 并被计入退化。焦点确认同时接受该库的两种名称，修复工程库符号 build 在前后台都必然失败；`activateDocument` 的布尔返回不再作为判据，焦点等待改为按 4s 总时长。
+- `library.footprint.build`（#279）：焊盘 `shape` 写入前按官方元组校验（类型须为 `"RECT"`/`"ELLIPSE"`/`"OVAL"`/`"NGON"`/`"POLYGON"` 字符串，元素个数与尺寸正确），数字类型 `[1, w, h]` 不再在写入中途失败；Skill 示例同步改为官方写法。工程库封装的编辑器 API 打不开（4.1.71 实测），build 改为明确拒绝并指引建在个人库。
+- 库资产删除（封装/符号/3D 模型/器件）的回读改为最多 5s 的有界轮询：删除晚落地时不再误报 "still exists"。
 - daemon `health`：写入健康度新增 `lastFailureError`（最后一次失败的错误码与信息）。
 ## [1.12.0] - 2026-10-14
 

@@ -35,7 +35,13 @@
 - `symbol.geometry` 直接传给 `library.symbol.build`：`outline[]` 至少四个 x/y 点，`pins[]` 的
   `number/name/x/y` 必填。
 - `footprint.geometry` 直接传给 `library.footprint.build`：每个 pad 的 `number/layer/x/y/shape`
-  必填，`shape` 为官方 pad tuple；图形线为 `lines[]`。
+  必填，`shape` 为官方 pad tuple，类型必须是字符串：`["RECT", 宽, 高, 圆角%]`、
+  `["ELLIPSE"|"OVAL"|"NGON", 宽, 高]` 或 `["POLYGON", 多边形源]`；数字类型（如 `[1, w, h]`）
+  宿主会在写入中途拒绝，现已在写入前拦截。图形线为 `lines[]`。
+- `--library` 用 `lib symbol/footprint create` 回包**顶层**的 `libraryUuid`；工程库资产自身记录里的
+  `libraryUuid` 会写成个人库 uuid，照抄它会打不开编辑器（CLI 会拒绝并给出正确值）。
+- 封装建在**个人库**（`lib footprint create --scope personal`）：Web 4.1.71 的 API 打不开工程库封装的
+  编辑器，build 会被拒绝；符号可建在工程库或个人库。
 - pad 可声明 `solderMaskAndPasteMaskExpansion`，仅支持官方 `topSolderMask`、
   `bottomSolderMask`、`topPasteMask`、`bottomPasteMask` 四个有限数值字段，单位 mil、每侧扩展；
   `0` 表示零扩展，省略表示不指定。当前公开 SDK 无法独立回读规则策略，因此拒绝 `null`。

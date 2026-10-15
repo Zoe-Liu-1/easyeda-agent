@@ -24,6 +24,7 @@ import {
 	connectPinEndpoint,
 	clickImportConfirm,
 	requireLibraryAssetIn,
+	padShapeTupleError,
 	constraintList,
 	detectPolarityConventionOutliers,
 	getComponentOrThrow,
@@ -1249,6 +1250,35 @@ test('library build refuses a wrong --library before opening an editor and names
 		(globalThis as any).eda.lib_Symbol.get = async () => { throw new Error('read failed'); };
 		assert.equal(await requireLibraryAssetIn('SYM1', 'PERSONAL', 'symbol'), undefined); // unreadable everywhere: the editor open decides
 		assert.equal(opened, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('pad shape tuples must use the official string types before any write (#279)', () => {
+	for (const bad of [[1, 23.6, 11.8], ['RECT', 12, 8], ['OVAL', 12, -8], ['POLYGON', []], ['SQUARE', 1, 1], 'RECT']) {
+		assert.match(padShapeTupleError(bad) ?? '', /official pad-shape tuple/, JSON.stringify(bad));
+	}
+	for (const good of [['RECT', 12, 8, 0], ['ELLIPSE', 10, 10], ['OVAL', 12, 8], ['NGON', 10, 6], ['POLYGON', [0, 0, 'L', 1, 0]]]) {
+		assert.equal(padShapeTupleError(good), undefined, JSON.stringify(good));
+	}
+});
+
+test('library footprint delete waits for a late-landing delete instead of reporting a false failure (#279)', async () => {
+	let reads = 0;
+	(globalThis as any).eda = {
+		lib_Footprint: {
+			get: async () => {
+				reads++;
+				if (reads <= 2) return { uuid: 'FP1', name: 'EA_AGENT__FP' }; // before + one stale read after delete
+				throw { opaque: true }; // SDK shape for a missing footprint
+			},
+			delete: async () => true,
+		},
+	};
+	try {
+		const reply = await runAction('library.footprint.delete', { uuid: 'FP1', libraryUuid: 'L', expectedName: 'EA_AGENT__FP' });
+		assert.equal((reply.result as any).verified, true);
+		assert.equal(reads, 3);
 	}
 	finally { delete (globalThis as any).eda; }
 });

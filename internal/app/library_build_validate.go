@@ -206,13 +206,39 @@ func validateOutline(raw any) error {
 	return nil
 }
 
+// officialPadShape mirrors the connector's padShapeTupleError: the host only
+// accepts string shape types; a numeric type (old example `[1, w, h]`) fails
+// mid-build with "无法创建焊盘图元" (#279).
+func officialPadShape(shape []any) bool {
+	if len(shape) == 0 {
+		return false
+	}
+	switch shape[0] {
+	case "RECT":
+		if len(shape) != 4 {
+			return false
+		}
+		r, ok := shape[3].(float64)
+		return finitePositive(shape[1]) && finitePositive(shape[2]) && ok && finiteNumber(r) && r >= 0
+	case "ELLIPSE", "OVAL", "NGON":
+		return len(shape) == 3 && finitePositive(shape[1]) && finitePositive(shape[2])
+	case "POLYGON":
+		if len(shape) != 2 {
+			return false
+		}
+		poly, ok := shape[1].([]any)
+		return ok && len(poly) > 0
+	}
+	return false
+}
+
 func validateFootprintShapes(geometry map[string]any) error {
 	pads := geometry["pads"].([]any)
 	for i, item := range pads {
 		obj := item.(map[string]any)
 		shape, ok := obj["shape"].([]any)
-		if !ok || len(shape) < 3 || !finitePositive(shape[1]) || !finitePositive(shape[2]) {
-			return fmt.Errorf("pads[%d].shape must be an official tuple with positive width and height", i)
+		if !ok || !officialPadShape(shape) {
+			return fmt.Errorf(`pads[%d].shape must be an official pad-shape tuple: ["RECT", width, height, cornerRadius%%], ["ELLIPSE"|"OVAL"|"NGON", width, height] or ["POLYGON", polygonSource]`, i)
 		}
 	}
 	if lines, exists := geometry["lines"]; exists {
