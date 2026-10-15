@@ -1751,25 +1751,74 @@ func bslSeedOffsets(blk blocks.Block, rel bslRelations, anchor string, roles []s
 			pending = append(pending, r)
 		}
 	}
-	width := 0.0
-	for i, r := range pending {
-		width += 2 * half(r)
-		if i > 0 {
-			width += bslPartGap
-		}
-	}
-	x := -width / 2
 	top := float64(bapPartMargin)
 	for _, p := range out {
 		top = math.Max(top, p.dy+bapPartMargin)
 	}
+	// Reserve pending members in rows that wrap at the anchor's width (at least
+	// bslSeedRowWidth). One single row made the envelope of a part-rich block
+	// wider than the sheet — 15 attach members of the ESP32-S3R8 block reserved
+	// ~1500 units and the preflight refused a block that fits once its members
+	// hug the anchor's pins (#43 E2E, 2026-10-15). This is only a reservation;
+	// the solved layout is still gated on real geometry after the anchor lands.
+	rowWidth := math.Max(2*half(anchor), bslSeedRowWidth)
+	var rows [][]string
+	var cur []string
+	curWidth := 0.0
 	for _, r := range pending {
-		x += half(r)
-		out[r] = bapRoleOffset{dx: snapAnchor(x), dy: snapAnchor(top + bslPartGap + bapPartMargin), source: "relation-seed"}
-		x += half(r) + bslPartGap
+		w := 2 * half(r)
+		if len(cur) > 0 && curWidth+bslPartGap+w > rowWidth {
+			rows = append(rows, cur)
+			cur, curWidth = nil, 0
+		}
+		if len(cur) > 0 {
+			curWidth += bslPartGap
+		}
+		cur = append(cur, r)
+		curWidth += w
+	}
+	if len(cur) > 0 {
+		rows = append(rows, cur)
+	}
+	// Rows alternate above and below the anchor: attach members hug pins on
+	// every side, so a reservation stacked on one side made the envelope tall
+	// enough to hit the title block from any origin.
+	bottom := float64(bapPartMargin)
+	for _, p := range out {
+		bottom = math.Max(bottom, -p.dy+bapPartMargin)
+	}
+	up := top + bslPartGap + bapPartMargin
+	down := -(bottom + bslPartGap + bapPartMargin)
+	for i, row := range rows {
+		width, rowHalf := 0.0, 0.0
+		for j, r := range row {
+			width += 2 * half(r)
+			if j > 0 {
+				width += bslPartGap
+			}
+			rowHalf = math.Max(rowHalf, half(r))
+		}
+		y := up
+		if i%2 == 1 {
+			y = down
+		}
+		x := -width / 2
+		for _, r := range row {
+			x += half(r)
+			out[r] = bapRoleOffset{dx: snapAnchor(x), dy: snapAnchor(y), source: "relation-seed"}
+			x += half(r) + bslPartGap
+		}
+		if i%2 == 1 {
+			down -= 2*rowHalf + bslPartGap
+		} else {
+			up += 2*rowHalf + bslPartGap
+		}
 	}
 	return out
 }
+
+// bslSeedRowWidth is the minimum row width of the pending-member reservation.
+const bslSeedRowWidth = 600.0
 
 // Provisional geometry must never become a silent live fallback after a failed
 // read or constrained solve. The caller compensates only its newly created IDs.

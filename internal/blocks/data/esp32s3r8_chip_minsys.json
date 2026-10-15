@@ -155,24 +155,39 @@
     }
   },
   "schematic_layout": {
-    "note": "y-UP(+dy=上)。审美依据 conventions:5 颗电源去耦贴 U 顶排一字排开(bulk 在最左靠 VDD3P3 入口);EN RC + IO0 上拉在左列(CHIP_PU/GPIO0 均左侧脚);晶振+负载帽贴右侧 XTAL_P/N 脚;FLASH 及其去耦/CS 上拉在右列(SPI0 六线右侧出)。偏移按 ceshi P1 实测符号 bbox 校核:U ±76×(-140..+150), FLASH 140×52, X 40×40, C0402 20×16, R0402 20×8——0 overlap by construction",
-    "roles": {
-      "U":        { "dx": 0,    "dy": 0 },
-      "C_BULK":   { "dx": -120, "dy": 190 },
-      "C_VDD3P3": { "dx": -60,  "dy": 190 },
-      "C_VDDA":   { "dx": 0,    "dy": 190 },
-      "C_RTC":    { "dx": 60,   "dy": 190 },
-      "C_CPU":    { "dx": 120,  "dy": 190 },
-      "R_IO0":    { "dx": -220, "dy": 60 },
-      "R_EN":     { "dx": -220, "dy": 0 },
-      "C_EN":     { "dx": -220, "dy": -60 },
-      "X":        { "dx": 180,  "dy": -80 },
-      "C_X1":     { "dx": 260,  "dy": -40 },
-      "C_X2":     { "dx": 260,  "dy": -120 },
-      "FLASH":    { "dx": 340,  "dy": 100 },
-      "C_FLASH":  { "dx": 340,  "dy": 180 },
-      "C_SPI":    { "dx": 240,  "dy": 180 },
-      "R_CS":     { "dx": 340,  "dy": 40 }
+    "note": "关系形态(#180;2026-10-15 #43 E2E 改写):只声明归属与朝向,坐标由块布局求解器按锚件 U 的实测引脚算。旧版固定 dx/dy 偏移表现场落图 10/59 连接失败:5 颗去耦横排顶部、0402 横放使电源/地桩线左右互撞;R_EN/C_EN/R_IO0 探出图纸左沿;C_SPI/C_FLASH marker 重叠;SPICS0/SPIQ 桩线穿器件本体。现每个外围件贴它服务的 U 引脚,去耦/上下拉/负载帽竖放。FLASH 的去耦与 CS 上拉在原理图上贴 U 的同网脚(VDD_SPI/SPICS0)——求解器 v1 只按锚件引脚求解;贴近 flash 是 PCB 约束,见 pcb_layout 的 flash-adjacency/decap-adjacency。 现状(2026-10-15 现场):预检已通过,但求解器把左右两列引脚的外围件全堆在锚件上下两头,FLASH 与 X 放不下 → 整块安全回滚;块仍为 draft,待求解器支持「沿引脚朝外方向成列排布」后再验。",
+    "anchor": "U",
+    "attach": {
+      "C_BULK": "U.2",
+      "C_VDD3P3": "U.3",
+      "C_VDDA": "U.55",
+      "C_RTC": "U.VDD3P3_RTC",
+      "C_CPU": "U.VDD3P3_CPU",
+      "R_EN": "U.CHIP_PU",
+      "C_EN": "U.CHIP_PU",
+      "R_IO0": "U.GPIO0",
+      "X": "U.XTAL_P",
+      "C_X1": "U.XTAL_P",
+      "C_X2": "U.XTAL_N",
+      "FLASH": "U.SPICLK",
+      "C_SPI": "U.VDD_SPI",
+      "C_FLASH": "U.VDD_SPI",
+      "R_CS": "U.SPICS0"
+    },
+    "orient": {
+      "C_BULK": "vertical",
+      "C_VDD3P3": "vertical",
+      "C_VDDA": "vertical",
+      "C_RTC": "vertical",
+      "C_CPU": "vertical",
+      "C_SPI": "vertical",
+      "C_FLASH": "vertical",
+      "C_EN": "vertical",
+      "R_EN": "vertical",
+      "R_IO0": "vertical",
+      "C_X1": "vertical",
+      "C_X2": "vertical",
+      "R_CS": "vertical"
     }
   },
   "schematic_notes": [

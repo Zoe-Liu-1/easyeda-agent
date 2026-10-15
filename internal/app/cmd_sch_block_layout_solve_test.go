@@ -782,3 +782,51 @@ func TestBslSolveAround_PairFirstIsAnchor(t *testing.T) {
 		t.Errorf("并列件该排在锚件右侧: x=%v vs 锚右沿 %v", rst.X, anchorBBox.MaxX)
 	}
 }
+
+// #43 E2E: a part-rich relational block (ESP32-S3R8, 15 attach members) must
+// reserve a compact envelope around its anchor — a single row above it was
+// ~1500 wide and made the preflight refuse a block that fits the sheet.
+func TestBslSeedOffsetsWrapsRowsAroundAnchor(t *testing.T) {
+	all, err := blocks.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blk blocks.Block
+	for _, b := range all {
+		if b.ID == "block.esp32s3r8_chip_minsys" {
+			blk = b
+		}
+	}
+	sl, err := blk.SchematicLayout()
+	if err != nil || sl == nil {
+		t.Fatalf("layout: %v", err)
+	}
+	rel, ok := bslRelationsFrom(sl)
+	if !ok {
+		t.Fatal("block layout must be relational")
+	}
+	roles := make([]string, 0, len(blk.Parts))
+	for r := range blk.Parts {
+		roles = append(roles, r)
+	}
+	off := bslSeedOffsets(blk, rel, "U", roles)
+	half := func(role string) float64 { return math.Max(bapRoleHalfExtent(blk.Parts[role].Part), bapPartMargin) }
+	rect := bapBlockRect(0, 0, off, half)
+	if w := rect.MaxX - rect.MinX; w > 2*bslSeedRowWidth {
+		t.Fatalf("reservation width %.0f: rows did not wrap", w)
+	}
+	above, below := 0, 0
+	for r, o := range off {
+		if r == "U" {
+			continue
+		}
+		if o.dy > 0 {
+			above++
+		} else if o.dy < 0 {
+			below++
+		}
+	}
+	if above == 0 || below == 0 {
+		t.Fatalf("rows must alternate around the anchor: above=%d below=%d", above, below)
+	}
+}
