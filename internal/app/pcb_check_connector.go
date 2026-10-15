@@ -643,3 +643,64 @@ func findConnectorMatingBlocked(conns []boardConnector, comps []boardComp, o *bo
 	}
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// 规则④ connector-opening-inward —— 贴边插口的开口朝向板内（#231）
+// ---------------------------------------------------------------------------
+
+// edgeOutward 是板边的朝外单位向量（世界系 y 向上，与 nearestEdge 同一套 AABB 口径）。
+func edgeOutward(e apEdge) (float64, float64) {
+	switch e {
+	case edgeLeft:
+		return -1, 0
+	case edgeRight:
+		return 1, 0
+	case edgeTop:
+		return 0, 1
+	default:
+		return 0, -1
+	}
+}
+
+// findConnectorOpeningInward 报告「贴在板边、但块库声明的开口背对这条边」的连接器。
+//
+// #231：Type-C 贴边摆放却焊盘朝外、插口朝内，插拔通道又恰好空着，规则③一条不报，
+// Agent 据此认定「调整成功」。插口贴边就是为了让插头从板外进来——开口背对最近的边，
+// 不管通道里有没有东西都是错的。只用规则③的可信档（块库声明的开口方向），没有声明
+// 的件不猜方向；开口沿着边走（侧向）不在本规则内。归因落在连接器自己，修法是转 180°。
+func findConnectorOpeningInward(conns []boardConnector) []pcbCheckFinding {
+	var out []pcbCheckFinding
+	for _, b := range conns {
+		if !b.hasEdge || b.edgeGapMil > pcbConnEdgeBandMil {
+			continue // 不在外沿带：开口朝哪不归这条规则管
+		}
+		lox, loy, declared := connOpeningFor(b.comp.Device)
+		if !declared {
+			continue
+		}
+		wx, wy := rotate2d(lox, loy, b.comp.Rotation)
+		dx, dy, ok := matingAxisDir(wx, wy)
+		if !ok {
+			continue
+		}
+		ox, oy := edgeOutward(b.edge)
+		if dx*ox+dy*oy >= 0 {
+			continue // 朝外或沿边
+		}
+		cx, cy := b.comp.center()
+		f := pcbCheckFinding{
+			Type: "connector-opening-inward", Level: "WARN",
+			Designator: b.comp.Designator,
+			Message: fmt.Sprintf(
+				"%s sits on the %s board edge but its block-declared opening faces into the board — a plug cannot enter from outside; rotate it 180° (rotation now %.0f°) so the opening faces the %s edge",
+				b.comp.Designator, b.edge, b.comp.Rotation, b.edge,
+			) + docRule("3.5", "插拔通道禁布 — 开口前方是插头的必经之路"),
+			At: &pcbXY{X: round2(cx), Y: round2(cy)},
+		}
+		if b.comp.ID != "" {
+			f.Primitives = append(f.Primitives, b.comp.ID)
+		}
+		out = append(out, f)
+	}
+	return out
+}

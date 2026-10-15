@@ -19,6 +19,11 @@
    "reason": "三个独立 Type-C 封装族六板实测全部 local=-y(立创库 Type-C 绘制惯例:rotation 0 插接面朝下):TYPEC-304-ACP16(实战派S3 USB1 rot90 贴+x边)、TYPEC-304-BCP16(RK3568 USB6 rot0 贴-y边)、USB-TYPE-C-019(K230 U1 rot-90 贴-x边)、USB3.1TYPE-C16P(车机 J2 rot0 贴-y边,外突40.7mil)。通配 type-c 子串,四族证据一致方敢通配。"
   },
   {
+   "match": "typec",
+   "local": "-y",
+   "reason": "同上 Type-C 证据中的 TYPEC-304-ACP16 / TYPEC-304-BCP16 名称不带连字符,`type-c` 子串匹配不到它们(#231 的 TYPEC-16P 同理);同一证据、同一惯例 local=-y,补一条不带连字符的通配。"
+  },
+  {
    "match": "usb-303wsd",
    "local": "-y",
    "reason": "Micro-USB 母座 USB-303WSD-BRY:RK3568 USB7 rot180 贴+y边(gap 2.4mil) → 反推 local=-y,与 Type-C 家族同惯例。"

@@ -397,3 +397,39 @@ func TestConnectorPinsDedupes(t *testing.T) {
 		t.Errorf("pins = %d, want 3", got)
 	}
 }
+
+// #231：贴边插口开口背对这条边就报，与插拔通道是否空着无关；朝外、离边、无声明都不报。
+func TestConnectorOpeningInward(t *testing.T) {
+	// KF301 rot 0 的块声明开口是 -y（见上一条测试）。
+	cases := []struct {
+		name     string
+		y, rot   float64
+		wantWarn bool
+	}{
+		{"bottom edge, opening faces out (-y)", 100, 0, false},
+		{"bottom edge, rotated 180 so opening faces in (+y)", 100, 180, true},
+		{"top edge, opening -y faces into the board", 2300, 0, true},
+		{"mid-board is not this rule's business", 1200, 180, false},
+	}
+	for _, c := range cases {
+		snap := &boardSnapshot{Outline: testOutline(), Components: []boardComp{
+			mkBoardConn("J1", "KF301-5.0-2P", 1, 2000, c.y, 400, 200, "VOUT", "GND"),
+		}}
+		snap.Components[0].Rotation = c.rot
+		got := findConnectorOpeningInward(collectBoardConnectors(snap, nil))
+		if (len(got) == 1) != c.wantWarn || len(got) > 1 {
+			t.Fatalf("%s: findings = %+v", c.name, got)
+		}
+		if c.wantWarn && (got[0].Type != "connector-opening-inward" || got[0].Designator != "J1") {
+			t.Fatalf("%s: finding = %+v", c.name, got[0])
+		}
+	}
+	// 没有块声明的贴边件不猜方向。
+	snap := &boardSnapshot{Outline: testOutline(), Components: []boardComp{
+		mkBoardConn("J2", "UNKNOWN-CONN-XYZ", 1, 2000, 100, 400, 200, "VBUS", "GND"),
+	}}
+	snap.Components[0].Rotation = 180
+	if got := findConnectorOpeningInward(collectBoardConnectors(snap, nil)); len(got) != 0 {
+		t.Fatalf("undeclared opening must not be guessed: %+v", got)
+	}
+}
