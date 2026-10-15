@@ -4,6 +4,7 @@
 
 - `library.symbol.build` / `library.footprint.build`（#279）：打开编辑器前先核对资产在 `--library` 指定的库中；不在时若能在工程库/个人库找到，以 `PRECONDITION_REFUSED` 拒绝并给出正确的库（宿主对工程库资产的记录把 `libraryUuid` 写成个人库 uuid，照抄该字段即失败），不再报 `INVALID_STATE` 并被计入退化。焦点确认同时接受该库的两种名称，修复工程库符号 build 在前后台都必然失败；`activateDocument` 的布尔返回不再作为判据，焦点等待改为按 4s 总时长。
 - `library.footprint.build`（#279）：焊盘 `shape` 写入前按官方元组校验（类型须为 `"RECT"`/`"ELLIPSE"`/`"OVAL"`/`"NGON"`/`"POLYGON"` 字符串，元素个数与尺寸正确），数字类型 `[1, w, h]` 不再在写入中途失败；Skill 示例同步改为官方写法。工程库封装的编辑器 API 打不开（4.1.71 实测），build 改为明确拒绝并指引建在个人库。
+- PCB 规则回读比较（#258）：宿主把所有规则长度按 mil 保留 4 位小数存储（现场 17/19 个 mm 值恰在该网格上，0.3 mm 首次转自定义读回 0.2999994 mm = 11.811 mil），比较改为在声明了 `unit` 的规则内先映射到同一宿主标准形式再按机器舍入严格比较；无单位字段与超出网格的真实漂移仍判不符。
 - `schematic.components.list --include-pins`（#244）：网表可读但某器件或复用块实例在网表中没有记录时（块实例的端口只以实例前缀网名出现在真实器件上），改由触碰该引脚的导线网名解析，标注 `netSource: wire-geometry`；解析不到时给 `netUnresolved`（no-touching-wire / unnamed-wire / conflicting-wire-nets / not-in-netlist），不再静默返回与"悬空"无法区分的 `null`。
 - `schematic.page.clear` 保留器件（#267）：用官方 `getAllPinsByPrimitiveId` 把保留器件的引脚纳入父属闭包，引脚自有属性（Pin Name/Number/Type）不再被归为孤儿属性列入删除计划；引脚读不到时写前拒绝；每轮按完整属性状态（值、显隐、几何）核对保留属性，回包新增 `preservedPinIds`。页面快照与普通清页的孤儿判定共用同一父属分类（含引脚）。
 - `pcb.component.modify`（#275）：`layer` 接受 `top`/`bottom`（含 `TOP`/`Bottom Layer` 等写法）与 1/2，并在写入前换成数字层 id；此前宿主收下层名 `"BOTTOM"` 回执 ok 却不翻面，回读又把字符串层名记为"无法核对"，批量翻面 68 件全部静默失败。非器件面取值直接拒绝；`pcb modify --help` 示例同步更正。
