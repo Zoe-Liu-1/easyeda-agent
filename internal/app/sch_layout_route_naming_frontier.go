@@ -1,5 +1,10 @@
 package app
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Route joins must retain a naming lead for an island that already contains
 // every physical pin of its net. A witness uses the same terminal constructor
 // and text/lead clearance checks as final naming. If a new route invalidates
@@ -93,6 +98,15 @@ func libRouteNamingProbe(p *powerLayoutPlan, island libIsland, policy string, ro
 	// before proving closure (MCU_EN/RX needs 524 on a measured zone). Keep the
 	// per-island proof bounded, while allowing that complete negative result
 	// and the 1816-candidate closed CC tree seen on a measured USB zone.
+	// A complete probe is a deterministic function of the fixed geometry, the
+	// island and its policy. Route alternatives and reroute rounds revisit the
+	// same baseline fragment and the same merged tree many times (issue #273:
+	// one closed BUCK_RT pair was re-proven 60+ times, ~1,200 candidates each).
+	// Replay only complete verdicts; an inconclusive probe is never cached.
+	key := libNamingProbeKey(p, island, policy)
+	if memo, ok := routing.namingProbes[key]; ok {
+		return memo.witness, true
+	}
 	allowance := 2048
 	shared := routing.candidateBudget
 	available := *shared - routing.namingReserve
@@ -105,5 +119,38 @@ func libRouteNamingProbe(p *powerLayoutPlan, island libIsland, policy string, ro
 	before := allowance
 	witness, complete := libNamingFrontierWitness(p, island, policy, &allowance)
 	*shared -= before - allowance
+	if complete {
+		if routing.namingProbes == nil {
+			routing.namingProbes = map[string]libNamingProbeMemo{}
+		}
+		routing.namingProbes[key] = libNamingProbeMemo{witness: witness}
+	}
 	return witness, complete
+}
+
+type libNamingProbeMemo struct {
+	witness *powerLayoutPlan
+}
+
+// libNamingProbeKey identifies the complete marker search input: every body,
+// pin, text box, wire and existing marker plus the island and its policy.
+func libNamingProbeKey(p *powerLayoutPlan, island libIsland, policy string) string {
+	var b strings.Builder
+	b.WriteString(policy)
+	b.WriteByte('#')
+	b.WriteString(island.net)
+	for _, pin := range island.pins {
+		fmt.Fprintf(&b, "/%s:%g,%g", pin.Number, pin.X, pin.Y)
+	}
+	b.WriteByte('#')
+	for _, c := range p.Placements {
+		fmt.Fprintf(&b, "%s@%g,%g,%g,%t;", c.Designator, c.X, c.Y, c.Rotation, c.Mirror)
+	}
+	b.WriteByte('#')
+	b.WriteString(libWireForestKey(p.Wires))
+	b.WriteByte('#')
+	for _, f := range p.Flags {
+		fmt.Fprintf(&b, "%s|%s|%g,%g|%s|%g;", f.Net, f.Kind, f.PinX, f.PinY, f.Direction, f.Offset)
+	}
+	return b.String()
 }

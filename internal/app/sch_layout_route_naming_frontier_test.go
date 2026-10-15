@@ -49,13 +49,23 @@ func TestRouteNamingFrontierRejectsNewlySealedSingleton(t *testing.T) {
 	if keeps || allowance <= 0 {
 		t.Fatalf("foreign route sealing the singleton was accepted or misreported as resource exhaustion: keeps=%v remaining=%d", keeps, allowance)
 	}
+	// A complete closure proof on identical geometry is replayed without a
+	// second debit (issue #273), even when the remaining slice is tiny.
+	replay := 1
+	ctx.candidateBudget = &replay
+	keeps, _ = libRouteKeepsCompletedNamingFrontiers(&before, &after, map[string]string{"PORT": "module_port", "OTHER": "direct"}, ctx, nil)
+	if keeps || replay != 1 {
+		t.Fatalf("complete closure proof was not replayed: keeps=%v remaining=%d", keeps, replay)
+	}
 	// An incomplete probe is not a proof of closure.
+	ctx = &schematicRoutingContext{}
 	tiny := 1
 	ctx.candidateBudget = &tiny
 	keeps, _ = libRouteKeepsCompletedNamingFrontiers(&before, &after, map[string]string{"PORT": "module_port", "OTHER": "direct"}, ctx, nil)
 	if !keeps {
 		t.Fatal("incomplete naming probe incorrectly pruned the route")
 	}
+	ctx = &schematicRoutingContext{}
 	reserved := 2000
 	ctx.candidateBudget = &reserved
 	ctx.namingReserve = 1999

@@ -83,6 +83,7 @@ type schematicRoutingContext struct {
 	namingReserve       int
 	requiredConnections []schematicRequiredConnection
 	requiredJoin        *schematicRequiredConnection
+	namingProbes        map[string]libNamingProbeMemo
 }
 
 func (c *schematicRoutingContext) beginReroute() bool {

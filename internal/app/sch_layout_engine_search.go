@@ -233,6 +233,10 @@ func libPlacePeripheralPairsAtMinimum(current powerLayoutPlan, measured powerLay
 							conflict.observe(lastErr)
 							continue
 						}
+						if lastErr = libValidateProvisionalWireFrontiers(&trial, &candidate, policies, routing); lastErr != nil {
+							conflict.observe(lastErr)
+							continue
+						}
 						// A short provisional named join can be electrically complete
 						// while sealing both outward pin exits. Reject that position
 						// here, while the distance shell can still try another XY,

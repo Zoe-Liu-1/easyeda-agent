@@ -2,6 +2,8 @@ package app
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 )
 
 var errLibLayoutBudget = errors.New("candidate search budget exhausted")
@@ -61,9 +63,29 @@ func libFinishSchematicLayoutMode(p powerLayoutPlan, netPolicies map[string]stri
 		p.Wires = nil
 	}
 	base := p
+	var finishUncached func(trial *powerLayoutPlan) error
 	base.Wires = clonePowerLayoutWires(p.Wires)
 	base.Flags = append([]powerLayoutFlag(nil), p.Flags...)
+	// The direct-first, rail-first and port-withdrawn schedules frequently
+	// converge on the same wire forest. Placements are fixed within this call,
+	// so an identical forest yields the identical deterministic naming verdict;
+	// replaying it only re-debits the shared allowance (issue #273 measured
+	// three identical 2,245-candidate naming passes per terminal checkpoint).
+	// Only concrete conflicts are memoized: a resource stop is never replayed
+	// as evidence, and every success is returned immediately.
+	finishedForests := map[string]error{}
 	finish := func(trial *powerLayoutPlan) error {
+		key := libWireForestKey(trial.Wires)
+		if cached, seen := finishedForests[key]; seen {
+			return cached
+		}
+		err := finishUncached(trial)
+		if err != nil && !isSchematicSearchResourceStop(err) {
+			finishedForests[key] = err
+		}
+		return err
+	}
+	finishUncached = func(trial *powerLayoutPlan) error {
 		if e := libJoinRequiredAttachments(trial, netPolicies, routing); e != nil {
 			return e
 		}
@@ -181,4 +203,20 @@ func libPreferDirectFirst(p *powerLayoutPlan, policies map[string]string) bool {
 		}
 	}
 	return false
+}
+
+// libWireForestKey is an exact, order-preserving fingerprint of a wire forest.
+func libWireForestKey(wires []powerLayoutWire) string {
+	var b strings.Builder
+	for _, wire := range wires {
+		b.WriteString(wire.Net)
+		for _, point := range wire.Points {
+			b.WriteString(strconv.FormatFloat(point[0], 'g', -1, 64))
+			b.WriteByte(',')
+			b.WriteString(strconv.FormatFloat(point[1], 'g', -1, 64))
+			b.WriteByte(';')
+		}
+		b.WriteByte('|')
+	}
+	return b.String()
 }

@@ -332,3 +332,73 @@ func asGeometryObstruction(err error, target **schGeometryObstruction) bool {
 	}
 	return false
 }
+
+// libValidateProvisionalWireFrontiers applies the same local direct frontier
+// ruler to the provisional wires of a placement candidate. The placement-only
+// gate above sees bodies, pins and text; the attachment route and nearby rail
+// joins generated afterwards can still wall in a mandatory direct pin whose
+// peers are not placed yet. Such a checkpoint leaves every later candidate for
+// those peers illegal, so the bounded search would only burn its allowance on
+// unrelated rollbacks. Only closures caused by this candidate's new wires are
+// rejected: an island already closed in placementOnly is left to other gates.
+func libValidateProvisionalWireFrontiers(placementOnly, wired *powerLayoutPlan, policies map[string]string, routing *schematicRoutingContext) error {
+	if placementOnly == nil || wired == nil {
+		return nil
+	}
+	expectedPins := map[string]int{}
+	for _, component := range wired.Placements {
+		for _, pin := range component.Pins {
+			if pin.Net != "" {
+				expectedPins[pin.Net]++
+			}
+		}
+	}
+	if routing != nil {
+		for net, count := range routing.netPins {
+			if count > expectedPins[net] {
+				expectedPins[net] = count
+			}
+		}
+	}
+	wiredIslands := libIslands(wired)
+	islandCounts := map[string]int{}
+	for _, island := range wiredIslands {
+		islandCounts[island.net]++
+	}
+	var beforeIslands []libIsland
+	for _, island := range wiredIslands {
+		if policies[island.net] != "direct" || len(island.pins) == 0 || (islandCounts[island.net] <= 1 && expectedPins[island.net] <= len(island.pins)) {
+			continue
+		}
+		after := libDirectIslandLocalFrontier(wired, island, libDirectFrontierExpansionRaw, libDirectFrontierNodeLimit)
+		if after.reachable || after.exhausted {
+			continue
+		}
+		if beforeIslands == nil {
+			beforeIslands = libIslands(placementOnly)
+		}
+		for _, old := range beforeIslands {
+			if old.net != island.net || !libIslandContainsPhysicalPin(old, island.pins[0]) {
+				continue
+			}
+			if !libDirectIslandLocalFrontier(placementOnly, old, libDirectFrontierExpansionRaw, libDirectFrontierNodeLimit).reachable {
+				break
+			}
+			blockerRefs := make([]string, 0, len(after.blockers))
+			for ref := range after.blockers {
+				blockerRefs = append(blockerRefs, ref)
+			}
+			sort.Strings(blockerRefs)
+			return &schGeometryObstruction{
+				kind:             "direct-island-enclosed-by-wire",
+				owners:           append([]string(nil), blockerRefs...),
+				blockers:         append([]string(nil), blockerRefs...),
+				blockersExplicit: true,
+				nets:             []string{island.net},
+				complete:         after.complete && len(blockerRefs) > 0,
+				cause:            fmt.Errorf("provisional wires close the local frontier of mandatory direct island %s (blockers=%v expanded=%d)", libIslandStableID(island), blockerRefs, after.expanded),
+			}
+		}
+	}
+	return nil
+}
