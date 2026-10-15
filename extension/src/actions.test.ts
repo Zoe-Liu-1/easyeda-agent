@@ -25,6 +25,7 @@ import {
 	clickImportConfirm,
 	requireLibraryAssetIn,
 	padShapeTupleError,
+	pcbComponentLayerId,
 	constraintList,
 	detectPolarityConventionOutliers,
 	getComponentOrThrow,
@@ -1281,6 +1282,18 @@ test('library footprint delete waits for a late-landing delete instead of report
 		assert.equal(reads, 3);
 	}
 	finally { delete (globalThis as any).eda; }
+});
+
+test('component layer names map to side ids so a flip is written and verified, never silently dropped (#275)', () => {
+	for (const [input, id] of [['BOTTOM', 2], ['bottom', 2], ['Bottom Layer', 2], ['bottom_layer', 2], [2, 2], ['TOP', 1], ['Top Layer', 1], [1, 1]] as const) {
+		assert.equal(pcbComponentLayerId(input), id, String(input));
+	}
+	for (const bad of ['TOP_SILKSCREEN', 'inner1', 3, 15, null]) {
+		assert.throws(() => pcbComponentLayerId(bad), (err: any) => err.code === 'PRECONDITION_REFUSED');
+	}
+	const patch = normalizePcbComponentPatch({ rotation: 90, layer: 'BOTTOM' });
+	assert.deepEqual(patch, { rotation: 90, layer: 2 });
+	assert.deepEqual(verifyPcbComponentPatch(patch, { rotation: 90, layer: 1 }).notApplied, [{ field: 'layer', expected: 2, actual: 1 }]);
 });
 
 test('library Device delete requires exact expected name and verifies absence', async () => {
