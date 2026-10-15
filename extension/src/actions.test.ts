@@ -1296,6 +1296,35 @@ test('component layer names map to side ids so a flip is written and verified, n
 	assert.deepEqual(verifyPcbComponentPatch(patch, { rotation: 90, layer: 1 }).notApplied, [{ field: 'layer', expected: 2, actual: 1 }]);
 });
 
+test('schematic.text.move moves texts by modify with read-back, never deletes, and refuses missing targets (#212)', async () => {
+	const texts: Record<string, { x: number; y: number }> = { a: { x: 0, y: 0 }, b: { x: 10, y: 10 } };
+	let deletes = 0, creates = 0;
+	(globalThis as any).eda = {
+		sch_PrimitiveText: {
+			get: async (id: string) => texts[id] && { getState_X: () => texts[id].x, getState_Y: () => texts[id].y },
+			modify: async (id: string, p: { x: number; y: number }) => {
+				if (id === 'b') throw new Error('host refused');
+				texts[id] = { x: p.x, y: p.y };
+				return {};
+			},
+			delete: async () => { deletes++; return true; },
+			create: async () => { creates++; return undefined; },
+		},
+	};
+	try {
+		const ok: any = await runAction('schematic.text.move', { moves: [{ primitiveId: 'a', x: 30, y: -20 }] });
+		assert.deepEqual([ok.result.verified, ok.result.moved], [true, ['a']]);
+		const partial: any = await runAction('schematic.text.move', { moves: [{ primitiveId: 'a', x: 40, y: 0 }, { primitiveId: 'b', x: 50, y: 50 }] });
+		assert.equal(partial.result.verified, false);
+		assert.equal(partial.result.partial, true);
+		assert.deepEqual(partial.result.notMoved.map((m: any) => [m.primitiveId, m.actual]), [['b', { x: 10, y: 10 }]]);
+		await assert.rejects(() => runAction('schematic.text.move', { moves: [{ primitiveId: 'gone', x: 1, y: 1 }] }),
+			(err: any) => err.code === 'PRECONDITION_REFUSED' && /nothing was moved/.test(err.message));
+		assert.deepEqual([deletes, creates], [0, 0]);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
 test('library Device delete requires exact expected name and verifies absence', async () => {
 	let live: any = { uuid: 'DEV-1', name: 'EA_AGENT__TEST' };
 	let deleteCalls = 0;

@@ -428,6 +428,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"count", "scope (activePage)", "texts[].primitiveId", "texts[].content", "texts[].x", "texts[].y", "texts[].rotation", "texts[].fontSize", "texts[].color"},
 		},
 		{
+			Name:        "schematic.text.move",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Move free text primitives on the ACTIVE schematic page to absolute targets with the official text modify and a fresh per-text read-back (#212). Nothing is deleted or recreated: a refused move leaves that text intact where it was, and absolute targets make a re-run idempotent. Refuses before any write when a target text is missing.",
+			Inputs:      []string{"moves[].primitiveId", "moves[].x", "moves[].y"},
+			Outputs:     []string{"moved[]", "verified", "partial", "notMoved[].primitiveId", "notMoved[].x", "notMoved[].y", "notMoved[].actual", "notMoved[].error"},
+		},
+		{
 			Name:        "schematic.visible_text.bboxes",
 			Domain:      DomainSchematic,
 			Phase:       1,

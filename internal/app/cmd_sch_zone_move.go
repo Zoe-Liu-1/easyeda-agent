@@ -356,41 +356,16 @@ func checkZoneMoveDestination(current layoutBBox, dx, dy float64, sheet, keepout
 	return rep
 }
 
-// ── 纯函数:文本搬移 JS(delete+recreate)─────────────────────────────────────
+// ── 纯函数:文本搬移载荷(typed schematic.text.move)──────────────────────────
 
-// buildZoneMoveTextJS 生成单条文本搬移的 exec_js:先 create 新文本(内容/旋转/
-// 颜色/字体/字号保留,坐标 +dx,+dy)并验证 id,再删旧 id —— 顺序保证 create 失败
-// 时旧文本原样保留(不会文本丢失)。删除走 sch_PrimitiveObject(#164:per-class
-// text delete 不落盘,reload 后复活),并用 getAllPrimitiveId 复核 oldDeleted。
-func buildZoneMoveTextJS(t zoneMoveText, dx, dy float64) string {
-	content, _ := json.Marshal(t.Content)
-	oldID, _ := json.Marshal(t.ID)
-	color := "null"
-	if strings.TrimSpace(t.Color) != "" {
-		cb, _ := json.Marshal(t.Color)
-		color = string(cb)
+// zoneMoveTextPayload 把区内文本平移成 schematic.text.move 的绝对目标坐标(#212)。
+// 不删不建:宿主拒绝某条时该文本原样留在原位,不会丢也不会重复;绝对目标让重跑幂等。
+func zoneMoveTextPayload(notes []zoneMoveText, dx, dy float64) map[string]any {
+	moves := make([]any, 0, len(notes))
+	for _, t := range notes {
+		moves = append(moves, map[string]any{"primitiveId": t.ID, "x": t.X + dx, "y": t.Y + dy})
 	}
-	font := "null"
-	if strings.TrimSpace(t.FontName) != "" {
-		fb, _ := json.Marshal(t.FontName)
-		font = string(fb)
-	}
-	size := t.FontSize
-	if size <= 0 {
-		size = schNoteDefaultFontSize
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "const oldId = %s;\n", oldID)
-	fmt.Fprintf(&b, "const tx = await eda.sch_PrimitiveText.create(%g, %g, %s, %g, %s, %s, %g);\n",
-		t.X+dx, t.Y+dy, content, t.Rotation, color, font, size)
-	b.WriteString("if (!tx) throw new Error('text create returned undefined');\n")
-	b.WriteString("const tid = tx.getState_PrimitiveId();\n")
-	b.WriteString("if (!tid) { await eda.sch_PrimitiveObject.delete([tx]); throw new Error('text id missing'); }\n")
-	b.WriteString("const generic = eda.sch_PrimitiveObject && typeof eda.sch_PrimitiveObject.delete === 'function' ? eda.sch_PrimitiveObject : null;\n")
-	b.WriteString("if (generic) { await generic.delete([oldId]); } else { await eda.sch_PrimitiveText.delete([oldId]); }\n")
-	b.WriteString("const alive = new Set(await eda.sch_PrimitiveText.getAllPrimitiveId());\n")
-	b.WriteString("return { textId: tid, oldDeleted: !alive.has(oldId) };")
-	return b.String()
+	return map[string]any{"moves": moves}
 }
 
 // --zone 的解析已统一走 resolveLayoutZone(sch_layout_objects.go):模块认领 /
@@ -732,18 +707,19 @@ func runSchZoneMove(cfg *appConfig, window, zoneRef string, dx, dy, textPad floa
 		return fmt.Errorf("zone move 刚移失败:%w", kerr)
 	}
 
-	// 8) 文本 delete+recreate(create 先行,失败不丢原文;旧 id 删除必须复核)。
-	for _, t := range notes {
-		v, terr := execAutolayoutZoneJS(pinned, win, docUUID, "move zone note", buildZoneMoveTextJS(t, dx, dy))
-		if terr != nil {
-			return fmt.Errorf("搬移文本 %s 失败(器件/导线已移动,文本半移 — 请回读文本后在呈现数据中修复并重新 Apply):%w", t.ID, terr)
-		}
-		newID := asString(mnav(v, "textId"))
-		if newID == "" {
-			return fmt.Errorf("文本 %s 重建未返回新 id(raw: %v)— 旧文本保留在原位,人工确认后重试", t.ID, v)
-		}
-		if !asBool(mnav(v, "oldDeleted")) {
-			return fmt.Errorf("旧文本 %s 删除未验证(新文本 %s 已建,页面出现重复)— `sch prim-delete --ids %s` 清理", t.ID, newID, t.ID)
+	// 8) 文本按绝对目标 typed 平移(#212:不再 exec_js delete+recreate)。宿主拒绝
+	//    的文本原样留在原位;绝对目标让重跑这一步幂等,所以失败时给出可直接重跑的载荷。
+	if len(notes) > 0 {
+		payload := zoneMoveTextPayload(notes, dx, dy)
+		res, terr := requestAction(pinned, "schematic.text.move", win, payload)
+		if terr != nil || res == nil || res.Result["verified"] != true {
+			body, _ := json.Marshal(payload)
+			detail := ""
+			if res != nil {
+				nm, _ := json.Marshal(res.Result["notMoved"])
+				detail = " notMoved=" + string(nm)
+			}
+			return fmt.Errorf("区内文本未全部搬移(器件/导线已移动;未搬的文本仍在原位、不丢不重复):%v%s — 重跑这一步(绝对坐标,幂等):easyeda call schematic.text.move --doc %s --payload '%s'", terr, detail, docUUID, body)
 		}
 	}
 

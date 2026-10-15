@@ -7556,6 +7556,50 @@ const schematicTextList: Handler = async () => {
 	return { result: { count: items.length, scope: 'activePage', texts: items } };
 };
 
+// schematic.text.move — move free text primitives to absolute targets with the
+// official modify(id, {x, y}) and a fresh read-back per text. Replaces the
+// zone-move exec_js delete+recreate (#212): nothing is deleted, so a host that
+// refuses one move leaves that text intact where it was (never lost, never
+// duplicated), and absolute targets make a re-run idempotent.
+const schematicTextMove: Handler = async (payload) => {
+	const raw = payload.moves;
+	if (!Array.isArray(raw) || !raw.length) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'moves must be a non-empty array of {primitiveId, x, y}.');
+	const moves = raw.map((m, i) => {
+		if (!m || typeof m !== 'object') throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `moves[${i}] must be an object.`);
+		const r = m as Record<string, unknown>;
+		const primitiveId = typeof r.primitiveId === 'string' && r.primitiveId ? r.primitiveId : '';
+		if (!primitiveId || typeof r.x !== 'number' || !Number.isFinite(r.x) || typeof r.y !== 'number' || !Number.isFinite(r.y)) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `moves[${i}] needs primitiveId and finite x, y.`);
+		}
+		return { primitiveId, x: r.x as number, y: r.y as number };
+	});
+	if (new Set(moves.map(m => m.primitiveId)).size !== moves.length) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Duplicate primitiveId in moves.');
+	const at = async (id: string): Promise<{ x: number; y: number } | undefined> => {
+		try { const t = await eda.sch_PrimitiveText.get(id); return t ? { x: t.getState_X(), y: t.getState_Y() } : undefined; }
+		catch { return undefined; }
+	};
+	// Refuse before any write when a target text is not on the page.
+	for (const m of moves) if (!await at(m.primitiveId)) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Text ${m.primitiveId} not found on the active page; nothing was moved.`);
+	const near = (a: number, b: number) => Math.abs(a - b) < 1e-3;
+	const moved: string[] = [];
+	const notMoved: Array<{ primitiveId: string; x: number; y: number; actual?: { x: number; y: number }; error?: string }> = [];
+	for (const m of moves) {
+		let error: string | undefined;
+		try { await eda.sch_PrimitiveText.modify(m.primitiveId, { x: m.x, y: m.y }); }
+		catch (err) { error = describeThrown(err); }
+		let actual = await at(m.primitiveId);
+		for (const deadline = Date.now() + 2_000; actual && !(near(actual.x, m.x) && near(actual.y, m.y)) && Date.now() < deadline;) {
+			await sleep(100);
+			actual = await at(m.primitiveId);
+		}
+		if (actual && near(actual.x, m.x) && near(actual.y, m.y)) moved.push(m.primitiveId);
+		else notMoved.push({ ...m, ...(actual ? { actual } : {}), ...(error ? { error } : {}) });
+	}
+	const result: Record<string, unknown> = { moved, verified: notMoved.length === 0 };
+	if (notMoved.length) { result.partial = moved.length > 0; result.notMoved = notMoved; }
+	return { result };
+};
+
 // schematic.visible_text.bboxes — official bbox of every VISIBLE text-like
 // object on the active page: free text primitives plus each component's
 // attributes whose key or value is shown (parts AND the sheet frame — showing
@@ -15635,6 +15679,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.replace': schematicComponentReplace,
 	'schematic.component.resolve_lcsc': schematicComponentResolveLcsc,
 	'schematic.text.list': schematicTextList,
+	'schematic.text.move': schematicTextMove,
 	'schematic.visible_text.bboxes': schematicVisibleTextBBoxes,
 	'pcb.documents.list': pcbDocumentsList,
 	'pcb.components.list': pcbComponentsList,

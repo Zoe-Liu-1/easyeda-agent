@@ -432,28 +432,17 @@ func TestParseZoneMoveTexts(t *testing.T) {
 	}
 }
 
-func TestBuildZoneMoveTextJS(t *testing.T) {
-	js := buildZoneMoveTextJS(zoneMoveText{
-		ID: "tOld", X: 100, Y: 200, Content: "LDO \"5V→3V3\"\n1A",
-		Rotation: 90, FontSize: 12, Color: "#5A5A5A",
-	}, 30, -50)
-	for _, want := range []string{
-		`const oldId = "tOld";`,
-		"eda.sch_PrimitiveText.create(130, 150, ", // 坐标已平移
-		`"LDO \"5V→3V3\"\n1A"`,                    // 内容 JSON 转义
-		", 90, ",                                  // 旋转保留
-		`"#5A5A5A"`,                               // 颜色保留
-		", 12);",                                  // 字号保留
-		"generic.delete([oldId])",                 // 旧 id 走 generic 删除(#164)
-		"oldDeleted: !alive.has(oldId)",           // 删除复核
-	} {
-		if !strings.Contains(js, want) {
-			t.Errorf("js missing %q\n---\n%s", want, js)
-		}
+func TestZoneMoveTextPayloadUsesAbsoluteTargets(t *testing.T) {
+	p := zoneMoveTextPayload([]zoneMoveText{{ID: "t1", X: 100, Y: 200, Content: "LDO"}, {ID: "t2", X: -5, Y: 0}}, 30, -50)
+	moves := p["moves"].([]any)
+	want := []map[string]any{{"primitiveId": "t1", "x": 130.0, "y": 150.0}, {"primitiveId": "t2", "x": 25.0, "y": -50.0}}
+	if len(moves) != len(want) {
+		t.Fatalf("moves = %v", moves)
 	}
-	// 空颜色/空字体 → null;fontSize<=0 → 默认 note 字号
-	js = buildZoneMoveTextJS(zoneMoveText{ID: "t2", X: 0, Y: 0, Content: "x"}, 1, 1)
-	if !strings.Contains(js, ", 0, null, null, 10);") {
-		t.Errorf("empty color/font should emit null + default size 10:\n%s", js)
+	for i, m := range moves {
+		got := m.(map[string]any)
+		if got["primitiveId"] != want[i]["primitiveId"] || got["x"] != want[i]["x"] || got["y"] != want[i]["y"] {
+			t.Fatalf("move %d = %v, want %v", i, got, want[i])
+		}
 	}
 }
