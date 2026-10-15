@@ -85,7 +85,7 @@ func findSchGroup(groups []*schGroup, ref string) (*schGroup, error) {
 	case 1:
 		return byName[0], nil
 	case 0:
-		return nil, fmt.Errorf("group %q not found on this page (`sch group list` to see groups)", ref)
+		return nil, fmt.Errorf("group %q not found on this document (`group list` to see groups)", ref)
 	default:
 		ids := make([]string, len(byName))
 		for i, g := range byName {
@@ -111,6 +111,19 @@ func groupOfMember(groups []*schGroup, designator string) *schGroup {
 	return nil
 }
 
+// schOnlyGroups drops PCB-document groups (#173) from a table. Page-scoped
+// reads never need it (a PCB documentUuid never equals a schematic page's), but
+// every CROSS-page walk over GroupsByPage must apply it.
+func schOnlyGroups(groups []*schGroup) []*schGroup {
+	var out []*schGroup
+	for _, g := range groups {
+		if g != nil && !g.IsPCB() {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 // describeSchGroup renders "g1" or `g1 "mcu-core"` for error/report text.
 func describeSchGroup(g *schGroup) string {
 	if g.Name != "" {
@@ -124,11 +137,11 @@ func describeSchGroup(g *schGroup) string {
 func groupsCreate(groups []*schGroup, name string, members []string) ([]*schGroup, *schGroup, error) {
 	norm := schGroupDesignators(members)
 	if len(norm) == 0 {
-		return nil, nil, fmt.Errorf("--members is required (CSV of designators, e.g. R1,C5,U2)")
+		return nil, nil, fmt.Errorf("members are required (CSV of designators, e.g. R1,C5,U2)")
 	}
 	for _, m := range norm {
 		if owner := groupOfMember(groups, m); owner != nil {
-			return nil, nil, fmt.Errorf("%s already belongs to group %s — remove it first (`sch group remove --group %s --members %s`) or pass different members",
+			return nil, nil, fmt.Errorf("%s already belongs to group %s — remove it first (`group remove --group %s` with %s) or pass different members",
 				m, describeSchGroup(owner), owner.ID, m)
 		}
 	}
@@ -1235,7 +1248,10 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 				pages := map[string][]*schGroup{}
 				if allPages {
 					for uuid, gs := range st.GroupsByPage {
-						pages[uuid] = gs
+						// PCB 文档的虚拟组(#173)同表存放,但不是原理图页的组。
+						if sch := schOnlyGroups(gs); len(sch) > 0 {
+							pages[uuid] = sch
+						}
 					}
 				} else if len(groups) > 0 {
 					pages[docUUID] = groups

@@ -208,6 +208,18 @@ EP/地过孔直接决定模块布局，可以在整板确认前作为一个参�
   `--max-shift` 超限剔除不截断、回读证实才算 restored。当前唯一变换器 grid-snap→tidy
   (`--grid` 默认 5mil);**blocking(重叠/短路/出板框)不归它管**——先
   `place-constrained` 等 typed 合法化动作清掉再精修；能力不足时报告 blocking 并补工具。真机环实测:65.2[blocked]→清 blocking→refine→78.6[good]。
+- `easyeda pcb group create/add/remove/ungroup/list/move` — **虚拟编组(#173,`mode: "virtual"`)**。
+  官方扩展 API 没有器件编组接口：UI 里建的组 CLI 读不到，CLI 建的组 UI 里也看不到，不得声称支持原生组。
+  关系按**当前 PCB 的 documentUuid** 存进工程 workflow 状态（与原理图组同表、`kind=pcb`，多板不串组），
+  成员是位号（`--designators R1,C5` 或 `--ids` 按活体板解析）；PCB 必须是活动文档，否则拒绝。
+  `list` 把板上已不存在的成员标 stale；`pcb delete` 删成员后经回读确认再级联摘除登记。
+  `group move --group g1 --dx --dy` 用一次 `pcb.components.move` 刚性平移全部成员，fresh 回读逐件核对
+  位移恰为 (dx,dy)、角度与层不变，不一致非零退出；成员 stale/锁定/位号重复时整组拒绝。
+  v1 不支持整组旋转，走线/过孔不跟随（平移后重布相关连接）。
+  布局写入尊重组：`modify`（改 x/y/rotation/layer）、`move` 只拒「搬了组的一部分」，
+  `align/distribute/grid-snap/arrange` 逐件定位，碰到多件组的任一成员即拒；
+  `auto-place/place-constrained/refine` 把成员当**固定件**（原地不动、作为障碍）并在 stderr 点名。
+  `--break-group` 显式放开；组表读不到只降级为提示，不阻断主命令。
 - `pcb.align` — `mode = left | right | top | bottom | centerX | centerY` (y-up: `top` = larger y), aligned to the group extent.
 - `pcb.distribute` — even center spacing, `axis = x | y`, extremes fixed.
 - `pcb.grid_snap` — round component anchors to `grid` (mil; SMD 25, THT 50).

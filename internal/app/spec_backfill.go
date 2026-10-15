@@ -148,6 +148,9 @@ func specCollectGroupsLive(st *workflow.State, liveUUID string, livePages map[st
 	}
 	sort.Strings(pages) // 同输入同输出
 	for _, p := range pages {
+		if len(schOnlyGroups(st.GroupsByPage[p])) == 0 {
+			continue // 只有 PCB 文档的组(#173):不是原理图页,不参与也不算「跳过」
+		}
 		if !st.PageInScope(p, liveUUID) {
 			if len(st.GroupsByPage[p]) > 0 {
 				skippedPages = append(skippedPages, p)
@@ -161,7 +164,8 @@ func specCollectGroupsLive(st *workflow.State, liveUUID string, livePages map[st
 			continue
 		}
 		for _, g := range st.GroupsByPage[p] {
-			if g == nil || len(g.Members) == 0 {
+			// PCB 文档的虚拟组(#173)是机械编组,不是原理图模块的事实来源。
+			if g == nil || len(g.Members) == 0 || g.IsPCB() {
 				continue
 			}
 			label := strings.TrimSpace(g.Name)

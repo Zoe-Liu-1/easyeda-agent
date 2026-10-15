@@ -463,6 +463,7 @@ func newPcbCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	pcb.AddCommand(newPcbNetPathCmd(cfg, &window, stdout, stderr))
 	pcb.AddCommand(newPcbRouteCmd(stdout, stderr))
 	pcb.AddCommand(newPcbLayoutCmd(stdout, stderr))
+	pcb.AddCommand(newPcbGroupCmd(cfg, &window, stdout, stderr))
 
 	// ── drc ───────────────────────────────────────────────────────────────
 	// pcb.drc.check — the PCB counterpart to `sch drc`. Routing is automatic:
@@ -996,7 +997,7 @@ schematic is active, so you pass them). Workflow:
 	// pcb.component.modify
 	{
 		var id, patchJSON, patchFile string
-		var center bool
+		var center, breakGroup bool
 		var centerX, centerY float64
 		c := &cobra.Command{
 			Use:   "modify",
@@ -1009,7 +1010,11 @@ CENTER; the CLI reads the live rendered bbox (rotation already baked in),
 converts to anchor coordinates, and dispatches the anchor patch. Exact by
 construction — moving never changes the anchor-to-center offset. Because
 ROTATING does change it, --center refuses a patch that also sets rotation:
-rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
+rotate first ('--patch {"rotation":…}'), then --center in a second call.
+
+Virtual groups (#173): a patch that changes x/y/rotation/layer of a member of a
+multi-part ` + "`pcb group`" + ` is refused (it would break the group) — use
+` + "`pcb group move`" + `, or --break-group to override.`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda pcb modify --id <pid> --patch '{"x":1000,"y":2000}'   # x/y = ANCHOR
   easyeda pcb modify --id <pid> --patch '{"rotation":90,"layer":"bottom"}'   # layer: top|bottom or 1|2, verified by readback
@@ -1052,6 +1057,11 @@ rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 					}
 					patch["x"], patch["y"] = ax, ay
 				}
+				if pcbModifyMovesPart(patch) {
+					if err := guardPcbGroupIntegrity(cfg, window, "pcb modify", []string{id}, true, breakGroup, stderr); err != nil {
+						return err
+					}
+				}
 				return dispatch(cfg, "pcb.component.modify", window,
 					map[string]any{"primitiveId": id, "patch": patch}, stdout, stderr)
 			},
@@ -1063,6 +1073,7 @@ rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 		c.Flags().BoolVar(&center, "center", false, "interpret --x/--y as the desired BBOX CENTER (converted to anchor via the live bbox)")
 		c.Flags().Float64Var(&centerX, "x", 0, "desired bbox-center x (mil; with --center)")
 		c.Flags().Float64Var(&centerY, "y", 0, "desired bbox-center y (mil; with --center)")
+		c.Flags().BoolVar(&breakGroup, "break-group", false, "allow repositioning one member of a virtual `pcb group` (breaks the group's geometry)")
 		pcb.AddCommand(c)
 	}
 
@@ -1147,8 +1158,14 @@ For copper routing (tracks/vias/fills) use 'pcb track-lock' instead.`,
 				if err != nil {
 					return err
 				}
-				return dispatch(cfg, "pcb.component.delete", window,
-					map[string]any{"primitiveIds": ids}, stdout, stderr)
+				// 虚拟组级联(#173):删除前先认出哪些是组成员(删后就没位号了)。
+				cascade := planPcbGroupDeleteCascade(cfg, window, ids, stderr)
+				if err := dispatch(cfg, "pcb.component.delete", window,
+					map[string]any{"primitiveIds": ids}, stdout, stderr); err != nil {
+					return err
+				}
+				cascadePcbGroupDelete(cfg, window, cascade, stderr)
+				return nil
 			},
 		}
 		c.Flags().StringVar(&idsRaw, "ids", "", "primitive IDs to delete — CSV: id1,id2 (required)")
@@ -1204,6 +1221,7 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 	// All require explicit --ids; none falls back to the canvas selection.
 	addLayoutOp := func(use, short, action, flagName, flagDesc string, withValue bool) {
 		var idsJSON, val string
+		var breakGroup bool
 		c := &cobra.Command{
 			Use:   use,
 			Short: short,
@@ -1224,6 +1242,9 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 					return err
 				}
 				payload["primitiveIds"] = ids
+				if err := guardPcbGroupIntegrity(cfg, window, "pcb "+use, ids, false, breakGroup, stderr); err != nil {
+					return err
+				}
 				return dispatch(cfg, action, window, payload, stdout, stderr)
 			},
 		}
@@ -1231,6 +1252,7 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 			c.Flags().StringVar(&val, flagName, "", flagDesc)
 		}
 		c.Flags().StringVar(&idsJSON, "ids", "", "primitive IDs — CSV: id1,id2 (required; never the canvas selection)")
+		c.Flags().BoolVar(&breakGroup, "break-group", false, breakGroupFlagHelp)
 		pcb.AddCommand(c)
 	}
 	addLayoutOp("align", "Align components by edge/center (left|right|top|bottom|centerX|centerY)",
@@ -1243,6 +1265,7 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 	{
 		var idsJSON string
 		var grid float64
+		var breakGroup bool
 		c := &cobra.Command{
 			Use:   "grid-snap",
 			Short: "Snap component anchors to a grid (PCB data units, mil-scale)",
@@ -1262,9 +1285,13 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 					return err
 				}
 				payload["primitiveIds"] = ids
+				if err := guardPcbGroupIntegrity(cfg, window, "pcb grid-snap", ids, false, breakGroup, stderr); err != nil {
+					return err
+				}
 				return dispatch(cfg, "pcb.grid_snap", window, payload, stdout, stderr)
 			},
 		}
+		c.Flags().BoolVar(&breakGroup, "break-group", false, breakGroupFlagHelp)
 		c.Flags().Float64Var(&grid, "grid", 0, "grid step in PCB data units (required)")
 		c.Flags().StringVar(&idsJSON, "ids", "", "primitive IDs — CSV: id1,id2 (required; never the canvas selection)")
 		pcb.AddCommand(c)
@@ -1272,6 +1299,7 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 	{
 		var idsJSON string
 		var dx, dy float64
+		var breakGroup bool
 		c := &cobra.Command{
 			Use:   "move",
 			Short: "Translate components by a relative (dx, dy) offset",
@@ -1291,9 +1319,14 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 					return err
 				}
 				payload["primitiveIds"] = ids
+				// 刚性平移:整组一起搬不破坏组,只拒「搬了组的一部分」。
+				if err := guardPcbGroupIntegrity(cfg, window, "pcb move", ids, true, breakGroup, stderr); err != nil {
+					return err
+				}
 				return dispatch(cfg, "pcb.components.move", window, payload, stdout, stderr)
 			},
 		}
+		c.Flags().BoolVar(&breakGroup, "break-group", false, "allow moving only part of a virtual `pcb group` (breaks the group's geometry)")
 		c.Flags().Float64Var(&dx, "dx", 0, "X offset")
 		c.Flags().Float64Var(&dy, "dy", 0, "Y offset")
 		c.Flags().StringVar(&idsJSON, "ids", "", "primitive IDs — CSV: id1,id2 (required; never the canvas selection)")
@@ -1303,6 +1336,7 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
 		var idsJSON, mode string
 		var pitch, gutter float64
 		var cols int
+		var breakGroup bool
 		c := &cobra.Command{
 			Use:   "arrange",
 			Short: "Coarse auto-layout SEED: cluster by shared nets, or pack a grid",
@@ -1336,9 +1370,13 @@ the placement priorities in pcb-layout-conventions.md (easyeda-agent) afterward.
 					return err
 				}
 				payload["primitiveIds"] = ids
+				if err := guardPcbGroupIntegrity(cfg, window, "pcb arrange", ids, false, breakGroup, stderr); err != nil {
+					return err
+				}
 				return dispatch(cfg, "pcb.components.arrange", window, payload, stdout, stderr)
 			},
 		}
+		c.Flags().BoolVar(&breakGroup, "break-group", false, breakGroupFlagHelp)
 		c.Flags().StringVar(&mode, "mode", "", "cluster (default) | grid")
 		c.Flags().Float64Var(&pitch, "pitch", 0, "component pitch within a block")
 		c.Flags().Float64Var(&gutter, "gutter", 0, "gutter between blocks")
@@ -3047,7 +3085,7 @@ exported DSN contains keepout entries before trusting the result.`,
 		var multiGap float64
 		var mainPins int
 		var gap, pitch, assemblyGap float64
-		var dryRun bool
+		var dryRun, breakGroup bool
 		var anchorCSV, excludeMainCSV string
 		c := &cobra.Command{
 			Use:   "auto-place",
@@ -3123,6 +3161,8 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 				}
 				opt.anchors = designatorSet(anchorCSV)
 				opt.excludeMain = designatorSet(excludeMainCSV)
+				// 虚拟组成员(#173)默认固定不动:规划器逐件摆放会拆散组。
+				opt.fixed = pcbGroupFixedBools(loadPcbGroupFixed(cfg, window, "pcb auto-place", breakGroup, stderr))
 				// Keep-out regions (same reader as pcb check's antenna rule) and the
 				// board outline bound every satellite slot.
 				if rres, rerr := requestAction(cfg, "pcb.region.list", window, nil); rerr != nil {
@@ -3183,6 +3223,7 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 		c.Flags().BoolVar(&noRotate, "no-rotate", false, "do not re-orient satellites (v1 translate-only behavior)")
 		c.Flags().Float64Var(&multiGap, "multi-gap", 0, "min bbox gap between multiple main chips (mil, default 150; 0 disables spacing)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the placement plan without moving anything")
+		c.Flags().BoolVar(&breakGroup, "break-group", false, "let auto-place move virtual `pcb group` members individually (default: they stay FIXED)")
 		pcb.AddCommand(c)
 	}
 
@@ -3191,7 +3232,7 @@ This is a SEED, not a final layout — verify with 'pcb drc'.
 	{
 		var mainPins int
 		var edgeMargin, partGap float64
-		var dryRun bool
+		var dryRun, breakGroup bool
 		c := &cobra.Command{
 			Use:   "place-constrained",
 			Short: "Tiered placement: edge-must parts (connectors/module/IPEX) → board edge + locked, then legalize the rest",
@@ -3240,6 +3281,8 @@ A SEED — verify with 'pcb layout-lint'. --dry-run prints the plan.
 				if partGap > 0 {
 					opt.partGap = partGap
 				}
+				// 虚拟组成员(#173)默认固定:按锚定件处理,原地不动并作为障碍。
+				opt.fixed = pcbGroupFixedBools(loadPcbGroupFixed(cfg, window, "pcb place-constrained", breakGroup, stderr))
 				// Snap edges to the REAL board outline when one exists; fall back to the
 				// part-cloud extent otherwise (and say which was used, so a flaky edge
 				// position is explainable rather than silent).
@@ -3337,6 +3380,7 @@ A SEED — verify with 'pcb layout-lint'. --dry-run prints the plan.
 		c.Flags().Float64Var(&edgeMargin, "edge-margin", 0, "gap between an edge part's bbox and the board edge (mil, default 45)")
 		c.Flags().Float64Var(&partGap, "part-gap", 0, "clearance between parts / part-to-hole (mil, default 14)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the placement plan without moving anything")
+		c.Flags().BoolVar(&breakGroup, "break-group", false, "let place-constrained move virtual `pcb group` members individually (default: they stay FIXED)")
 		pcb.AddCommand(c)
 	}
 

@@ -351,7 +351,18 @@ type Group struct {
 	// 组成为模块归属的单一事实来源后,说明的归属也必须跟着落在组上,否则块驱动的页
 	// 根本没有可写回的对象(认领表是空的)。
 	NoteIDs []string `json:"noteIds,omitempty"`
+	// Kind 区分组属于哪种文档:空 = 原理图页(历史文件全是这种),GroupKindPCB = PCB
+	// 文档(#173 PCB 侧)。两者共用 GroupsByPage(键都是 documentUuid,不会撞),但
+	// **跨页**读取(`sch group list --all-pages`、spec 回填)必须按它把 PCB 组挡在外面,
+	// 否则 PCB 的机械编组会被当成原理图模块收进去。
+	Kind string `json:"kind,omitempty"`
 }
+
+// GroupKindPCB marks a virtual group keyed by a PCB document UUID (#173).
+const GroupKindPCB = "pcb"
+
+// IsPCB reports whether the group belongs to a PCB document.
+func (g *Group) IsPCB() bool { return g != nil && g.Kind == GroupKindPCB }
 
 // GroupsForPage returns one document's persistent groups (nil when none).
 func (s *State) GroupsForPage(documentUUID string) []*Group {

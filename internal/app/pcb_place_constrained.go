@@ -383,6 +383,10 @@ type cpOptions struct {
 	edgeMargin float64 // gap between an edge part's bbox and the board edge
 	partGap    float64 // clearance between any two parts / part-to-hole
 	board      *cpRect // REAL board-outline bbox; nil → fall back to the part-cloud union extent
+	// fixed are virtual PCB group members (#173, upper-cased designators): they
+	// are kept exactly where they are (treated like block-anchored parts, no
+	// zone relocation) and act as obstacles for every other tier.
+	fixed map[string]bool
 }
 
 // cpFollowRadius 是「原本贴着这个端子」的判据半径（mil）。
@@ -566,8 +570,16 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 
 	// Classify.
 	kinds := make([]cpClass, len(comps))
+	groupFixed := make([]bool, len(comps))
 	for i, c := range comps {
 		kinds[i] = classifyCP(c, opt.mainPins)
+		if opt.fixed[strings.ToUpper(strings.TrimSpace(c.designator))] {
+			kinds[i], groupFixed[i] = cpAnchored, true
+			// 先于任何一档落子登记为占用:组成员原地不动,谁都不能被规划到它身上。
+			if c.hasBBox {
+				addFixed(cpRect{c.minX - m, c.minY - m, c.maxX + m, c.maxY + m}, c.layer)
+			}
+		}
 	}
 
 	// ── Tier 2: edge-must → snap to an edge, fix. ─────────────────────────────
@@ -956,6 +968,10 @@ func planConstrainedPlace(comps []cpComp, holes []cpHole, opt cpOptions) ([]apMo
 	// beats "keep where imported". A main already inside its zone is untouched.
 	for i, c := range comps {
 		if (kinds[i] != cpMainChip && kinds[i] != cpAnchored) || !c.hasBBox {
+			continue
+		}
+		if groupFixed[i] {
+			diags = append(diags, apDiag{Designator: c.designator, Reason: "group:fixed — virtual PCB group member, not moved (--break-group to override)"})
 			continue
 		}
 		cx, cy := c.bboxCenter()

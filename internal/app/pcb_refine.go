@@ -94,6 +94,9 @@ type refineOpts struct {
 	DryRun bool
 	// IncludeLocked 打开后才碰锁定件（默认不碰）。
 	IncludeLocked bool
+	// GroupFixed 是虚拟 PCB 组成员(#173,大写位号 → 原因):grid-snap 逐件各吸
+	// 各的格会改变组内相对几何,所以默认把它们并入不可动集合。--break-group 时为空。
+	GroupFixed map[string]string
 }
 
 func defaultRefineOpts() refineOpts {
@@ -136,6 +139,28 @@ type refineReport struct {
 type immovableReason struct {
 	Designator string
 	Reason     string
+}
+
+// mergeGroupImmovable folds virtual-group members (#173) into the immovable set.
+func mergeGroupImmovable(out map[string]string, list []immovableReason, fixed map[string]string) []immovableReason {
+	keys := make([]string, 0, len(fixed))
+	for k := range fixed {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		key := strings.ToUpper(strings.TrimSpace(k))
+		if key == "" {
+			continue
+		}
+		if _, dup := out[key]; dup {
+			continue
+		}
+		out[key] = fixed[k]
+		list = append(list, immovableReason{Designator: key, Reason: fixed[k]})
+	}
+	sort.SliceStable(list, func(i, j int) bool { return list[i].Designator < list[j].Designator })
+	return list
 }
 
 func buildImmovableSet(snap *boardSnapshot, includeLocked bool) (map[string]string, []immovableReason) {

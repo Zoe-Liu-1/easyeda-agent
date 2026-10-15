@@ -235,6 +235,10 @@ type apOptions struct {
 	// one-way packer pushed C1/C3 up into the ESP32 antenna keep-out.
 	keepouts []layoutBBox
 	board    *layoutBBox
+	// fixed are virtual PCB group members (#173, upper-cased designators): never
+	// moved. A fixed satellite stays put and becomes a keep-out for the others;
+	// a fixed main stays an anchor and vetoes multi-chip spacing.
+	fixed map[string]bool
 }
 
 // Satellite slot search along an edge: step and how far from the target pad.
@@ -300,6 +304,7 @@ type assignment struct {
 func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 	var mains, sats []int
 	var diags []apDiag
+	var fixedBoxes []layoutBBox
 	for i, c := range comps {
 		if !c.hasBBox {
 			continue
@@ -310,6 +315,11 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 			mains = append(mains, i)
 		case c.locked:
 			continue
+		case opt.fixed[strings.ToUpper(strings.TrimSpace(c.designator))]:
+			// 虚拟组成员(#173):原地不动,并作为其他卫星的禁入区 —— 否则卫星会被
+			// 打包进它的位置。
+			fixedBoxes = append(fixedBoxes, layoutBBox{MinX: c.minX, MinY: c.minY, MaxX: c.maxX, MaxY: c.maxY})
+			diags = append(diags, apDiag{c.designator, "group:fixed — virtual PCB group member, not moved (--break-group to override)"})
 		case highPin && connectorDesRe.MatchString(strings.TrimSpace(c.designator)):
 			// #131: a high-pin connector (USB-C, boxed header…) is a MECHANICAL
 			// anchor, not an electrical main — it must neither move nor own
@@ -328,6 +338,10 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 		}
 	}
 
+	if len(fixedBoxes) > 0 {
+		opt.keepouts = append(append([]layoutBBox(nil), opt.keepouts...), fixedBoxes...)
+	}
+
 	if len(mains) == 0 {
 		for _, s := range sats {
 			diags = append(diags, apDiag{comps[s].designator, "no main chip on board (>= mainPins distinct pins) to anchor against"})
@@ -344,6 +358,14 @@ func planAutoPlace(comps []apComp, opt apOptions) ([]apMove, []apDiag) {
 	// main. Single-chip boards (and multiGap=0) skip this entirely → unchanged v1.1.
 	if opt.multiGap > 0 && len(mains) > 1 && !mainsAre2D(comps, mains) {
 		shifts := spaceMains(comps, mains, opt.multiGap)
+		for mi, m := range mains {
+			if shifts[mi] != 0 && opt.fixed[strings.ToUpper(strings.TrimSpace(comps[m].designator))] {
+				// 组成员主芯片不能被横向拉开;整步跳过,而不是只挪一部分主芯片。
+				diags = append(diags, apDiag{comps[m].designator, "chip-spacing skipped — this main chip is a virtual PCB group member (--break-group to allow)"})
+				shifts = make([]float64, len(shifts))
+				break
+			}
+		}
 		work := make([]apComp, len(comps))
 		copy(work, comps)
 		for mi, m := range mains {

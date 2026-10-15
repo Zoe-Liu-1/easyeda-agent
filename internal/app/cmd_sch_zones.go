@@ -113,19 +113,26 @@ func parseSchZoneModuleFlags(items []string) (map[string]*schZoneClaim, error) {
 // claims and visual annotations are page-scoped; accepting an empty UUID would
 // collapse unrelated pages into the same workflow-state key.
 func currentSchematicDocumentUUID(cfg *appConfig, window string) (string, error) {
+	return currentDocumentUUIDOfType(cfg, window, "schematic")
+}
+
+// currentDocumentUUIDOfType returns the active document's UUID only when the
+// live context reports the wanted documentType ("schematic" | "pcb"); PCB
+// virtual groups (#173) key on the PCB document exactly like zones key on a page.
+func currentDocumentUUIDOfType(cfg *appConfig, window, want string) (string, error) {
 	cur, err := requestAction(cfg, "document.current", window, nil)
 	if err != nil {
 		return "", err
 	}
-	if cur.Context == nil || cur.Context.DocumentType != "schematic" {
+	if cur.Context == nil || cur.Context.DocumentType != want {
 		dt := "unknown"
 		if cur.Context != nil && cur.Context.DocumentType != "" {
 			dt = cur.Context.DocumentType
 		}
-		return "", fmt.Errorf("active document is %q, not a schematic", dt)
+		return "", fmt.Errorf("active document is %q, not a %s", dt, want)
 	}
 	if cur.Context.DocumentUUID == "" {
-		return "", fmt.Errorf("active schematic response omitted documentUuid")
+		return "", fmt.Errorf("active %s response omitted documentUuid", want)
 	}
 	return cur.Context.DocumentUUID, nil
 }

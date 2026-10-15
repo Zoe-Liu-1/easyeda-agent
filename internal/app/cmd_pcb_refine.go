@@ -32,14 +32,15 @@ import (
 
 func newPcbRefineCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var (
-		specPath string
-		apply    bool
-		asJSON   bool
-		maxShift float64
-		maxRound int
-		target   float64
-		gridMil  float64
-		withLock bool
+		specPath   string
+		apply      bool
+		asJSON     bool
+		maxShift   float64
+		maxRound   int
+		target     float64
+		gridMil    float64
+		withLock   bool
+		breakGroup bool
 	)
 	c := &cobra.Command{
 		Use:   "refine",
@@ -53,7 +54,8 @@ func newPcbRefineCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *
 			"BBClaw 69 器件板上 37/39 落格、最大位移 1.998mil、check findings 25→25 不变）。\n" +
 			"其余八维会照实报告「这一维低，但没有可安全自动化的对症手段」，不硬凑动作。\n\n" +
 			"三条护栏（都来自 #153 的要求，全部默认开启）：\n" +
-			"  · 不可动集合 —— 锁定件、已签字的 tier-1/2（孔与朝向经用户确认的边缘件）一律不碰\n" +
+			"  · 不可动集合 —— 锁定件、已签字的 tier-1/2（孔与朝向经用户确认的边缘件）、\n" +
+			"    虚拟 `pcb group` 成员（--break-group 放开）一律不碰\n" +
 			"  · 位移预算 —— 单件位移超 --max-shift 的**剔除而不是截断**（截断会把件放到\n" +
 			"    既不是原位也不是目标的第三个位置，比不动更糟）\n" +
 			"  · 逐步回滚 —— 按**步**而非按命令回滚，好的步不会被坏的步连累",
@@ -68,6 +70,7 @@ func newPcbRefineCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *
 			opts := defaultRefineOpts()
 			opts.DryRun = !apply
 			opts.IncludeLocked = withLock
+			opts.GroupFixed = loadPcbGroupFixed(cfg, *window, "pcb refine", breakGroup, stderr)
 			if maxShift > 0 {
 				opts.MaxShiftMil = maxShift
 			}
@@ -109,6 +112,7 @@ func newPcbRefineCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *
 	c.Flags().Float64Var(&target, "target", 0, "per-dimension pass mark (default 85)")
 	c.Flags().Float64Var(&gridMil, "grid", 0, "grid for the snap transform in mil (default 5 — catches sub-mil drift)")
 	c.Flags().BoolVar(&withLock, "include-locked", false, "also move parts locked in the editor (off by default — a lock is a decision)")
+	c.Flags().BoolVar(&breakGroup, "break-group", false, "let refine snap virtual `pcb group` members individually (default: they are immovable)")
 	return c
 }
 
@@ -155,6 +159,7 @@ func runRefineLoop(cfg *appConfig, window string, s0 *spec.Spec, opts refineOpts
 	// Legacy workflow/tier records remain readable history, but are not execution
 	// permissions and therefore cannot silently freeze parts in this command.
 	immovable, immovableList := buildImmovableSet(snap, opts.IncludeLocked)
+	immovableList = mergeGroupImmovable(immovable, immovableList, opts.GroupFixed)
 	rep.Immovable = len(immovableList)
 
 	scoreOpts := layoutScoreOpts{gridMil: gridMil}
