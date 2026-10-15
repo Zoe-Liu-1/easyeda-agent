@@ -34,6 +34,7 @@ import {
 	isPowerRailNet,
 	normalizeDeviceRef,
 	pcbPadExtent,
+	pcbEmbeddedParent,
 	pcbImportDuplicateIdentities,
 	planOtherPropertyBackfill,
 	polygonSourceToPoints,
@@ -4800,4 +4801,38 @@ test('silk label must sit nearer its own part than any other part', () => {
 	assert.equal(silkLabelOwnedBy(aboveC3, c1, 'C1', obs), false, 'a slot beyond C3 names the wrong part');
 	const leftOfC1 = { minX: -228, minY: -796, maxX: -186, maxY: -751 };
 	assert.equal(silkLabelOwnedBy(leftOfC1, c1, 'C1', obs), true);
+});
+
+test('PCB embedded ownership needs the parent id followed by a child e<digits> id, not a bare prefix', () => {
+	const components = ['e2', 'ba45f3'];
+	assert.equal(pcbEmbeddedParent('e200', components), undefined);
+	assert.equal(pcbEmbeddedParent('e20e5', components), undefined);
+	assert.equal(pcbEmbeddedParent('e2', components), undefined);
+	assert.equal(pcbEmbeddedParent('e2e5', components), 'e2');
+	assert.equal(pcbEmbeddedParent('ba45f3e184', components), 'ba45f3');
+	assert.equal(pcbEmbeddedParent('ba45f3x', components), undefined);
+});
+
+test('pcb.route.delete deletes a top-level track whose id merely starts with a component id and still refuses embedded vias', async () => {
+	const prim = (id: string, extra: Record<string, unknown> = {}): any => ({
+		getState_PrimitiveId: () => id, getState_PrimitiveLock: () => false, getState_Net: () => 'GND', getState_Layer: () => 1,
+		getState_StartX: () => 0, getState_StartY: () => 0, getState_EndX: () => 10, getState_EndY: () => 0, getState_LineWidth: () => 10,
+		getState_X: () => 0, getState_Y: () => 0, getState_HoleDiameter: () => 12, getState_Diameter: () => 24, ...extra,
+	});
+	let lines = [prim('e200')];
+	const vias = [prim('ba45f3e184'), prim('e2e5')];
+	const deleted: Array<Array<string>> = [];
+	(globalThis as any).eda = {
+		pcb_PrimitiveLine: { getAll: async () => lines, delete: async (ids: Array<string>) => { deleted.push(ids); lines = lines.filter(l => !ids.includes(l.getState_PrimitiveId())); return true; } },
+		pcb_PrimitiveArc: { getAll: async () => [], delete: async () => true },
+		pcb_PrimitiveVia: { getAll: async () => vias, delete: async (ids: Array<string>) => { deleted.push(ids); return true; } },
+		pcb_PrimitiveComponent: { getAll: async () => [prim('e2'), prim('ba45f3')] },
+	};
+	try {
+		const res: any = await runAction('pcb.route.delete', { primitiveIds: ['e200', 'ba45f3e184', 'e2e5'] });
+		assert.deepEqual(deleted, [['e200']]);
+		assert.equal(res.result.count, 1);
+		assert.deepEqual(res.result.notDeletable.map((n: any) => [n.primitiveId, n.parentComponent]), [['ba45f3e184', 'ba45f3'], ['e2e5', 'e2']]);
+	}
+	finally { delete (globalThis as any).eda; }
 });

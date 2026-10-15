@@ -189,7 +189,8 @@ EasyEDA 原生自动布线或已配置的外部路由器，完成后都按网回
   stale ids reported as `notFound`. The result's `removed[]` echoes each primitive's full
   before-state (net/layer/geometry) so the audit log can recreate it. **Embedded-primitive
   pre-check + readback (#120, live-verified)**: a footprint-embedded via's id is its
-  parent component's primitiveId + a suffix (`ba45…f3` + `e184`); deleting one lies
+  parent component's primitiveId + its own `e<digits>` id (`ba45…f3` + `e184`) — a bare
+  prefix is not ownership (top-level `e200` under component `e2` stays deletable); deleting one lies
   TWICE — the SDK returns true AND an immediate getAll shows it gone, but the next
   save/reload re-materializes it from the footprint. The handler refuses these UPFRONT
   (`notDeletable[]` with the parent component + `ok:false`; use `pcb via-bond` to net
