@@ -207,10 +207,9 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 			return failReadback(nil, "Document or FIFO freshness changed; geometry verification is incomplete.")
 		}
 		previousSeq = after.Seq
-		findings := schguard.AnalyzeWireGeometry(after.Result)
-		if addingWire {
-			findings = schguard.NewGeometryFindings(baseline, findings)
-		}
+		// Every guarded write is judged by its own delta: unchanged pre-existing
+		// findings stay diagnostics, while new, changed or multiplied ones fail.
+		findings := schguard.NewGeometryFindings(baseline, schguard.AnalyzeWireGeometry(after.Result))
 		if len(findings) != 0 {
 			return failReadback(findings, "New invalid geometry observed after write. Repair the measured state; API success is not validation success.")
 		}
@@ -251,12 +250,12 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 	if len(observations) > 1 {
 		res.Result["geometryGuard"].(map[string]any)["observations"] = observations
 	}
-	if req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin" {
+	res.Result["geometryGuard"].(map[string]any)["baselineFindings"] = baseline
+	if addingWire {
 		res.Result["geometryGuard"].(map[string]any)["scope"] = "pin-exit-direction/wire-through-body/wire-coverage/wire-contact-topology"
-		res.Result["geometryGuard"].(map[string]any)["baselineFindings"] = baseline
-		if len(baseline) > 0 {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("%d pre-existing geometry finding(s) retained as diagnostics; this validates the added wire, not the whole page.", len(baseline)))
-		}
+	}
+	if len(baseline) > 0 {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d pre-existing geometry finding(s) retained as diagnostics; this validates this write's changes, not the whole page.", len(baseline)))
 	}
 	return res, nil
 }
