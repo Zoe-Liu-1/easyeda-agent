@@ -531,7 +531,7 @@ func zaaVerticalOrderOK(pins []layoutPin, terms []zaaTermExec) bool {
 // J_USB 事故真正缺的判据。
 func zaaVerifyConnectivity(cfg *appConfig, win, docUUID string, snaps []zaaPinSnap) error {
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", win,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "verify connectivity")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "verify connectivity")
 	if err != nil {
 		return fmt.Errorf("断言②无法运行(没有证明不算过):%w", err)
 	}
@@ -949,7 +949,7 @@ func zaaRigidWhy(desig string, want, got layoutBBox) string {
 func zaaLandedRecheck(cfg *appConfig, win, docUUID string, out *zoneArrangeOut,
 	execs []zaaMemberExec, opts partitionOpts) ([]zaaLandedZone, error) {
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", win,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "zone-arrange 落地复判")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "zone-arrange 落地复判")
 	if err != nil {
 		return nil, err
 	}

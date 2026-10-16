@@ -632,7 +632,7 @@ func newSchClustersCmd(cfg *appConfig, window *string, stdout, stderr io.Writer)
 // `layout-lint` 默认根本看不见(非 part 图元全被排除),不报就是假绿。
 func bapReportClusters(cfg *appConfig, window string, man *bapManifest, stderr io.Writer) *schPageFit {
 	res, err := requestAction(cfg, "schematic.components.list", window,
-		map[string]any{"includeBBox": true, "includePins": true})
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false})
 	if err != nil {
 		fmt.Fprintf(stderr, "warn: 虚拟组体检读不到几何(%v)—— 请手动跑 `easyeda sch clusters`\n", err)
 		return nil

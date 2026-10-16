@@ -372,7 +372,7 @@ func destaggerHostPin(comps []layoutComp, x, y float64) (desig, pin string, ok b
 // 第四个返回值是活页 documentUuid(响应信封的 context),给收敛台账按页记账用;
 // 取不到时是空串,台账退化成整工程一本账,绝不因此报错。
 func fetchDestaggerGeometry(cfg *appConfig, window string) ([]layoutComp, []schGroupWire, string, error) {
-	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{"includeBBox": true, "includePins": true})
+	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false})
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("components.list 失败: %w", err)
 	}

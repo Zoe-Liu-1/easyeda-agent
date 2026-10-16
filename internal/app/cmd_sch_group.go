@@ -842,7 +842,7 @@ func expandSchGroupForMove(cfg *appConfig, window, groupRef string) (*schGroupMo
 		return nil, err
 	}
 	res, err := requestAutolayoutAction(pinned, "schematic.components.list", win,
-		map[string]any{"includePins": true}, docUUID, "resolve group members")
+		map[string]any{"includePins": true, "includePinNets": false}, docUUID, "resolve group members")
 	if err != nil {
 		return nil, err
 	}

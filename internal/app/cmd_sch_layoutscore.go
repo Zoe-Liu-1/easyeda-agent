@@ -976,7 +976,7 @@ func newSchLayoutScoreCmd(cfg *appConfig, window *string, stdout, stderr io.Writ
 			// includeWires:宿主 pin 判定的电气匹配输入(anchor→stub→pin),
 			// 缺了自动退几何最近 —— 与 autoconnect 同一 wires payload/解析。
 			res, err := requestAction(cfg, "schematic.components.list", *window,
-				map[string]any{"includeBBox": true, "includePins": true, "includeWires": true})
+				map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false, "includeWires": true})
 			if err != nil {
 				return err
 			}

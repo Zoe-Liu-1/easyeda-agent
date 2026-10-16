@@ -274,7 +274,7 @@ func runGroupArrange(cfg *appConfig, window string, gap float64, dryRun, annotat
 		return fmt.Errorf("本页没有虚拟组 —— 第二层排的是**组**;先用 `sch block-apply` 落块(会自动归组)或 `sch group create` 手工建组")
 	}
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", win,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "group-arrange 读场景")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "group-arrange 读场景")
 	if err != nil {
 		return fmt.Errorf("读场景:%w", err)
 	}

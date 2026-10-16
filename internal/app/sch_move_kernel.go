@@ -1105,7 +1105,7 @@ func (o *daemonMoveOps) resolveDoc() error {
 
 func (o *daemonMoveOps) scene() ([]layoutComp, []schGroupWire, error) {
 	res, err := requestAutolayoutAction(o.cfg, "schematic.components.list", o.win,
-		map[string]any{"includeBBox": true, "includePins": true}, o.docUUID, "move-kernel 快照")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, o.docUUID, "move-kernel 快照")
 	if err != nil {
 		return nil, nil, err
 	}

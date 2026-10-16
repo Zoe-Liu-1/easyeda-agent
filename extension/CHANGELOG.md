@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CLI：20 处只用引脚几何的原理图回读（`sch connect --pin` 目标解析、块内直连、移动内核、zone move/tidy/arrange/plan、group move/arrange/tidy、autolayout、destagger、clusters、marker 几何、layout-score）改为 `includePinNets:false`，不再顺带跑网表导出——导出后紧跟的写入会被宿主以 cmdKey 拒绝（#256/#257）。需要引脚网名的读取（autoconnect 幂等、外围直连、compose/design-diff 对账、gate 导线交叉、block-apply 写前硬门、power-layout 回放断言）保持不变。
+
 ## [1.13.1] - 2026-10-16
 
 - CLI：`easyeda update` 换完二进制后自动在后台重启仍在跑旧版本的已安装 daemon（`--restart-daemon`，默认开启，启动参数回到默认），报告新增 `daemonRestart`；任何命令发现已安装的 daemon 比当前 CLI 旧（安装脚本、包管理器升级后）也会自动重启它。`make dev` 等源码构建的 daemon 一律不动。思路来自 #278（@XianD7），按 v1.12.0 已有的按需后台启动收窄实现，不引入系统服务注册。

@@ -42,7 +42,7 @@ func validatePinTarget(pinSet, xSet, ySet bool) error {
 func resolveSchPin(cfg *appConfig, window, ref string) (acPin, error) {
 	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{
 		"includeBBox": true,
-		"includePins": true,
+		"includePins": true, "includePinNets": false,
 	})
 	if err != nil {
 		return acPin{}, err

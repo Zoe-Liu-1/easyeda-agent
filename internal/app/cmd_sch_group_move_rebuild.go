@@ -80,7 +80,7 @@ func groupsMoveRebuild(cfg *appConfig, window string, groupRefs []string, dx, dy
 	// 1. 读场景 —— 规划(边界收拢)所需的几何。执行侧的电气快照由内核自己采
 	//    (快照与执行同一份场景,不会拿 stale 数据 mutate)。
 	res, err := requestAutolayoutAction(pinned, "schematic.components.list", win,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "group-move 读场景")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "group-move 读场景")
 	if err != nil {
 		return fmt.Errorf("读场景:%w", err)
 	}

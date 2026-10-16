@@ -1059,7 +1059,7 @@ func tidySettledPins(cfg *appConfig, win, docUUID, desig string) ([]layoutPin, e
 	for attempt := 0; attempt < tidySettleAttempts; attempt++ {
 		time.Sleep(tidySettleDelay)
 		res, err := requestAutolayoutAction(cfg, "schematic.components.list", win,
-			map[string]any{"includePins": true}, docUUID, "measure tidy pins")
+			map[string]any{"includePins": true, "includePinNets": false}, docUUID, "measure tidy pins")
 		if err != nil {
 			return nil, err
 		}

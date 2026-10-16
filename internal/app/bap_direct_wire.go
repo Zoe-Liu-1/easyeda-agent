@@ -79,7 +79,7 @@ func bapWireDirectPairs(cfg *appConfig, window string, nets []bapNet, stderr io.
 	if len(cands) == 0 {
 		return done
 	}
-	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{"includeBBox": true, "includePins": true})
+	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false})
 	if err != nil {
 		fmt.Fprintf(stderr, "direct wiring skipped (geometry unavailable: %v) — autoconnect wires every net\n", err)
 		return done

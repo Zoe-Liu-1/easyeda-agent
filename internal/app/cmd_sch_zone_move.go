@@ -485,7 +485,7 @@ func runSchZoneMove(cfg *appConfig, window, zoneRef string, dx, dy, textPad floa
 	//    快照,展开必须「全区一份」(逐单元展开会把区内跨单元直连线误判成
 	//    SharedTrees 留在原地,刚体被撕开;评审 F1)。
 	res, err := requestAutolayoutAction(pinned, "schematic.components.list", win,
-		map[string]any{"includePins": true, "includeBBox": true}, docUUID, "read zone-move geometry")
+		map[string]any{"includePins": true, "includePinNets": false, "includeBBox": true}, docUUID, "read zone-move geometry")
 	if err != nil {
 		return err
 	}

@@ -793,7 +793,7 @@ func computeZoneTidy(pinned *appConfig, win, docUUID, zoneRef string, hGap, vGap
 	}
 
 	res, err := requestAutolayoutAction(pinned, "schematic.components.list", win,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "read zone-tidy geometry")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "read zone-tidy geometry")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1055,7 +1055,7 @@ func zoneTidyExpandUnitIDs(cfg *appConfig, win, docUUID string, u zoneTidyUnit) 
 		return set.AllIDs(), nil
 	}
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", win,
-		map[string]any{"includePins": true}, docUUID, "resolve loose part "+u.Ref)
+		map[string]any{"includePins": true, "includePinNets": false}, docUUID, "resolve loose part "+u.Ref)
 	if err != nil {
 		return nil, err
 	}

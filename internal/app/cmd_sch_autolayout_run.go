@@ -405,7 +405,7 @@ func saveAutolayoutDocument(cfg *appConfig, window, targetUUID, phase string) er
 func autolayoutGeometryPayload(includeConnectivity bool) map[string]any {
 	payload := map[string]any{
 		"includeBBox": true,
-		"includePins": true,
+		"includePins": true, "includePinNets": false,
 	}
 	if includeConnectivity {
 		payload["includeConnectivitySummary"] = true

@@ -1415,7 +1415,7 @@ func computePartitionPlan(cfg *appConfig, window, docUUID string, opts partition
 	// 只读 + exec_js 建图元(zone-draw)/ 建文字(sch note),不发 modify;要挪件请走
 	// `sch zone-arrange --apply` 自己的取数(它本来就带引脚,且清扫在前)。
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", window,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "read partition geometry")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "read partition geometry")
 	if err != nil {
 		return partitionPlan{}, nil, err
 	}

@@ -268,7 +268,7 @@ func runOfficialAutolayout(cfg *appConfig, window string, apply, rewire bool, st
 	// a hard failure; this command has already mutated the page, so returning zero
 	// on a skipped read/check would falsely certify an unknown state.
 	res, err := requestAction(cfg, "schematic.components.list", win, map[string]any{
-		"includeBBox": true, "includePins": true, "includeConnectivitySummary": true,
+		"includeBBox": true, "includePins": true, "includePinNets": false, "includeConnectivitySummary": true,
 	})
 	if err != nil {
 		return fmt.Errorf("official autolayout post-check could not read back geometry: %w", err)

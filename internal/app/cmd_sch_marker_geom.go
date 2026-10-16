@@ -484,7 +484,7 @@ func mergeMarkerGeomFindings(cfg *appConfig, window string, allPages bool, overl
 
 // mergeMarkerGeomFindingsWith 是带**预读快照**的版本(geom=nil 时行为不变)。
 func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer, geom *schGeomSnapshot) {
-	payload := map[string]any{"includeBBox": true, "includePins": true}
+	payload := map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}
 	if allPages {
 		payload["allPages"] = true
 	}

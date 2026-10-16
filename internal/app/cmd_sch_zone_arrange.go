@@ -270,7 +270,7 @@ func computeZoneArrange(cfg *appConfig, window, docUUID string, opts partitionOp
 		return nil, nil, fmt.Errorf("zone-arrange: restore pinned page %s: %w", docUUID, err)
 	}
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", window,
-		map[string]any{"includeBBox": true, "includePins": true}, docUUID, "read zone-arrange geometry")
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, docUUID, "read zone-arrange geometry")
 	if err != nil {
 		return nil, nil, err
 	}
