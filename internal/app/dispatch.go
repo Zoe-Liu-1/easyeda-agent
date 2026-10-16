@@ -600,7 +600,15 @@ func encodeResultEnvelope(res *actionResult, report any, stdout io.Writer) error
 // so the caller can post-process artifacts. The streamed bytes are unchanged;
 // callers read res.Artifacts for the persisted file path.
 func dispatchCapture(cfg *appConfig, action, window string, payload any, stdout io.Writer) (*actionResult, error) {
-	respBody, err := postAction(cfg, action, window, payload, defaultActionTimeout)
+	return dispatchCaptureTimed(cfg, action, window, payload, stdout, defaultActionTimeout)
+}
+
+// dispatchCaptureTimed is dispatchCapture with a caller-chosen round-trip budget
+// for actions whose cost grows with the page (clear, export) and that a hidden,
+// throttled tab plus a concurrent autosave pushed past the default (v1.13.0
+// acceptance: export 18s DISPATCH_FAILED, clear landed after its deadline).
+func dispatchCaptureTimed(cfg *appConfig, action, window string, payload any, stdout io.Writer, timeout time.Duration) (*actionResult, error) {
+	respBody, err := postAction(cfg, action, window, payload, timeout)
 	if err != nil {
 		return nil, libraryWriteFailureError(action, respBody, err)
 	}

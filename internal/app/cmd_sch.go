@@ -483,7 +483,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 					}
 					payload["expectedPagePrimitives"] = expectedPagePrimitives
 				}
-				res, err := dispatchCapture(cfg, "schematic.page.clear", window, payload, stdout)
+				res, err := dispatchCaptureTimed(cfg, "schematic.page.clear", window, payload, stdout, 120*time.Second)
 				if err != nil {
 					return err
 				}
@@ -2077,7 +2077,7 @@ the selection). Without --ids it exports the whole active page.`,
 				if out != "" {
 					payload["fileName"] = filepath.Base(out)
 				}
-				res, err := dispatchCapture(cfg, "schematic.export.image", window, payload, stdout)
+				res, err := dispatchCaptureTimed(cfg, "schematic.export.image", window, payload, stdout, 90*time.Second)
 				if err != nil {
 					return err
 				}
