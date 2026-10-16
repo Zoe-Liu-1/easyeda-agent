@@ -174,6 +174,8 @@ func validateSchematicLayout(b Block, add func(string, string)) {
 		return
 	}
 	switch {
+	case len(layout.Tiles) > 0:
+		validateSchTiles(b, layout, add)
 	case layout.IsLegacy() && layout.IsRelational():
 		add("schematic_layout", "roles(绝对偏移)与 flow/attach/pair(关系)不可混用 —— "+
 			"两种形态会给同一个件两个种子点;legacy 已废弃,新块只写关系")

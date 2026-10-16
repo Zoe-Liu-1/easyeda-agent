@@ -101,6 +101,10 @@ type SchematicLayout struct {
 	// Orient 只说**意图**(竖放/横放),不说角度 —— 具体 90 还是 270 由求解器按
 	// 引脚朝向消解。
 	Orient map[string]string `json:"orient,omitempty"`
+	// Tiles(功能框形态)把块拆成几个框:核心芯片独占一框只挂标签,外围按功能各成
+	// 一框、框内直连,框之间靠网络标签 —— 参考原理图的排法。与上面的顶层关系互斥,
+	// 关系写进各框的 layout。见 tiles.go。
+	Tiles []SchematicTile `json:"tiles,omitempty"`
 }
 
 // IsRelational reports whether the template declares relationships (the form the
@@ -204,10 +208,18 @@ func Get(id string) (Block, bool, error) {
 	if err != nil {
 		return Block{}, false, err
 	}
-	want := strings.TrimPrefix(id, "block.")
+	parent, tile, tiled := strings.Cut(id, TileSeparator)
+	want := strings.TrimPrefix(parent, "block.")
 	for _, b := range all {
-		if b.ID == id || strings.TrimPrefix(b.ID, "block.") == want {
-			return b, true, nil
+		if b.ID == parent || strings.TrimPrefix(b.ID, "block.") == want {
+			if !tiled {
+				return b, true, nil
+			}
+			t, err := b.Tile(tile)
+			if err != nil {
+				return Block{}, false, err
+			}
+			return t, true, nil
 		}
 	}
 	return Block{}, false, nil

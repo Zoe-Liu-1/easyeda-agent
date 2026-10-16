@@ -5,7 +5,7 @@
   "author": "@zhoushoujianwork",
   "contributors": [],
   "added": "v0.12.1",
-  "updated": "v0.13.1",
+  "updated": "v1.13.2",
   "source": "official-ref:Espressif《ESP32-S3 Hardware Design Guidelines》(esp32-s3_hardware_design_guidelines) §2.1 电源(逐脚去耦/10uF 体电容)、§2.2 上电时序与复位(CHIP_PU RC: R=10k C=1uF)、§2.3 Flash/PSRAM(VDD_SPI 供外挂 flash + SPICS0 上拉)、§2.4 晶振(40MHz 3225 + 对称负载帽)、§2.7 strapping(GPIO0 上拉默认 flash 启动) + 官方最小系统外围原理图(Schematic Checklist)。脚名 2026-07-15 在 ceshi 临时页 place C2913194/C179171/C47089401 后 sch read 逐脚核实",
   "validated": null,
   "parts": {
@@ -155,40 +155,15 @@
     }
   },
   "schematic_layout": {
-    "note": "关系形态(#180;2026-10-15 #43 E2E 改写):只声明归属与朝向,坐标由块布局求解器按锚件 U 的实测引脚算。旧版固定 dx/dy 偏移表现场落图 10/59 连接失败:5 颗去耦横排顶部、0402 横放使电源/地桩线左右互撞;R_EN/C_EN/R_IO0 探出图纸左沿;C_SPI/C_FLASH marker 重叠;SPICS0/SPIQ 桩线穿器件本体。现每个外围件贴它服务的 U 引脚,去耦/上下拉/负载帽竖放。FLASH 的去耦与 CS 上拉在原理图上贴 U 的同网脚(VDD_SPI/SPICS0)——求解器 v1 只按锚件引脚求解;贴近 flash 是 PCB 约束,见 pcb_layout 的 flash-adjacency/decap-adjacency。 现状(2026-10-15 现场):预检已通过,但求解器把左右两列引脚的外围件全堆在锚件上下两头,FLASH 与 X 放不下 → 整块安全回滚;块仍为 draft,待求解器支持「沿引脚朝外方向成列排布」后再验。",
-    "anchor": "U",
-    "attach": {
-      "C_BULK": "U.2",
-      "C_VDD3P3": "U.3",
-      "C_VDDA": "U.55",
-      "C_RTC": "U.VDD3P3_RTC",
-      "C_CPU": "U.VDD3P3_CPU",
-      "R_EN": "U.CHIP_PU",
-      "C_EN": "U.CHIP_PU",
-      "R_IO0": "U.GPIO0",
-      "X": "U.XTAL_P",
-      "C_X1": "U.XTAL_P",
-      "C_X2": "U.XTAL_N",
-      "FLASH": "U.SPICLK",
-      "C_SPI": "U.VDD_SPI",
-      "C_FLASH": "U.VDD_SPI",
-      "R_CS": "U.SPICS0"
-    },
-    "orient": {
-      "C_BULK": "vertical",
-      "C_VDD3P3": "vertical",
-      "C_VDDA": "vertical",
-      "C_RTC": "vertical",
-      "C_CPU": "vertical",
-      "C_SPI": "vertical",
-      "C_FLASH": "vertical",
-      "C_EN": "vertical",
-      "R_EN": "vertical",
-      "R_IO0": "vertical",
-      "C_X1": "vertical",
-      "C_X2": "vertical",
-      "R_CS": "vertical"
-    }
+    "note": "功能框形态(2026-10-17,#43):照嘉立创考证参考原理图的排法 —— 核心芯片独占一框,每个脚只挂短网络标签;去耦电容单独排成一排(3V3 上/GND 下,经电源符号连);EN RC + IO0 上拉一框;晶振 + 两颗负载帽一框且框内直连;flash 与它的 VDD_SPI 去耦/CS 上拉各一框。框间网络标签名取芯片脚功能名(XTAL_P、SPICLK…)。此前把全部外围用干线挂在芯片脚旁(attach 关系形态),左侧 EN/IO0 一簇挤到 sch gate clusters 失败,而图纸其余大片空着 —— 拥挤是结构问题,不是间距参数问题。无源件排用 roles 偏移:框内是固定小排列,与落在页面哪里无关。电阻 rotation 270 = 2 脚(电源侧)朝上。",
+    "tiles": [
+      {"name": "core", "roles": ["U"]},
+      {"name": "decap", "roles": ["C_BULK", "C_VDD3P3", "C_VDDA", "C_RTC", "C_CPU"], "layout": {"roles": {"C_BULK": {"dx": 0, "dy": 0, "rotation": 90}, "C_VDD3P3": {"dx": 40, "dy": 0, "rotation": 90}, "C_VDDA": {"dx": 80, "dy": 0, "rotation": 90}, "C_RTC": {"dx": 120, "dy": 0, "rotation": 90}, "C_CPU": {"dx": 160, "dy": 0, "rotation": 90}}}},
+      {"name": "reset_boot", "roles": ["R_EN", "C_EN", "R_IO0"], "layout": {"roles": {"R_EN": {"dx": 0, "dy": 0, "rotation": 270}, "C_EN": {"dx": 60, "dy": 0, "rotation": 90}, "R_IO0": {"dx": 120, "dy": 0, "rotation": 270}}}},
+      {"name": "xtal", "roles": ["X", "C_X1", "C_X2"], "layout": {"anchor": "X", "attach": {"C_X1": "X.1", "C_X2": "X.3"}, "orient": {"C_X1": "vertical", "C_X2": "vertical"}}},
+      {"name": "flash", "roles": ["FLASH"]},
+      {"name": "flash_passives", "roles": ["C_FLASH", "C_SPI", "R_CS"], "layout": {"roles": {"C_FLASH": {"dx": 0, "dy": 0, "rotation": 90}, "C_SPI": {"dx": 40, "dy": 0, "rotation": 90}, "R_CS": {"dx": 100, "dy": 0, "rotation": 270}}}}
+    ]
   },
   "schematic_notes": [
     "R8 内封 8MB Octal PSRAM → 不外挂 PSRAM。代价:**GPIO33~GPIO37 共 5 个脚**(GPIO33=SPIIO4/DQ4、GPIO34=SPIIO5/DQ5、GPIO35=SPIIO6/DQ6、GPIO36=SPIIO7/DQ7、GPIO37=SPIDQS/DQS/DM)与 SPICS1(pin28)被内封 PSRAM 占用,原理图上必须悬空、固件里不可复用。依据 Espressif HDG 原文:『When 1.8 V or 3.3 V, octal, in-package or off-package SPI flash/PSRAM is used, GPIO33 ~ GPIO37 are occupied and cannot be used for other functions』(v0.13.1 订正:本条此前只列 GPIO35/36/37,漏掉 GPIO33/34 —— 照旧版复用会把 DQ4/DQ5 当普通 GPIO 用,PSRAM 直接坏)。普通 ESP32-S3 裸片要外挂四线 PSRAM 见 block.esp32s3_chip_minsys(只占 SPICS1,GPIO33~37 全保留)。",

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
 	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
 )
 
@@ -57,6 +58,7 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 	type module struct {
 		name    string
 		members []string
+		tile    bool // a frame of a tiled block (blocks.SchematicTile)
 	}
 	var modules []*module
 	byInstance := map[string]*module{}
@@ -71,6 +73,7 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 				m = prev
 			} else {
 				m.name = g.BlockID + "#" + g.Instance
+				m.tile = strings.Contains(g.BlockID, blocks.TileSeparator)
 				byInstance[key] = m
 				modules = append(modules, m)
 			}
@@ -103,6 +106,12 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 		// module (≥5 pins, e.g. an SPI flash) is joined by net labels by design and
 		// judged as its own solo module. Pin count stands in for the part class
 		// block-apply uses (bslIsSimplePeripheral): passives have 2 pins, crystals 4.
+		// A frame of a tiled block made only of 2-pin parts (decoupling bank, a
+		// pull-up row) has no core: its parts join the chip through power symbols
+		// and labels, the reference-schematic convention the tile exists for.
+		if m.tile && pinCount[members[0]] <= 2 {
+			continue
+		}
 		owned := map[string]bool{members[0]: true}
 		var peripherals []string
 		for _, ref := range members[1:] {

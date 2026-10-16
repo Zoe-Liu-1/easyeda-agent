@@ -514,6 +514,25 @@ func bapBlockRect(originX, originY float64, offsets map[string]bapRoleOffset, ha
 // so in the warnings, because a placed-but-overlapping block is diagnosable by
 // layout-lint while a refused apply loses all the work.
 func bapResolveOrigin(in bapInput, offsets map[string]bapRoleOffset, half func(string) float64) (float64, float64, *bapOrigin, []string) {
+	// 先要求晕圈也留在图纸内(块紧贴图纸边时 marker 照样长到纸外 —— 真机 2026-10-17:
+	// 功能框 reset_boot 被排到 y=760,两个上拉电阻朝上的 3V3 符号无处可落);这一档
+	// 没有干净结果(要降级或带警告)时退回本体口径,页面挤时的旧行为不变。
+	if in.Sheet != nil {
+		if x, y, o, w := bapResolveOriginEdge(in, offsets, half, true); len(w) == 0 {
+			return x, y, o, w
+		}
+	}
+	return bapResolveOriginEdge(in, offsets, half, false)
+}
+
+// bapEdgeMarkerReach is how far markers reach past a block's estimated body
+// toward a sheet edge: a power/ground symbol on a vertical pin (stub 18 +
+// symbol + name band ≈ 40) or an elbow rise (≤30) plus its label row. Long
+// netport labels leave sideways and the scorer turns them away from the edge,
+// so the full label halo would only crowd the search out of usable space.
+const bapEdgeMarkerReach = 60.0
+
+func bapResolveOriginEdge(in bapInput, offsets map[string]bapRoleOffset, half func(string) float64, edgeHalo bool) (float64, float64, *bapOrigin, []string) {
 	origin := &bapOrigin{
 		RequestedX: in.OriginX, RequestedY: in.OriginY,
 		X: in.OriginX, Y: in.OriginY,
@@ -523,9 +542,9 @@ func bapResolveOrigin(in bapInput, offsets map[string]bapRoleOffset, half func(s
 	// 的组重叠判据量的正是它。障碍侧则由 schBlockObstacleBoxes 提供**实测**的全图元
 	// 盒(含 marker 的文字带),两侧口径一致 —— 见 bapMarkerHalo 上方的复盘。
 	//
-	// 晕圈**只进障碍判定,不进 inBounds/oversize**:后者问的是"这一块装不装得进图纸",
-	// 是本体几何的问题;把预留的晕圈算进去会让中等块凭空变 oversize,而 oversize 分支
-	// 会**关掉**边界约束 —— 为了更严反而更松,那是净损失。
+	// 晕圈**不进 oversize**:"这一块装不装得进图纸"是本体几何的问题;把预留的晕圈算进去
+	// 会让中等块凭空变 oversize,而 oversize 分支会**关掉**边界约束 —— 为了更严反而更松。
+	// 边界判定只在晕圈本身装得进可用区时才按晕圈收紧(见下)。
 	halo := bapMarkerHalo(in.Block, in.Instance, in.Bind)
 	// 间隙判定一律走 boxesGapOverlap:旧代码用 rectGap(欧氏角距,math.Hypot),
 	// 对角方向名义留 20 实际只保证 ~14 单轴 —— 判据必须逐轴。
@@ -562,6 +581,10 @@ func bapResolveOrigin(in bapInput, offsets map[string]bapRoleOffset, half func(s
 		if bw > uw || bh > uh {
 			oversize = true
 		} else {
+			// edgeHalo 档:晕圈装得进可用区时,边界也按晕圈判(见 bapResolveOrigin)。
+			if e := math.Min(halo, bapEdgeMarkerReach); edgeHalo && bw+2*e <= uw && bh+2*e <= uh {
+				usable = layoutBBox{MinX: usable.MinX + e, MinY: usable.MinY + e, MaxX: usable.MaxX - e, MaxY: usable.MaxY - e}
+			}
 			inBounds = func(b layoutBBox) bool { return boxInside(b, usable) }
 		}
 	}

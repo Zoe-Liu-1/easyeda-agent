@@ -108,9 +108,25 @@
           "type": "object",
           "minProperties": 1,
           "additionalProperties": {"enum": ["vertical", "horizontal"]}
+        },
+        "tiles": {
+          "description": "功能框形态:核心独占一框只挂标签,外围按功能各成一框、框内直连,框间靠网络标签。与顶层 roles/anchor/flow/attach/pair 互斥;每框的 layout 用同一套规则校验。",
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["name", "roles"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "pattern": "^[^#]+$"},
+              "roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+              "layout": {"$ref": "#/$defs/schematic_layout"}
+            },
+            "additionalProperties": false
+          }
         }
       },
       "anyOf": [
+        {"required": ["tiles"]},
         {"required": ["roles"]},
         {"required": ["flow"]},
         {"required": ["attach"]},

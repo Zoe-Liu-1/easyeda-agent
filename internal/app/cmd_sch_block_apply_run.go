@@ -769,6 +769,11 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 		return fmt.Errorf("no such block %q — `easyeda blocks ls` to list", blockID)
 	}
 	in.Block = b
+	if tiles, terr := b.Tiles(); terr != nil {
+		return terr
+	} else if len(tiles) > 0 {
+		return runTiledBlockApply(cfg, window, b, tiles, in, partsPath, dryRun, asJSON, maxAttempts, stdout, stderr)
+	}
 
 	if in.Topology, err = blockTopology(b); err != nil {
 		return err

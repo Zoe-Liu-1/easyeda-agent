@@ -787,16 +787,7 @@ func TestBslSolveAround_PairFirstIsAnchor(t *testing.T) {
 // reserve a compact envelope around its anchor — a single row above it was
 // ~1500 wide and made the preflight refuse a block that fits the sheet.
 func TestBslSeedOffsetsWrapsRowsAroundAnchor(t *testing.T) {
-	all, err := blocks.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var blk blocks.Block
-	for _, b := range all {
-		if b.ID == "block.esp32s3r8_chip_minsys" {
-			blk = b
-		}
-	}
+	blk, _ := esp32s3r8Block(t)
 	sl, err := blk.SchematicLayout()
 	if err != nil || sl == nil {
 		t.Fatalf("layout: %v", err)

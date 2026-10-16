@@ -1,8 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -41,12 +43,21 @@ func esp32s3r8Pins(ox, oy float64) (layoutBBox, map[string]acPin) {
 	return bbox, pins
 }
 
+// esp32s3r8Block is the ESP32-S3R8 chip block in its former attach-relational
+// form (every peripheral hung off its chip pin by the trunk solver), frozen in
+// testdata: the library block is now tiled, but attach blocks remain solver
+// input and this dense chip is its hardest case.
 func esp32s3r8Block(t *testing.T) (blocks.Block, bslRelations) {
 	t.Helper()
-	blk, ok, err := blocks.Get("block.esp32s3r8_chip_minsys")
-	if err != nil || !ok {
-		t.Fatal("block missing", err)
+	raw, err := os.ReadFile("testdata/blocks/esp32s3r8_chip_attach.json")
+	if err != nil {
+		t.Fatal(err)
 	}
+	var blk blocks.Block
+	if err := json.Unmarshal(raw, &blk); err != nil {
+		t.Fatal(err)
+	}
+	blk.Raw = raw
 	sl, err := blk.SchematicLayout()
 	if err != nil {
 		t.Fatal(err)

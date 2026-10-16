@@ -39,7 +39,7 @@ Block；只有当它需要参数化生成拓扑时才提升为新 Block，不能
 
 ## 布局提示的执行范围
 
-`schematic_layout` 有两种互斥形式，新模板优先使用关系形式：
+`schematic_layout` 有三种互斥形式，新模板优先使用关系形式（多脚主控用下文的功能框形式）：
 
 ```json
 {
@@ -58,6 +58,25 @@ Block；只有当它需要参数化生成拓扑时才提升为新 Block，不能
   `internal_nets` 电气依据。`pair` 组内须为相同 part，`orient` 用 `vertical/horizontal`。
 - 兼容的 legacy `roles:{ROLE:{dx,dy,rotation}}` 使用相对块原点偏移，y 向上；
   dx/dy 落 5 raw 网格、rotation 为 0/90/180/270，并覆盖全部角色。不能与关系形式混用。
+
+**多脚主控用功能框形式 `tiles`**（与上面两种互斥）：核心芯片独占一框，每个脚只挂短标签；
+外围按功能各成一框（去耦排、复位/上拉、晶振、flash…），框内用各自的 `layout` 直连，
+框之间靠网络标签。每个角色恰好属于一框；跨框的网自动成为同名端口，名字取芯片脚功能名
+（`U.XTAL_P` → `XTAL_P`，数字脚退为 `U_4`）。`blocks.Get("<id>#<框名>")` 派生出该框，
+`block-apply` 逐框执行：核心落在 `--at`，其余框自动找离核心最近、连标签外圈都放得下的空位。
+只含 2 脚件的框（去耦排）不要求直连核心，经电源符号相连即可；见 `esp32s3r8_chip_minsys`。
+
+```json
+{
+  "schematic_layout": {
+    "tiles": [
+      {"name": "core", "roles": ["U"]},
+      {"name": "xtal", "roles": ["X", "C_X1", "C_X2"],
+       "layout": {"anchor": "X", "attach": {"C_X1": "X.1", "C_X2": "X.3"}}}
+    ]
+  }
+}
+```
 
 `block-apply` 已有关系求解：先放锚件，读取引脚与边界，再计算其余位置；放件后用真实
 bbox 扩展避让，并在接线前检查几何。关系被跳过或约束未执行时，manifest 会列入

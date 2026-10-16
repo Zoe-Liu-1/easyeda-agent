@@ -98,3 +98,43 @@ func TestPeripheralDirectFindingExemptsLabelJoinedICs(t *testing.T) {
 		t.Fatal("a label-only 2-pin peripheral must still fail peripheral-direct")
 	}
 }
+
+// A frame of a tiled block holding only 2-pin parts (a decoupling bank) has no
+// core: its caps reach the chip through power symbols by design. The same
+// label-joined caps registered as an ordinary block still must be wired.
+func TestPeripheralDirectSkipsPassiveOnlyTile(t *testing.T) {
+	raw, err := os.ReadFile("testdata/peripheral-direct/composed.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page map[string]any
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatal(err)
+	}
+	comps := page["components"].([]any)
+	for _, c := range comps {
+		m := c.(map[string]any)
+		if m["designator"] != "C1" {
+			continue
+		}
+		b, _ := json.Marshal(m)
+		var cp map[string]any
+		_ = json.Unmarshal(b, &cp)
+		cp["designator"], cp["primitiveId"] = "C9", "id-C9"
+		for _, p := range cp["pins"].([]any) {
+			pm := p.(map[string]any)
+			pm["x"] = pm["x"].(float64) + 5000
+		}
+		page["components"] = append(comps, cp)
+		break
+	}
+	bank := func(blockID string) []*schGroup {
+		return []*schGroup{{ID: "g1", Name: "bank", BlockID: blockID, Instance: "C9", Members: []string{"C9", "C2"}}}
+	}
+	if got := peripheralDirectFindingsFor(page, bank("block.esp32s3r8_chip_minsys#decap")); len(got) != 0 {
+		t.Fatalf("a passive-only tile must not fail peripheral-direct, got %+v", got)
+	}
+	if got := peripheralDirectFindingsFor(page, bank("block.led_indicator_gpio")); len(got) == 0 {
+		t.Fatal("the same unwired passives in an ordinary block must still fail peripheral-direct")
+	}
+}

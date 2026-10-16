@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
@@ -246,5 +247,25 @@ func TestBapResolveOrigin_DegradesToBodyRulerWhenPageIsTight(t *testing.T) {
 	}
 	if len(warns) == 0 {
 		t.Error("晕圈没留住必须说出来,否则用户不知道要去跑 sch clusters")
+	}
+}
+
+// Live 2026-10-17: the reset_boot tile was auto-placed at y=760, its body inside
+// the sheet but its pull-ups' 3V3 symbols past the top edge. With room to spare,
+// the search must keep the marker halo inside the sheet too; a tight page still
+// falls back to the body (the halo test above).
+func TestBapResolveOrigin_KeepsHaloInsideSheetWhenRoomAllows(t *testing.T) {
+	offsets, half, blk := ledBlockPlan(t)
+	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 1170, MaxY: 825}
+	// The body fits just under the top edge; its halo does not.
+	in := bapInput{Block: blk, Instance: "led1", OriginX: 600, OriginY: 740, Sheet: sheet,
+		Bind: map[string]string{"CTRL": "LED_GPIO"}}
+	if !boxInside(bapBlockRect(600, 740, offsets, half), schUsableArea(*sheet)) {
+		t.Fatal("setup: the body itself must fit at the request")
+	}
+	x, y, _, warns := bapResolveOrigin(in, offsets, half)
+	reach := math.Min(bapMarkerHalo(blk, in.Instance, in.Bind), bapEdgeMarkerReach)
+	if env := bapGrow(bapBlockRect(x, y, offsets, half), reach); !boxInside(env, schUsableArea(*sheet)) {
+		t.Fatalf("with an empty sheet around, the halo must stay inside: origin (%.0f,%.0f) env %+v warns %v", x, y, env, warns)
 	}
 }
