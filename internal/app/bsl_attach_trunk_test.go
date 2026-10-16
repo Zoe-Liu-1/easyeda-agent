@@ -381,8 +381,10 @@ func TestBapPlanBlockWires_RejectsUnclearRoutesWithReason(t *testing.T) {
 				"x": p[0] - 20, "y": p[1], "bbox": map[string]any{"minX": p[0] - 30, "minY": p[1] - 3, "maxX": p[0] - 24, "maxY": p[1] + 3},
 				"pins": []any{map[string]any{"pinNumber": "1", "x": p[0], "y": p[1], "rotation": 0.0, "net": "", "noConnected": false}}})
 		}, "碰到别的引脚 TP9:1"},
-		{"existing wire across the trunk", func(r map[string]any) {
-			r["wires"] = []any{map[string]any{"primitiveId": "w9", "x0": mid[0], "y0": mid[1] - 5, "x1": mid[0], "y1": mid[1] + 5, "net": "OTHER"}}
+		// A foreign wire ending ON the trunk (T contact) conducts and would merge.
+		// A bare interior X crossing does not conduct and is allowed (see below).
+		{"existing wire touching the trunk", func(r map[string]any) {
+			r["wires"] = []any{map[string]any{"primitiveId": "w9", "x0": mid[0], "y0": mid[1], "x1": mid[0], "y1": mid[1] + 5, "net": "OTHER"}}
 		}, "碰到页面已有导线"},
 	}
 	for _, tc := range cases {

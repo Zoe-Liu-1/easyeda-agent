@@ -32,7 +32,7 @@ import (
 
 // bapWireRoute 是一根要画的导线。
 type bapWireRoute struct {
-	Kind   string       `json:"kind"` // trunk | branch | facing
+	Kind   string       `json:"kind"` // trunk | branch | facing | maze
 	Net    string       `json:"net"`
 	Host   string       `json:"host,omitempty"` // 干线挂在哪只核心脚上(DESIG:PIN)
 	Member string       `json:"member"`         // 这根线落到的脚(DESIG:PIN)
@@ -120,6 +120,42 @@ type bapWirePlanner struct {
 	routes   []bapWireRoute
 	baseline []schguard.Finding
 	rawWires []any
+	maze     *bapMazeState // 迷宫兜底的共享预算(bap_block_maze.go),首次用到时建
+	pinNets  map[string]string // DESIG:PIN(号或名)→ 块内规划网,首次用到时建
+	// reserveExits 只在迷宫兜底阶段打开:那时干线/分支已定,还没导线的脚之后要由
+	// autoconnect 引桩,迷宫线不得压它们的引出位。更早的阶段不知道谁会被导线接走。
+	reserveExits bool
+}
+
+// bapPinExitLen 是 autoconnect 给引脚打标记时引出的桩长(offset 18 取网格 20)。
+const bapPinExitLen = 20.0
+
+// pinWired reports whether a planned route already ends on q (as member or host).
+func (p *bapWirePlanner) pinWired(q acPin) bool {
+	for _, r := range p.routes {
+		for _, ref := range []string{r.Member, r.Host} {
+			if ref == q.Designator+":"+q.PinNumber || (q.PinName != "" && ref == q.Designator+":"+q.PinName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pinNetOf 返回块内引脚的规划网;块外引脚与块内没连网的脚返回 ""。
+func (p *bapWirePlanner) pinNetOf(q acPin) string {
+	if p.pinNets == nil {
+		p.pinNets = map[string]string{}
+		for _, n := range p.in.Nets {
+			for _, m := range n.Members {
+				p.pinNets[m] = n.Net
+			}
+		}
+	}
+	if n := p.pinNets[q.Designator+":"+q.PinNumber]; n != "" {
+		return n
+	}
+	return p.pinNets[q.Designator+":"+q.PinName]
 }
 
 // segClear 判一段新线 a→b(网 net)是否清白。ends 是允许挨着的引脚(本段两端的脚),
@@ -160,8 +196,35 @@ func (p *bapWirePlanner) segClear(a, b [2]float64, net string, ends []acPin, own
 			return false, fmt.Sprintf("碰到别的引脚 %s:%s", q.Designator, q.PinNumber)
 		}
 	}
+	// 块内别的网的脚之后还要由 autoconnect 引桩打标记:导线压住它的引出位,桩就无处可出
+	// (现场 apply15:迷宫线贴着 FLASH 右侧脚走,CLK/DI/HOLD 与 X1:2 每个方向都碰外网线)。
+	for _, q := range p.in.Scene.Pins {
+		if (q.Designator == pa.Designator && q.PinNumber == pa.PinNumber && pa.Designator != "") ||
+			(q.Designator == pb.Designator && q.PinNumber == pb.PinNumber && pb.Designator != "") {
+			continue
+		}
+		if !p.reserveExits {
+			break
+		}
+		qn := p.pinNetOf(q)
+		if qn == "" || qn == net || q.PinRotation == nil || p.pinWired(q) {
+			continue
+		}
+		ux, uy, ok := bapDirVec(outwardDirection(q))
+		if !ok {
+			continue
+		}
+		exit := [2]float64{q.X + ux*bapPinExitLen, q.Y + uy*bapPinExitLen}
+		if bapSegsIntersect(a, b, [2]float64{q.X, q.Y}, exit) {
+			return false, fmt.Sprintf("压到 %s:%s 的引出位(它之后要接 %s)", q.Designator, q.PinNumber, qn)
+		}
+	}
+	// 导线之间只按导通判:端点落在对方线上(含 T)或共线重叠才相连并会被宿主合并;
+	// 内部十字交叉不导通(schguard.SegmentsContact,与几何守卫和 lib-layout 同一把尺),
+	// 原理图里正常允许。原先按包围盒相交一律拒绝,Flash 的 SPI 线因引脚次序对不上
+	// 必须交叉,于是全部退回标签(现场 apply15-17)。
 	for _, w := range p.in.Scene.Wires {
-		if bapSegsIntersect(a, b, [2]float64{w.X0, w.Y0}, [2]float64{w.X1, w.Y1}) {
+		if plSegmentsContact(a, b, [2]float64{w.X0, w.Y0}, [2]float64{w.X1, w.Y1}) {
 			return false, "碰到页面已有导线(会被自动合并)"
 		}
 	}
@@ -171,7 +234,7 @@ func (p *bapWirePlanner) segClear(a, b [2]float64, net string, ends []acPin, own
 		}
 	}
 	for _, s := range p.planned {
-		if s.Net != net && bapSegsIntersect(a, b, s.A, s.B) {
+		if s.Net != net && plSegmentsContact(a, b, s.A, s.B) {
 			return false, "与别的网(" + s.Net + ")已规划的导线相接/交叉"
 		}
 	}
@@ -225,6 +288,9 @@ func bapPlanBlockWires(in bapWireInput) bapWirePlan {
 	var out bapWirePlan
 	wired := map[string]bool{}
 	failed := map[string]bool{}
+	// blocked:形状够得着、但规划好的通道被东西挡住的成员。求解器给它留过通道,挡住
+	// 说明布局/采集有问题,该回源头修,不拿迷宫绕一大圈去掩盖(见 mazeFallbacks)。
+	blocked := map[string]bool{}
 	fail := func(member, net, host, why string) {
 		failed[member] = true
 		out.Fallback = append(out.Fallback, bapWireFallback{Member: member, Net: net, Host: host, Reason: why})
@@ -366,6 +432,7 @@ func bapPlanBlockWires(in bapWireInput) bapWirePlan {
 				owners := map[string]bool{P.Designator: true, M.Designator: true}
 				if ok, why := p.routeClear(pts, n.Net, ends, owners); !ok {
 					fail(c.ref, n.Net, host, why)
+					blocked[c.ref] = true
 					continue
 				}
 				p.add(bapWireRoute{Kind: "trunk", Net: n.Net, Host: host, Member: c.ref, Points: pts})
@@ -449,12 +516,17 @@ func bapPlanBlockWires(in bapWireInput) bapWirePlan {
 			pts := [][2]float64{{M.X, M.Y}, best}
 			if ok, why := p.routeClear(pts, n.Net, []acPin{M}, map[string]bool{M.Designator: true}); !ok {
 				fail(m, n.Net, "", why)
+				blocked[m] = true
 				continue
 			}
 			p.add(bapWireRoute{Kind: "branch", Net: n.Net, Member: m, Points: pts})
 			wired[m] = true
 		}
 	}
+
+	// ⑤ 迷宫兜底:前几步因形状(直线/一个弯够不到、没有线树)退回标签的非地网成员
+	//    交给 A* 绕线器再试(bap_block_maze.go)。
+	p.mazeFallbacks(&out, wired, blocked)
 	out.Routes = p.routes
 
 	// ④ 端口网整网都被导线接住时,别处没有 marker 印出它的名字 —— 在第一棵干线的末端
@@ -524,10 +596,10 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 	wp := bapPlanBlockWires(bapWireInput{Nets: plan.Nets, Attach: attach, Scene: buildScene(res.Result), Comps: comps, Raw: res.Result})
 	rep.Fallback = append(rep.Fallback, wp.Fallback...)
 	brokenTree := map[string]string{} // 干线一段没画上,同一棵树后面的线可能 T 在缺的那段上
+	brokenNet := map[string]string{}  // 迷宫线可能 T 在同网任何一段已规划的线上
 	for _, r := range wp.Routes {
-		if r.Kind == "trunk" && brokenTree[r.Host] != "" {
-			rep.Fallback = append(rep.Fallback, bapWireFallback{Member: r.Member, Net: r.Net, Host: r.Host,
-				Reason: "同一棵干线的前一段没画上(" + brokenTree[r.Host] + ")"})
+		if why := bapRouteBrokenDependency(r, brokenTree, brokenNet); why != "" {
+			rep.Fallback = append(rep.Fallback, bapWireFallback{Member: r.Member, Net: r.Net, Host: r.Host, Reason: why})
 			continue
 		}
 		pts := bapCompactRoute(r.Points)
@@ -544,6 +616,7 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 			if r.Kind == "trunk" {
 				brokenTree[r.Host] = r.Member
 			}
+			brokenNet[r.Net] = r.Member
 			continue
 		}
 		fmt.Fprintf(stderr, "wire ✓ %s %s → %s as %s\n", r.Kind, r.Member, bapOr(r.Host, "tree"), r.Net)
@@ -654,4 +727,19 @@ func bapCompactRoute(pts [][2]float64) [][2]float64 {
 		out = append(out, q)
 	}
 	return out
+}
+
+// bapRouteBrokenDependency says why a route must not be issued because a wire it
+// joins was not created: a trunk segment continues its host's tree; branch and
+// maze routes T onto any wire already planned for the net. Issuing them anyway
+// left a dangling stub that was still dropped from autoconnect — a silent open
+// (review of 3636d20). "" means the route may be issued.
+func bapRouteBrokenDependency(r bapWireRoute, brokenTree, brokenNet map[string]string) string {
+	if r.Kind == "trunk" && brokenTree[r.Host] != "" {
+		return "同一棵干线的前一段没画上(" + brokenTree[r.Host] + ")"
+	}
+	if (r.Kind == "maze" || r.Kind == "branch") && brokenNet[r.Net] != "" {
+		return "同网先前的一根线没画上(" + brokenNet[r.Net] + "),这根线可能接在缺的那段上"
+	}
+	return ""
 }

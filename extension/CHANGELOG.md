@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CLI：`sch block-apply` 干线/单弯接不上的块内非地成员改由 lib-layout 的 A* 正交绕线器兜底（kind `maze`，适配层直接用执行端的实测场景、不重读网表），并放行不导通的十字交叉（与 `schguard.SegmentsContact` 同一把尺；端点相接、T 接、共线重叠仍拒）；迷宫阶段为还要接标签的块内引脚预留 20 raw 引出位；同网先前一根线下发失败时，T 在其上的分支/迷宫线不再下发（防悬空短线被当作已接）。求解器不再给将用导线直连的块内两脚专线核心脚预留标签通道，Flash 贴到 SPI 脚旁。现场 ESP32-S3R8 芯片级块：22 根直连（9 根迷宫）、16 网与实时网表一致、退出 0；Flash CLK 仍为标签（迷宫单次节点上限）。
+
 - CLI：`sch block-apply` 把 attach 外围按「干线」用真实导线接到所贴核心脚（竖放 2 脚分立件挂在核心脚引出方向的干线上，同一只脚的件共用一棵线树）；证不清白的成员退回同名标签并逐条写进 manifest `wiring.fallback`。现场 ESP32-S3R8 芯片级块：14 根干线全部画上、16 网与实时网表一致（去耦、EN/IO0 RC、晶振与负载电容）；Flash 多脚信号仍为标签。修复的几何根因：竖放阻容引脚连接点离中心实测 20（原按 10，落线被吃掉）；回读坐标的浮点噪声改为圆整后判定；下发前去掉重复点（宿主拒绝零长度线段）。
 
 - CLI：20 处只用引脚几何的原理图回读（`sch connect --pin` 目标解析、块内直连、移动内核、zone move/tidy/arrange/plan、group move/arrange/tidy、autolayout、destagger、clusters、marker 几何、layout-score）改为 `includePinNets:false`，不再顺带跑网表导出——导出后紧跟的写入会被宿主以 cmdKey 拒绝（#256/#257）。需要引脚网名的读取（autoconnect 幂等、外围直连、compose/design-diff 对账、gate 导线交叉、block-apply 写前硬门、power-layout 回放断言）保持不变。

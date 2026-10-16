@@ -337,7 +337,8 @@ func bslHostPinLanes(nets [][]string, anchorRole string, pins map[string]acPin, 
 }
 
 // bslHostPinLanesExcept 同 bslHostPinLanes,但跳过 skip 里的宿主脚(按编号)—— 走干线的
-// 宿主脚不挂 marker,它的通道由干线自己的几何(bslSolveTrunks)占位。
+// 宿主脚不挂 marker,它的通道由干线自己的几何(bslSolveTrunks)占位;专线宿主脚
+// (bslWiredHostPins)同理,求解器调用时一并跳过。
 func bslHostPinLanesExcept(nets [][]string, anchorRole string, pins map[string]acPin, host layoutBBox, reach float64, skip map[string]bool) []layoutBBox {
 	if len(pins) == 0 {
 		return nil
@@ -435,6 +436,62 @@ func bslHostPinLanesExcept(nets [][]string, anchorRole string, pins map[string]a
 		default: // up
 			out = append(out, layoutBBox{MinX: math.Min(b.MinX, p.X), MinY: p.Y, MaxX: math.Max(b.MaxX, p.X), MaxY: p.Y + d})
 		}
+	}
+	return out
+}
+
+// bslWiredHostPins 是会被块执行器用导线直连、**不挂 marker** 的宿主脚(按编号):它所在的
+// 块内网没有 PORT、不是地,恰好两只脚 —— 宿主这一只和一个贴在宿主上的件(rel.Attach 指向
+// 宿主)的一只。这种网是专线(ESP32-S3R8 的 SPICLK/SPID/SPIQ/SPIWP/SPIHD ↔ W25Q64),
+// block-apply 用干线/分支/迷宫把两端连成真实导线,两端都不印网名;再给宿主脚留 marker
+// 通道,通道就把它要连的那个件挤出去 —— #43 E2E:右列 SPI 五脚的通道 + 干线走廊把 FLASH
+// 推到 x≈940,离 SPI 脚 400 远,迷宫在信封里够不着,五根 SPI 全部退回标签。
+// 执行器绕线失败时这只脚仍会退回标签(manifest.wiring.fallback 逐条报),那是现场要看的
+// 退化,不是这里该预留的常态。
+func bslWiredHostPins(nets [][]string, rel bslRelations, anchorRole string, pins map[string]acPin) map[string]bool {
+	out := map[string]bool{}
+	for _, net := range nets {
+		if bslNetIsGround(net) {
+			continue
+		}
+		hostPin, other, refs, port := "", "", 0, false
+		for _, m := range net {
+			if strings.HasPrefix(m, "PORT:") {
+				port = true
+				break
+			}
+			r, p, ok := splitBlockPinRef(m)
+			if !ok {
+				continue
+			}
+			refs++
+			if r == anchorRole {
+				hostPin = strings.TrimSuffix(p, acPinFanoutSuffix)
+			} else {
+				other = r
+			}
+		}
+		if port || refs != 2 || hostPin == "" || other == "" {
+			continue
+		}
+		if tRole, _, ok := splitBlockPinRef(rel.Attach[other]); !ok || tRole != anchorRole {
+			continue
+		}
+		if q, ok := pins[hostPin]; ok {
+			out[q.PinNumber] = true
+		}
+	}
+	return out
+}
+
+// bslMergeSkip 返回 a ∪ b(都可为 nil),不改动入参。
+func bslMergeSkip(a, b map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
 	}
 	return out
 }
@@ -1064,7 +1121,9 @@ func bslSolveAroundCore(
 	// 放不下退回的)外排,避开干线的导线与标签。
 	var trunk bslTrunkResult
 	attachPhase = true
-	nonTrunkLanes := bslHostPinLanesExcept(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole), trunkKeys)
+	// 专线宿主脚(bslWiredHostPins)由执行器用导线接、不挂 marker:与干线宿主脚一样不占通道。
+	wiredPins := bslWiredHostPins(nets, rel, anchorRole, anchorPins)
+	nonTrunkLanes := bslHostPinLanesExcept(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole), bslMergeSkip(trunkKeys, wiredPins))
 	ts := newBslTrunkSolver(nets, trunkHosts, anchorBBox, hull, anchorPins, anchorRole, live, nonTrunkLanes, usable)
 	ts.pass(true)
 	nearBodies, nearClusters, nearWired := ts.snapshot()
@@ -1079,7 +1138,7 @@ func bslSolveAroundCore(
 			pendingHosts = append(pendingHosts, h)
 		}
 	}
-	skipDone := map[string]bool{}
+	skipDone := bslMergeSkip(nil, wiredPins)
 	for k := range trunkKeys {
 		if !pendingKeys[k] {
 			skipDone[k] = true
@@ -1536,7 +1595,7 @@ func bslRelocateAnchor(blk blocks.Block, rel bslRelations, nets [][]string, role
 		reach = r
 	}
 	hull := bslHostHull(anchorBBox, pins)
-	lanes := bslHostPinLanes(nets, anchorRole, pins, anchorBBox, reach)
+	lanes := bslHostPinLanesExcept(nets, anchorRole, pins, anchorBBox, reach, bslWiredHostPins(nets, rel, anchorRole, pins))
 	foot := append([]layoutBBox{hull}, lanes...)
 	lo, hi := hull, hull
 	for _, l := range lanes {

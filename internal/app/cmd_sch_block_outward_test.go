@@ -137,7 +137,18 @@ func TestBslRelocateAnchor_ESP32S3R8FromPlannerOrigin(t *testing.T) {
 		others := []layoutBBox{*tb}
 		solved, _ := bslSolveAround(blk, rel, nets, reach, "U", pins, anchor, append(others, anchor), &usable)
 		if bslSolveComplete(rel, "U", solved) {
+			// 2026-10-16: with the SPI host pins wired to FLASH owning no lanes, the
+			// planner origin solves as is (live apply14 relocated (-20,0) only because
+			// FLASH found no slot). Same acceptance as a relocated anchor.
 			t.Logf("planner origin (%.0f,%.0f) already solves; relocation not needed", ox, oy)
+			if reach != nil {
+				checkExecutorWiresPassives(t, blk, rel, solved, ox, oy)
+			}
+			checkTallAnchorOutward(t, blk, rel, reach, ox, oy, usable, *tb)
+			if reach != nil {
+				solved, notes := bslSolveAround(blk, rel, nets, reach, "U", pins, anchor, append(others, anchor), &usable)
+				checkFlashBesideSPI(t, blk, solved, notes, pins, bslHostHull(anchor, pins), true)
+			}
 			continue
 		}
 		dx, dy, s2, notes, ok := bslRelocateAnchor(blk, rel, nets, reach, "U", pins, anchor, anchor, others, usable)
@@ -244,7 +255,9 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 	}
 	// 2026-10-16: host pins wired by a trunk carry no marker, so they own no lane;
 	// every other connected U pin still does.
-	trunkPins := bslTestTrunkPins(rel, pins, solved)
+	// Host pins on a dedicated two-pin net to an attach member (U.SPICLK ↔ FLASH.CLK
+	// …) are wired by the executor and own no lane either (bslWiredHostPins).
+	trunkPins := bslMergeSkip(bslTestTrunkPins(rel, pins, solved), bslWiredHostPins(nets, rel, "U", pins))
 	lanes := bslHostPinLanesExcept(nets, "U", pins, anchor, reachOf("U"), trunkPins)
 	connected := map[string]bool{}
 	for _, net := range nets {
@@ -267,6 +280,7 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 	}
 	checkTrunkWires(t, blk, rel, pins, anchor, solved)
 	hull := bslHostHull(anchor, pins)
+	checkFlashBesideSPI(t, blk, solved, notes, pins, hull, false)
 	env := hull
 	var bodies []layoutBBox
 	var roles []string
@@ -387,6 +401,53 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 		}
 		t.Logf("envelope %+v", env)
 	}
+}
+
+// checkFlashBesideSPI: the W25Q64 is solved by attach (never the grid) and sits
+// right of the core's right column. With near (the live planner origin on an
+// empty A4, live instance net names) its estimated body also starts within
+// bslFlashMaxGap of the core's pin tips and its centre stays inside the y-range
+// of the SPI pin group it is wired to (SPIHD … SPID) — close enough for the
+// executor's branch/maze wiring envelope (#43 live apply14: x≈940, 400 from the
+// pins, every SPI net fell back to labels).
+//
+// near is not asserted for every origin: when the SPICS0 trunk (R_CS) is still
+// pending as FLASH is placed, SPICS0 keeps its marker lane and the trunk
+// corridor, and FLASH lands past them (origin (300,400): body 375 away).
+func checkFlashBesideSPI(t *testing.T, blk blocks.Block, solved []bslSolved, notes []string, pins map[string]acPin, hull layoutBBox, near bool) {
+	t.Helper()
+	const bslFlashMaxGap = 250.0
+	for _, n := range notes {
+		if strings.HasPrefix(n, "FLASH") && strings.Contains(n, "走网格") {
+			t.Errorf("FLASH fell back to the grid: %s", n)
+		}
+	}
+	for _, s := range solved {
+		if s.Role != "FLASH" {
+			continue
+		}
+		if s.Source != "attach" {
+			t.Errorf("FLASH solved by %s, want attach", s.Source)
+		}
+		b := bslPartBox(blk.Parts["FLASH"].Part)
+		gap := s.X + b.MinX - hull.MaxX
+		if gap <= 0 {
+			t.Errorf("FLASH at (%.0f,%.0f) is not right of the core", s.X, s.Y)
+		}
+		if !near {
+			return
+		}
+		t.Logf("FLASH at (%.0f,%.0f): body %.0f right of the core pin tips", s.X, s.Y, gap)
+		if gap > bslFlashMaxGap {
+			t.Errorf("FLASH at (%.0f,%.0f): body starts %.0f right of the core pin tips, want (0, %.0f]", s.X, s.Y, gap, bslFlashMaxGap)
+		}
+		lo, hi := pins["SPIHD"].Y, pins["SPID"].Y
+		if s.Y < lo || s.Y > hi {
+			t.Errorf("FLASH centre y=%.0f outside the SPI pin group [%.0f, %.0f]", s.Y, lo, hi)
+		}
+		return
+	}
+	t.Error("FLASH not solved")
 }
 
 // bslTestHasFallback reports whether solver notes say a member fell back to the
