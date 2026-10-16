@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-16
+
+- CLI：关系块 `sch block-apply` 的预留包络按行折返、在锚件上下交替，外围件多的块不再被预检误判放不下；实测引脚下原位解不开时，锚件平移到最近可整块解开的位置。求解前的引脚回读改为 `includePinNets:false`（只要几何），不再跑网表导出，紧随的锚件平移不再被宿主以 cmdKey 拒绝（ESP32-S3R8 芯片级块现场整块落图、16 网与实时网表一致；外围仍以网标签相连，`peripheral-not-direct` 照常报出）。
+- CLI：`sch zone-draw` / `zone move` / `zone-plan` 清除分区框改走 typed `schematic.primitives.delete` 逐个删除并等落定回读（复用 `deleteVerifiedOneByOne`），不再在 exec_js 里删完立刻回读——未落定快照曾把刚删的框报成 survived，使 `zone move` 重画框间歇失败。
+- CLI：`sch clear` 与 `sch export-image` 派发预算改为 120s / 90s；后台标签页里的密页此前在 20s 处报 DISPATCH_FAILED 而实际已落地。`sch export-image` 未给 `--format` 时按 `--out` 扩展名推断，冲突时拒绝，不再把 SVG 写进 .png。
+- daemon：原理图几何守卫读取失败时报出宿主错误码与信息，不再打印响应结构体指针。
 - `pcb.route.delete`：封装内嵌对象改按「父器件 primitiveId + 自身 `e<数字>` id」判定，不再只看 ID 前缀；顶层走线/过孔的 ID 恰好以某器件 ID 开头（如器件 `e2`、走线 `e200`）时不再被误拒为 footprint-embedded。真正的 EPAD 热过孔仍拒删（ceshi 实测 ESP32-S3R8 九颗热过孔）。
 - daemon 原理图几何守卫：放件、换件、位姿修改、重绑定、整组移动与导线/连接一样只按本次写入的几何差分判定，页面上未改变的历史问题保留为诊断（`baselineFindings` + 警告），不再让局部 ECO 写后被判失败；新增、改变或重复次数增加的问题与缺测仍失败。
 - `library.symbol.build` / `library.footprint.build`（#279）：打开编辑器前先核对资产在 `--library` 指定的库中；不在时若能在工程库/个人库找到，以 `PRECONDITION_REFUSED` 拒绝并给出正确的库（宿主对工程库资产的记录把 `libraryUuid` 写成个人库 uuid，照抄该字段即失败），不再报 `INVALID_STATE` 并被计入退化。焦点确认同时接受该库的两种名称，修复工程库符号 build 在前后台都必然失败；`activateDocument` 的布尔返回不再作为判据，焦点等待改为按 4s 总时长。
