@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CLI：整网被导线接住的端口网，其标签落点改用 autoconnect 同一打分（`planConnection`）在干线末端与沿干线各网格点（垂直引出）中挑一个逐项无隐患的位置（不穿件、不压件、不压标签），不再无条件挂在线端；现场 IO0 标签不再压 C7（sch check WARN 10→8）。
+
 - CLI：autoconnect 把超出图纸可用区（图纸内缩 12）的标签候选与压图签一样硬拒，不再把错位到外层的标签画出纸面（现场 W25Q64 右侧两支标签 out-of-sheet ERROR → 0）。
 
 - CLI：原理图直连只覆盖简单外围（阻容、晶振、磁珠等）——块内另一颗 IC/连接器/模块的引脚按规范用网络标签解耦示意（`bapDirectWireScope`），求解器也只为将直连的简单外围脚省去标签通道；`sch check` 的 `peripheral-not-direct` 同样只要求 ≤4 脚的外围直连。`sch block-apply` 写前硬门回读改为 `includePinNets:false`（只用几何），不再触发网表导出——此前紧随其后的 wire.create 会被宿主整批拒绝（#256，现场 22/22）。现场 ESP32-S3R8 块：16 根直连、Flash 走标签、16 网与实时网表一致、`peripheral-not-direct` 通过、退出 0。

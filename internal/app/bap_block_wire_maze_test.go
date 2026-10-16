@@ -311,3 +311,20 @@ func TestBapDirectWireScopeLeavesICsToLabels(t *testing.T) {
 		t.Fatalf("attach scope wrong: %v", att)
 	}
 }
+
+// A fully wired port net's label hangs where autoconnect's own scorer finds it
+// clear: the trunk end when free, else a grid point along the trunk leaving
+// perpendicular (live: the IO0 label hung at a blocked end and covered C7).
+func TestPickTrunkLabelAvoidsBlockedEnd(t *testing.T) {
+	rot := 180.0
+	host := acPin{X: 300, Y: 300, Designator: "U2", PinNumber: "5", PinRotation: &rot}
+	free := &bapWirePlanner{}
+	if x, y, dir := free.pickTrunkLabel(host, "left", 60, "IO0", "netport"); x != 240 || y != 300 || dir != "left" {
+		t.Fatalf("a clear trunk end keeps the label: got (%v,%v) %s", x, y, dir)
+	}
+	blocked := &bapWirePlanner{in: bapWireInput{Scene: acScene{Parts: []layoutBBox{{MinX: 120, MinY: 285, MaxX: 235, MaxY: 315}}}}}
+	x, y, dir := blocked.pickTrunkLabel(host, "left", 60, "IO0", "netport")
+	if (dir != "up" && dir != "down") || y != 300 || x < 240 || x >= 300 {
+		t.Fatalf("a blocked end must move the label onto the trunk, leaving perpendicular: got (%v,%v) %s", x, y, dir)
+	}
+}

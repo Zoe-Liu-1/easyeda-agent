@@ -553,9 +553,9 @@ func bapPlanBlockWires(in bapWireInput) bapWirePlan {
 			if t.net != n.Net || !t.hasRoute || t.end == 0 {
 				continue
 			}
-			dx, dy, _ := bapDirVec(t.dir)
+			x, y, dir := p.pickTrunkLabel(t.pin, t.dir, t.end, n.Net, n.Kind)
 			out.Labels = append(out.Labels, bapWireLabel{Net: n.Net, Kind: n.Kind, Host: t.host,
-				X: t.pin.X + dx*t.end, Y: t.pin.Y + dy*t.end, Rotation: bapDirRotation(t.dir)})
+				X: x, Y: y, Rotation: bapDirRotation(dir)})
 			break
 		}
 	}
@@ -786,4 +786,62 @@ func bapDirectWireScope(plan bapPlan, attach map[string]string) ([]bapNet, map[s
 		}
 	}
 	return nets, att
+}
+
+// pickTrunkLabel chooses where a fully wired port net's label hangs on its trunk,
+// with autoconnect's own scorer (planConnection) so the choice is the one
+// autoconnect will accept: the trunk end continuing outward first, then any grid
+// point along the trunk leaving perpendicular (a same-net T). Planned wires join
+// the scored scene so a stub cannot land on a foreign wire drawn this run. It
+// returns the trunk end when nothing scores clear (no stub through a body, no
+// label on a part or marker), as before. Live 2026-10-16: the IO0 label hung at the end regardless and sat on
+// C7 (sch gate clusters FAIL) although a clear spot existed along the trunk.
+func (p *bapWirePlanner) pickTrunkLabel(pin acPin, dir string, end float64, net, kind string) (float64, float64, string) {
+	dx, dy, _ := bapDirVec(dir)
+	endX, endY := pin.X+dx*end, pin.Y+dy*end
+	ck, err := resolveNetflagKind(kind)
+	if err != nil {
+		return endX, endY, dir
+	}
+	sc := p.in.Scene
+	sc.Wires = append([]wireSegment(nil), sc.Wires...)
+	for _, s := range p.planned {
+		sc.Wires = append(sc.Wires, wireSegment{X0: s.A[0], Y0: s.A[1], X1: s.B[0], Y1: s.B[1], Net: s.Net})
+	}
+	rules := defaultAutoconnectRules()
+	type opt struct {
+		x, y float64
+		dir  string
+	}
+	opts := []opt{{endX, endY, dir}}
+	perp := []string{"up", "down"}
+	if dir == "up" || dir == "down" {
+		perp = []string{"left", "right"}
+	}
+	for d := end; d >= schAnchorGrid; d -= schAnchorGrid {
+		for _, pd := range perp {
+			opts = append(opts, opt{pin.X + dx*d, pin.Y + dy*d, pd})
+		}
+	}
+	for _, o := range opts {
+		rot := bapDirRotation(o.dir)
+		anchor := acPin{X: o.x, Y: o.y, PinRotation: &rot}
+		// planConnection sorts every direction; the label leaves along o.dir only.
+		// Clear means no soft hazard either: a stub through a body (costThroughPart),
+		// a label on another marker or on a part all score at or above it.
+		for _, c := range planConnection(anchor, ck, net, sc, rules, 0) {
+			if c.Direction != o.dir {
+				continue
+			}
+			clear := true
+			for _, r := range c.Reasons {
+				clear = clear && r.Cost < costThroughPart // judged per hazard: bonuses must not mask one
+			}
+			if clear {
+				return o.x, o.y, o.dir
+			}
+			break
+		}
+	}
+	return endX, endY, dir
 }
