@@ -17,6 +17,11 @@ CLI/daemon、连接器包、npm/lock 与 Skill 版本统一为 1.13.1，已导�
 `daemonRestart: restarted` 且 daemon 状态 current。不涉及 EDA 读写。版本一致性、release-check、release-build、资产 SHA256、
 安装与升级冒烟及远端资产照常核验。完整设计 E2E（#43）保持 in-progress。
 
+v1.13.1 于 2026-10-16 03:52:48 UTC 正式发布，非草稿、非预发布，附注标签绑定提交 `9e589cf`，main 已快进到该提交且 CI 通过。
+九项资产（含 checksums.txt）全部下载核对 SHA256 一致；release-smoke 离线冒烟通过；升级冒烟：已发布的 v1.13.0 二进制经
+`easyeda update --cli-only --version 1.13.1` 从 GitHub 下载、校验通过并原子替换为 v1.13.1。ClawHub 同步成功
+（easyeda-agent@1.13.1），SkillHub 自动发布工作流成功。
+
 ## v1.13.0 历史记录
 
 用户于 2026-10-16 批准发布中版本 v1.13.0（选择"先修再发"：S1 现场发现的 zone move 重画框间歇失败修复后重跑全部用例），
