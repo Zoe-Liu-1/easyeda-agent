@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CLI：autoconnect 把超出图纸可用区（图纸内缩 12）的标签候选与压图签一样硬拒，不再把错位到外层的标签画出纸面（现场 W25Q64 右侧两支标签 out-of-sheet ERROR → 0）。
+
 - CLI：原理图直连只覆盖简单外围（阻容、晶振、磁珠等）——块内另一颗 IC/连接器/模块的引脚按规范用网络标签解耦示意（`bapDirectWireScope`），求解器也只为将直连的简单外围脚省去标签通道；`sch check` 的 `peripheral-not-direct` 同样只要求 ≤4 脚的外围直连。`sch block-apply` 写前硬门回读改为 `includePinNets:false`（只用几何），不再触发网表导出——此前紧随其后的 wire.create 会被宿主整批拒绝（#256，现场 22/22）。现场 ESP32-S3R8 块：16 根直连、Flash 走标签、16 网与实时网表一致、`peripheral-not-direct` 通过、退出 0。
 
 - CLI：`sch block-apply` 干线/单弯接不上的块内非地成员改由 lib-layout 的 A* 正交绕线器兜底（kind `maze`，适配层直接用执行端的实测场景、不重读网表），并放行不导通的十字交叉（与 `schguard.SegmentsContact` 同一把尺；端点相接、T 接、共线重叠仍拒）；迷宫阶段为还要接标签的块内引脚预留 20 raw 引出位；同网先前一根线下发失败时，T 在其上的分支/迷宫线不再下发（防悬空短线被当作已接）。求解器不再给将用导线直连的块内两脚专线核心脚预留标签通道，Flash 贴到 SPI 脚旁。现场 ESP32-S3R8 芯片级块：22 根直连（9 根迷宫）、16 网与实时网表一致、退出 0；Flash CLK 仍为标签（迷宫单次节点上限）。
