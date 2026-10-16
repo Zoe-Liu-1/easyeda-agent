@@ -1416,6 +1416,64 @@ test('connect_pin net_label creates only its stub and native attribute without r
 	assert.deepEqual(result.result.endPoint, { x: 545, y: 310 });
 });
 
+test('connect_pin via draws pin → corner → label end as ONE polyline wire', async (t) => {
+	const globals = globalThis as any;
+	const previousEda = globals.eda;
+	const previousTypes = globals.EDMT_EditorDocumentType;
+	globals.EDMT_EditorDocumentType = { HOME:-1, BLANK:0, SCHEMATIC_PAGE:1, PCB:3 };
+	t.after(() => {
+		if (previousTypes === undefined) delete globals.EDMT_EditorDocumentType;
+		else globals.EDMT_EditorDocumentType = previousTypes;
+		if (previousEda === undefined) delete globals.eda;
+		else globals.eda = previousEda;
+	});
+	const calls: Array<unknown[]> = [];
+	let labelCreated = false;
+	const label = new Proxy({}, { get: (_target, key) => String(key).startsWith('getState_') ? () => ({ PrimitiveId: 'label-1', ParentPrimitiveId: 'stub-1', Key: 'Name', Value: 'ISSUE191_SIGNAL', X: 565, Y: 300, ValueVisible: true, KeyVisible: false } as Record<string, unknown>)[String(key).replace('getState_', '')] ?? null : undefined });
+	globals.eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({uuid: "project"}) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({uuid: "page", tabId: "tab", documentType: 1}) },
+		sch_PrimitiveComponent: {
+			createNetFlag: async (...args: unknown[]) => {
+				calls.push(['unexpected rotation probe', ...args]);
+				throw new Error('native labels must not depend on power-flag creation');
+			},
+			getAll: async () => { calls.push(['unexpected calibration read']); return []; },
+			delete: async () => { calls.push(['unexpected calibration cleanup']); return true; },
+		},
+		sch_PrimitiveWire: {
+			get: async () => ({ getState_PrimitiveId: () => 'stub-1', getState_Net: () => 'ISSUE191_SIGNAL' }),
+			create: async (...args: unknown[]) => {
+				calls.push(['wire', ...args]);
+				return { getState_PrimitiveId: () => 'stub-1' };
+			},
+		},
+		sch_PrimitiveAttribute: {
+			getAll: async () => labelCreated ? [label] : [],
+			createNetLabel: async (...args: unknown[]) => {
+				calls.push(['label', ...args]);
+				labelCreated = true;
+				return label;
+			},
+		},
+	};
+
+	const result: any = await runAction('schematic.power.connect_pin', {
+		kind: 'net_label', net: 'ISSUE191_SIGNAL', pinX: 545, pinY: 290,
+		direction: 'right', offset: 18, via: [545, 300],
+	});
+	assert.deepEqual(calls, [
+		['wire', [545, 290, 545, 300, 565, 300]],
+		['label', 565, 300, 'ISSUE191_SIGNAL'],
+	], 'the corner is a vertex of the single stub wire and the label sits at the far end');
+	assert.equal(result.result.wirePrimitiveId, 'stub-1');
+	assert.equal(result.result.flagPrimitiveId, 'label-1');
+	assert.deepEqual(result.result.endPoint, { x: 565, y: 300 });
+	await assert.rejects(runAction('schematic.power.connect_pin', {
+		kind: 'net_label', net: 'ISSUE191_SIGNAL', pinX: 545, pinY: 290, direction: 'right', offset: 18, via: [555, 300],
+	}), /via/, 'a corner off the pin axis would make a diagonal leg');
+});
+
 /** A minimal mock of eda.sch_PrimitiveComponent exposing only the getters
  *  serializeComponent reads. Casts through unknown since the real type is huge. */
 function mockComponent(overrides: Record<string, unknown> = {}): any {

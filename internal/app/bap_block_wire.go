@@ -77,7 +77,7 @@ type bapWireInput struct {
 	// AllNets is the block's full net list, used to know which pins still need a
 	// label exit; Nets may be narrowed to the directly wired scope.
 	AllNets []bapNet
-	Nets []bapNet
+	Nets    []bapNet
 	// Attach 是外围件位号 → 它贴的核心脚(DESIG:PIN),来自块模板的 schematic_layout.attach。
 	Attach map[string]string
 	Scene  acScene
@@ -123,7 +123,7 @@ type bapWirePlanner struct {
 	routes   []bapWireRoute
 	baseline []schguard.Finding
 	rawWires []any
-	maze     *bapMazeState // 迷宫兜底的共享预算(bap_block_maze.go),首次用到时建
+	maze     *bapMazeState     // 迷宫兜底的共享预算(bap_block_maze.go),首次用到时建
 	pinNets  map[string]string // DESIG:PIN(号或名)→ 块内规划网,首次用到时建
 	// reserveExits 只在迷宫兜底阶段打开:那时干线/分支已定,还没导线的脚之后要由
 	// autoconnect 引桩,迷宫线不得压它们的引出位。更早的阶段不知道谁会被导线接走。
@@ -830,8 +830,8 @@ func (p *bapWirePlanner) pickTrunkLabel(pin acPin, dir string, end float64, net,
 		// Clear means no soft hazard either: a stub through a body (costThroughPart),
 		// a label on another marker or on a part all score at or above it.
 		for _, c := range planConnection(anchor, ck, net, sc, rules, 0) {
-			if c.Direction != o.dir {
-				continue
+			if c.Direction != o.dir || c.Via != nil {
+				continue // the trunk itself is the leg; an elbow would leave it
 			}
 			clear := true
 			for _, r := range c.Reasons {

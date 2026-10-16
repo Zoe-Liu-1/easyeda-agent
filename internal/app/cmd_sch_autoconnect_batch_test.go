@@ -355,7 +355,7 @@ func TestPlanConnection_DenseArea_ExtendsBeyondOffsetMax(t *testing.T) {
 		{MinX: -300, MinY: -300, MaxX: 300, MaxY: -15}, // 下半平面
 		{MinX: -300, MinY: 15, MaxX: 300, MaxY: 300},   // 上半平面
 		{MinX: -300, MinY: -15, MaxX: -5, MaxY: 15},    // 左
-		{MinX: 5, MinY: -15, MaxX: 100, MaxY: 15},      // 右(只堵到 100)
+		{MinX: 5, MinY: 2, MaxX: 100, MaxY: 15},        // 右(只堵到 100;不压桩线那一行 —— 桩线穿标签本身也算重叠)
 	}
 	scene := acScene{Flags: flags}
 	got := planConnection(pin, "gnd", "GND", scene, rules, 0)

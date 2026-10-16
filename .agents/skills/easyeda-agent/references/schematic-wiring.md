@@ -67,6 +67,13 @@ power 为 6×11/11×6;**netport 的长度跟网名走**(`6*len(net)+8`,下限 31
 #64 短路保护不会被绕过。真机 ceshi 单块回归:markerOverlaps 12 → 3。
 残留不可避免的密集重叠由 `sch check` 的 marker-overlap 门捕获(见 Actions)。
 
+**竖脚上的 netport 拐弯挂横标签。** 竖放上拉/RC 的朝上脚,直出只能竖着折起标签
+(costFoldedPort),横出又违反「首段沿引脚朝外」。规划器为此加拐弯候选:沿引脚朝外
+先走 10/20/30,再横向出桩挂标签(参考图 BOOT0 画法);整段由 `connect_pin` 的
+`via` 画成**一根**折线,拐点不会被合并掉。竖腿与普通桩线过同样的硬拒/穿件判据。
+另有三项与标签互压同级(1000)的检查:桩线穿过已有标记、标签(含符号自带短引脚)
+压在已有导线上、桩线或标签挡在另一只**未接线**引脚前方 30 以内的出线口。
+
 **Hard rejects (issue #64):** two hazards are never soft penalties — they make a
 candidate *unusable* no matter the offset, because EasyEDA would silently merge
 nets and the post-hoc DRC can't see it: (1) a stub whose endpoint or path touches

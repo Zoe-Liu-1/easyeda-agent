@@ -587,6 +587,9 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 				"direction": selected.Direction,
 				"offset":    selected.Offset,
 			}
+			if selected.Via != nil {
+				payload["via"] = []float64{selected.Via.X, selected.Via.Y}
+			}
 			cres, cerr, retried := acConnectPinWithRetry(cfg, window, payload)
 			cr.Retried = retried
 			if cerr != nil {
@@ -615,8 +618,13 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 		// one part on different nets (isolated DC-DC domain pins, B0512S-class)
 		// planned in one batch could pick mutually-touching stubs, because each
 		// candidate was scored against a scene that ignored its batch siblings.
+		from := acPoint{X: pin.X, Y: pin.Y}
+		if v := selected.Via; v != nil {
+			scene.Wires = append(scene.Wires, wireSegment{X0: pin.X, Y0: pin.Y, X1: v.X, Y1: v.Y, Net: c.Net})
+			from = *v
+		}
 		scene.Wires = append(scene.Wires, wireSegment{
-			X0: pin.X, Y0: pin.Y,
+			X0: from.X, Y0: from.Y,
 			X1: selected.EndPoint.X, Y1: selected.EndPoint.Y,
 			Net: c.Net,
 		})

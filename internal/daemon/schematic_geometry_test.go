@@ -174,6 +174,30 @@ func TestSchematicGeometryConnectDefaultsMatchConnector(t *testing.T) {
 	}
 }
 
+// An elbowed netport is judged as the whole polyline pin → via → label end, so
+// the pin-exit rule sees the leg along the pin, not the sideways label stub.
+func TestSchematicGeometryConnectViaProposesElbowPolyline(t *testing.T) {
+	w, err := proposedSchematicWire(protocol.Request{Action: "schematic.power.connect_pin", Payload: map[string]any{
+		"pinX": 1000., "pinY": 740., "kind": "net_port_bi", "direction": "right", "offset": 18., "via": []any{1000., 750.}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pts, _ := w["points"].([]any)
+	want := []any{1000., 740., 1000., 750., 1020., 750.}
+	if len(pts) != len(want) {
+		t.Fatalf("points = %v, want %v", pts, want)
+	}
+	for i := range want {
+		if pts[i] != want[i] {
+			t.Fatalf("points = %v, want %v", pts, want)
+		}
+	}
+	if _, err := proposedSchematicWire(protocol.Request{Action: "schematic.power.connect_pin", Payload: map[string]any{
+		"pinX": 0., "pinY": 0., "kind": "net_port_bi", "via": []any{1.}}}); err == nil {
+		t.Fatal("a malformed via must be refused before any write")
+	}
+}
+
 func TestSchematicGeometryRejectsUnexpectedContactDespiteEqualEdges(t *testing.T) {
 	for _, junction := range []bool{false, true} {
 		s := New(Options{})

@@ -8563,7 +8563,22 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	// y-UP (+y renders upward), so 'up' increases y and 'down' decreases it.
 	// Flag-body rotation remains independent: rotationFor() is calibrated in
 	// visual directions and appliedRotation() handles build-specific negation.
-	const endpoint = connectPinEndpoint(pinX, pinY, offset, direction);
+	// Optional elbow (via=[x,y]): the stub runs pin → via along the pin's own
+	// side, then `direction`/`offset` from via, as ONE polyline wire so the
+	// corner is a vertex of a single primitive (two wires meeting at a free
+	// corner get merged and the corner dropped). The planner only offers it for a
+	// netport on a vertical pin so the label reads horizontally.
+	const viaRaw = payload.via;
+	let via: { x: number; y: number } | undefined;
+	if (viaRaw !== undefined) {
+		if (!Array.isArray(viaRaw) || viaRaw.length !== 2 || !viaRaw.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+			throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'via must be [x, y] with finite numbers.');
+		}
+		via = { x: nearestGrid(viaRaw[0] as number), y: nearestGrid(viaRaw[1] as number) };
+	}
+	const startX = via ? via.x : pinX;
+	const startY = via ? via.y : pinY;
+	const endpoint = connectPinEndpoint(startX, startY, offset, direction);
 	const endX = endpoint.x;
 	const endY = endpoint.y;
 
@@ -8585,6 +8600,12 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	// real pin, so EasyEDA still treats it as connected to the pin.
 	const pinGX = nearestGrid(pinX);
 	const pinGY = nearestGrid(pinY);
+	if (via && ((via.x !== pinGX && via.y !== pinGY) || (via.x === pinGX && via.y === pinGY) || (via.x === endX && via.y === endY))) {
+		throw new ActionError(
+			ErrorCodes.MISSING_PAYLOAD_FIELD,
+			`via (${via.x}, ${via.y}) must be a distinct point on the pin's own axis (pin ${pinGX}, ${pinGY}).`,
+		);
+	}
 
 	if (endX === pinGX && endY === pinGY) {
 		throw new ActionError(
@@ -8621,7 +8642,7 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 		if (attempt > 0) await sleep(250);
 		try {
 			wire = await withTimeout(
-				eda.sch_PrimitiveWire.create([pinGX, pinGY, endX, endY]),
+				eda.sch_PrimitiveWire.create(via ? [pinGX, pinGY, via.x, via.y, endX, endY] : [pinGX, pinGY, endX, endY]),
 				CONNECT_PIN_OP_TIMEOUT_MS,
 				`Stub-wire create did not settle within ${CONNECT_PIN_OP_TIMEOUT_MS}ms — the platform dropped the request without rejecting (the stuck-at-99% hang). Failing this attempt so the retry/caller can re-issue instead of hanging until the dispatch timeout.`,
 			);

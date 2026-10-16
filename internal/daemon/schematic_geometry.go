@@ -299,7 +299,28 @@ func proposedSchematicWire(req protocol.Request) (map[string]any, error) {
 			direction = "right"
 		}
 	}
-	ex, ey := x, y
+	// An elbowed netport (payload via=[x,y]) runs pin → via along the pin's
+	// outward side, then the stub leaves the corner; the guard judges that
+	// whole polyline, so its first segment is the one the pin-exit rule sees.
+	var via []float64
+	if raw, exists := req.Payload["via"]; exists {
+		pair, ok := raw.([]any)
+		if !ok || len(pair) != 2 {
+			return nil, fmt.Errorf("connect_pin via must be [x, y]")
+		}
+		for _, v := range pair {
+			f, ok := v.(float64)
+			if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
+				return nil, fmt.Errorf("connect_pin via must be two finite numbers")
+			}
+			via = append(via, f)
+		}
+	}
+	sx, sy := x, y
+	if via != nil {
+		sx, sy = via[0], via[1]
+	}
+	ex, ey := sx, sy
 	switch direction {
 	case "up":
 		ey += offset
@@ -314,5 +335,8 @@ func proposedSchematicWire(req protocol.Request) (map[string]any, error) {
 	}
 	// Match JavaScript Math.round, including negative half-grid values.
 	snap := func(v float64) float64 { return math.Floor(v/5+0.5) * 5 }
+	if via != nil {
+		return map[string]any{"primitiveId": "proposed-wire", "points": []any{snap(x), snap(y), snap(sx), snap(sy), snap(ex), snap(ey)}}, nil
+	}
 	return map[string]any{"primitiveId": "proposed-wire", "x0": snap(x), "y0": snap(y), "x1": snap(ex), "y1": snap(ey)}, nil
 }

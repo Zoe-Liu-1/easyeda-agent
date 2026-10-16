@@ -151,6 +151,10 @@ type acCandidate struct {
 	EndPoint  acPoint    `json:"endPoint"`
 	Score     float64    `json:"score"`
 	Reasons   []acReason `json:"reasons,omitempty"`
+	// Via is the elbow corner of a netport that leaves a vertical pin: the stub
+	// runs pin → Via along the pin's outward side, then Direction/Offset from Via,
+	// so the label reads horizontally (see elbowCandidates). Nil = straight stub.
+	Via *acPoint `json:"via,omitempty"`
 }
 
 // Cost-table constants (issue #24). Kept as named constants so the scorer reads
@@ -682,6 +686,7 @@ func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind, target
 			break
 		}
 	}
+	reasons = append(reasons, markerWireCrossReasons(pin.X, pin.Y, endX, endY, lbl, scene)...)
 
 	// +500 stub passes through another component bbox.
 	for _, p := range scene.Parts {
@@ -823,6 +828,7 @@ func planConnection(pin acPin, canonicalKind, targetNet string, scene acScene, r
 	if noCleanCandidate(all) || laneFloor > rules.OffsetMax {
 		all = append(all, score(extendedOffsets(rules, laneFloor))...)
 	}
+	all = append(all, elbowCandidates(pin, canonicalKind, targetNet, scene, rules)...)
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].Score != all[j].Score {
 			return all[i].Score < all[j].Score
@@ -834,6 +840,152 @@ func planConnection(pin acPin, canonicalKind, targetNet string, scene acScene, r
 	})
 	return all
 }
+
+// acElbowRises are the vertical legs tried before an elbowed netport turns
+// sideways: one connection grid clears the pin, longer ones step over a
+// neighbour's label row.
+var acElbowRises = []float64{2 * acSchGrid, 4 * acSchGrid, acPinExitReach}
+
+// costElbow keeps a straight clean stub ahead of an elbow while staying far
+// below costFoldedPort, so a vertical pin's netport turns sideways and reads
+// horizontally instead of standing folded.
+const costElbow = 30
+
+// elbowCandidates offers a netport on a vertical pin the drafting convention for
+// a pull-up or a vertical passive (BOOT0 above its resistor): a short wire along
+// the pin's outward side, then a horizontal stub and label. A straight netport
+// there can only stand folded (costFoldedPort) or leave sideways, which the
+// connector's pin-exit guard rejects. The vertical leg carries the same hazards
+// as a stub (pin cross, foreign wire, through a part); the horizontal part is
+// scored as an ordinary stub from the corner.
+func elbowCandidates(pin acPin, canonicalKind, targetNet string, scene acScene, rules autoconnectRules) []acCandidate {
+	out := outwardDirection(pin)
+	if !isNetPortKind(canonicalKind) || (out != "up" && out != "down") {
+		return nil
+	}
+	var cands []acCandidate
+	for _, rise := range acElbowRises {
+		cx, cy := endpointFor(pin.X, pin.Y, rise, out)
+		leg := stubLegReasons(pin, cx, cy, targetNet, scene)
+		for _, side := range []string{"left", "right"} {
+			rot := bapDirRotation(side)
+			corner := acPin{X: cx, Y: cy, PinRotation: &rot, Designator: pin.Designator}
+			// The vertical leg is the target pin's own wire: keep it out of the
+			// corner stub's pin-cross and fanout checks.
+			sc := scene
+			sc.Pins = nil
+			for _, op := range scene.Pins {
+				if math.Abs(op.X-pin.X) >= acCoordEps || math.Abs(op.Y-pin.Y) >= acCoordEps {
+					sc.Pins = append(sc.Pins, op)
+				}
+			}
+			for _, off := range candidateOffsets(rules, canonicalKind, targetNet) {
+				c := scoreCandidate(corner, side, off, canonicalKind, targetNet, sc, rules)
+				c.Reasons = append(c.Reasons, leg...)
+				c.Reasons = append(c.Reasons, acReason{round2(costElbow + rise*costOffsetPerUnit), "netport elbowed off a vertical pin"})
+				c.Score = 0
+				for _, r := range c.Reasons {
+					c.Score += r.Cost
+				}
+				c.Score = round2(c.Score)
+				c.Via = &acPoint{X: round2(cx), Y: round2(cy)}
+				cands = append(cands, c)
+			}
+		}
+	}
+	return cands
+}
+
+// stubLegReasons are the wiring hazards of one straight leg pin → (x,y): ending
+// on or crossing another pin, touching a foreign-net wire, or passing through a
+// part. Same judgements and costs as scoreCandidate's stub checks.
+func stubLegReasons(pin acPin, x, y float64, targetNet string, scene acScene) []acReason {
+	var reasons []acReason
+	for _, op := range scene.Pins {
+		if math.Abs(op.X-pin.X) < acCoordEps && math.Abs(op.Y-pin.Y) < acCoordEps {
+			continue
+		}
+		endsOnPin := math.Abs(op.X-x) < acCoordEps && math.Abs(op.Y-y) < acCoordEps
+		if endsOnPin || pinOnSegment(pin.X, pin.Y, x, y, op.X, op.Y) {
+			reasons = append(reasons, acReason{costPinCross, "elbow leg crosses a non-target pin (hard reject)"})
+			break
+		}
+	}
+	if stubTouchesForeignWire(pin.X, pin.Y, x, y, targetNet, scene.Wires) {
+		reasons = append(reasons, acReason{costWireTouch, "elbow leg touches an existing (foreign-net) wire (hard reject)"})
+	}
+	for _, p := range scene.Parts {
+		if segHitsRect(pin.X, pin.Y, x, y, p) {
+			reasons = append(reasons, acReason{costThroughPart, "elbow leg passes through a component bbox"})
+			break
+		}
+	}
+	return append(reasons, markerWireCrossReasons(pin.X, pin.Y, x, y, layoutBBox{}, scene)...)
+}
+
+// markerWireCrossReasons scores the overlap a label-vs-label check misses: a
+// stub drawn through an existing marker, or a new label lying on an existing
+// wire. Same weight as a label collision — both read as one marker sitting on
+// another connection. Live 2026-10-16: C6's EN stub ran under R2's IO0 port and
+// C6's EN label sat on R2's elbow leg; no label pair overlapped. lbl is the
+// zero box for a bare wire leg.
+func markerWireCrossReasons(x0, y0, x1, y1 float64, lbl layoutBBox, scene acScene) []acReason {
+	var reasons []acReason
+	for _, f := range scene.Flags {
+		if segHitsRect(x0, y0, x1, y1, f) {
+			reasons = append(reasons, acReason{costFlagCollision, "stub runs through an existing flag/port/label"})
+			break
+		}
+	}
+	if lbl.MaxX <= lbl.MinX {
+		return reasons
+	}
+	// The marker symbol's own lead runs from the stub end to its body; a wire
+	// under that lead reads as a crossing too (live: C6's EN port lead lay over
+	// R2's elbow leg one grid past C6's stub end). Edges stay strict, so the
+	// stub's own collinear wire ending at (x1,y1) is not a hit.
+	marker := layoutBBox{MinX: math.Min(lbl.MinX, x1), MinY: math.Min(lbl.MinY, y1), MaxX: math.Max(lbl.MaxX, x1), MaxY: math.Max(lbl.MaxY, y1)}
+	for _, w := range scene.Wires {
+		if (w.X0 == w.X1 || w.Y0 == w.Y1) && segHitsRect(w.X0, w.Y0, w.X1, w.Y1, marker) {
+			reasons = append(reasons, acReason{costFlagCollision, "label lies on an existing wire"})
+			break
+		}
+	}
+	// A label or stub parked across another pin's exit takes the only way out
+	// of that pin: live, R2's IO0 port pointed left over C6's head and every
+	// exit of C6 then ran through it; next run C6's EN stub ran over R2's head.
+	for _, op := range scene.Pins {
+		out := outwardDirection(op)
+		if out == "" || (math.Abs(op.X-x0) < acCoordEps && math.Abs(op.Y-y0) < acCoordEps) || pinWiredInScene(op, scene) {
+			continue // a wired pin has already left; its wire is judged above
+		}
+		ex, ey := endpointFor(op.X, op.Y, acPinExitReach, out)
+		if segHitsRect(op.X, op.Y, ex, ey, marker) || segmentsTouch(x0, y0, x1, y1, op.X, op.Y, ex, ey) {
+			reasons = append(reasons, acReason{costFlagCollision, "stub or label blocks another pin's exit"})
+			break
+		}
+	}
+	return reasons
+}
+
+// pinWiredInScene reports whether a pin already has a connection: a known net
+// or a scene wire (existing or planned this run) ending on it.
+func pinWiredInScene(op acPin, scene acScene) bool {
+	if op.NetKnown && op.Net != "" {
+		return true
+	}
+	for _, w := range scene.Wires {
+		if (math.Abs(w.X0-op.X) < acCoordEps && math.Abs(w.Y0-op.Y) < acCoordEps) ||
+			(math.Abs(w.X1-op.X) < acCoordEps && math.Abs(w.Y1-op.Y) < acCoordEps) {
+			return true
+		}
+	}
+	return false
+}
+
+// acPinExitReach is the stretch in front of a pin kept free of other stubs and
+// labels: the highest elbow rise, so that pin can still leave and turn.
+const acPinExitReach = 6 * acSchGrid
 
 // noCleanCandidate reports whether the regular offset range holds NO candidate
 // that is both selectable (not hard-rejected) and free of marker collision.
