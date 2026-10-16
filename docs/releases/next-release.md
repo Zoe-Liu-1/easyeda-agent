@@ -1,4 +1,23 @@
-# v1.13.0 发布记录
+# v1.13.1 发布记录
+
+用户于 2026-10-16 批准发布小版本 v1.13.1。连接器运行时自 v1.13.0 起无改动（`extension/src` 无差异），按版本规则递增 patch；
+CLI/daemon、连接器包、npm/lock 与 Skill 版本统一为 1.13.1，已导入的 1.13.0 连接器无需重新导入。
+
+## 版本范围
+
+- `easyeda update` 换完二进制后自动在后台重启仍在跑旧版本的已安装 daemon（`--restart-daemon`，默认开启）；任何命令发现
+  已安装的 daemon 比 CLI 旧时也自动重启。`make dev` 等源码构建的 daemon 不动，旧 CLI 不降级新 daemon。思路来自 #278。
+
+## 测试范围
+
+按小版本规则，不跑全量需求到成品 E2E，也不重跑 B00–B10 / A00–A06。受影响自动测试：Go 全仓通过，新增
+`TestStaleInstalledDaemon`、`TestShouldRestartDaemonAfterUpdate`、`TestRestartInstalledDaemonSkipsWhenAlreadyReplaced`、
+`TestUpdateNotesReportDaemonRestart`。定向回归（本机测试端口 61900，不影响开发 daemon）：v1.12.0 daemon 遇 v1.13.0 CLI 的
+`doc ls` 自动重启为 v1.13.0；v1.12.0 CLI 不降级；`update --cli-only` 在二进制已最新、daemon 落后时报告
+`daemonRestart: restarted` 且 daemon 状态 current。不涉及 EDA 读写。版本一致性、release-check、release-build、资产 SHA256、
+安装与升级冒烟及远端资产照常核验。完整设计 E2E（#43）保持 in-progress。
+
+## v1.13.0 历史记录
 
 用户于 2026-10-16 批准发布中版本 v1.13.0（选择"先修再发"：S1 现场发现的 zone move 重画框间歇失败修复后重跑全部用例），
 沿用有限范围。连接器运行时自 v1.12.0 起有改动（库资产 build 核对与焊盘元组校验、`pcb.component.modify` 层名、
