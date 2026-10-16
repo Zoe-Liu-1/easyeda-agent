@@ -147,8 +147,16 @@ func TestBslRelocateAnchor_ESP32S3R8FromPlannerOrigin(t *testing.T) {
 		if dx == 0 && dy == 0 {
 			t.Fatal("relocation must move the anchor")
 		}
-		if !bslSolveComplete(rel, "U", s2) || len(notes) != 0 {
+		if !bslSolveComplete(rel, "U", s2) {
 			t.Fatalf("relocated solve incomplete: %v", notes)
+		}
+		// Acceptance uses the executor's ruler, not the solver's notes: the solver
+		// judges a trunk more strictly than the planner that draws it, and live
+		// (apply13, same anchor (380,520)) wired C_VDDA and C_X1 even though the
+		// solver noted them as falling back. Every vertical passive must get a
+		// drawn route from the executor at the relocated anchor.
+		if reach != nil { // the live solve after anchor readback always has the instance's real net names
+			checkExecutorWiresPassives(t, blk, rel, s2, ox+dx, oy+dy)
 		}
 		dx2, dy2, _, _, _ := bslRelocateAnchor(blk, rel, nets, reach, "U", pins, anchor, anchor, others, usable)
 		if dx2 != dx || dy2 != dy {
@@ -215,14 +223,29 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 	if len(solved) != len(rel.Attach) {
 		t.Fatalf("all %d attach members must solve, got %d (notes %v)", len(rel.Attach), len(solved), notes)
 	}
+	// Every vertical passive is either wired by a trunk or its fallback is
+	// reported by name — never silently left on a label.
+	wired := 0
+	for _, s := range solved {
+		if s.Wire != nil {
+			wired++
+			continue
+		}
+		if bslIsDiscrete(blk.Parts[s.Role].Part) && !strings.Contains(strings.Join(notes, "\n"), s.Role+": 贴") {
+			t.Errorf("%s has no trunk and no reported reason (notes %v)", s.Role, notes)
+		}
+	}
+	t.Logf("%d/%d attach members wired by trunks", wired, len(solved))
 	reachOf := func(role string) float64 {
 		if r, ok := roleReach[role]; ok && r > 0 {
 			return r
 		}
 		return bslRoleReach(nets, role)
 	}
-	lanes := bslHostPinLanes(nets, "U", pins, anchor, reachOf("U"))
-	// every U pin the block connects must own a lane
+	// 2026-10-16: host pins wired by a trunk carry no marker, so they own no lane;
+	// every other connected U pin still does.
+	trunkPins := bslTestTrunkPins(rel, pins, solved)
+	lanes := bslHostPinLanesExcept(nets, "U", pins, anchor, reachOf("U"), trunkPins)
 	connected := map[string]bool{}
 	for _, net := range nets {
 		for _, m := range net {
@@ -234,14 +257,15 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 	wantLanes := 0
 	counted := map[string]bool{}
 	for _, p := range pins {
-		if !counted[p.PinNumber] && (connected[p.PinNumber] || connected[p.PinName]) {
+		if !counted[p.PinNumber] && !trunkPins[p.PinNumber] && (connected[p.PinNumber] || connected[p.PinName]) {
 			wantLanes++
 		}
 		counted[p.PinNumber] = true
 	}
 	if len(lanes) != wantLanes {
-		t.Fatalf("lanes %d, want one per connected host pin %d", len(lanes), wantLanes)
+		t.Fatalf("lanes %d, want one per connected non-trunk host pin %d", len(lanes), wantLanes)
 	}
+	checkTrunkWires(t, blk, rel, pins, anchor, solved)
 	hull := bslHostHull(anchor, pins)
 	env := hull
 	var bodies []layoutBBox
@@ -250,10 +274,15 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 		if s.Source != "attach" {
 			t.Errorf("%s fell back to %s", s.Role, s.Source)
 		}
-		// passives declared vertical turn 270; FLASH and the crystal (no orient)
+		// passives declared vertical turn 270 (a trunk member hanging with its net
+		// pin toward the trunk may turn 90); FLASH and the crystal (no orient)
 		// keep 0 — a turned multi-pin symbol no longer matches its estimated box.
-		if want := map[bool]float64{true: 270, false: 0}[bslIsDiscrete(blk.Parts[s.Role].Part)]; s.Rotation != want {
-			t.Errorf("%s rotation %.0f, want %.0f", s.Role, s.Rotation, want)
+		if bslIsDiscrete(blk.Parts[s.Role].Part) {
+			if s.Rotation != 270 && !(s.Wire != nil && s.Rotation == 90) {
+				t.Errorf("%s rotation %.0f, want 270 (or 90 on a trunk)", s.Role, s.Rotation)
+			}
+		} else if s.Rotation != 0 {
+			t.Errorf("%s rotation %.0f, want 0", s.Role, s.Rotation)
 		}
 		b := bslPartBox(blk.Parts[s.Role].Part)
 		body := layoutBBox{MinX: s.X + b.MinX, MinY: s.Y + b.MinY, MaxX: s.X + b.MaxX, MaxY: s.Y + b.MaxY}
@@ -283,6 +312,21 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 			if body.MaxX >= hull.MinX {
 				t.Errorf("%s (pin %s, left column) at x=%.0f is not left of the host", s.Role, tPin, s.X)
 			}
+		}
+		if s.Wire != nil {
+			// trunk members: their far-pin marker hangs off the free end (checked by
+			// the trunk solver with the autoconnect ruler); the body and the wire
+			// must stay on the sheet and off the title block.
+			for _, q := range s.Wire {
+				if !boxInside(bslPointBox(q), usable) || boxesGapOverlap(bslPointBox(q), tb, 0) {
+					t.Errorf("%s wire point %v leaves the sheet or sits on the title block", s.Role, q)
+				}
+			}
+			if !boxInside(body, usable) || boxesGapOverlap(body, tb, 0) {
+				t.Errorf("%s body %+v leaves the sheet or sits on the title block", s.Role, body)
+			}
+			env = bslUnion(env, body)
+			continue
 		}
 		// the envelope counts each member's own markers (same ruler as free())
 		h, v := reachOf(s.Role), bslMarkerVReach
@@ -324,6 +368,12 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 			if rel.Attach[s.Role] == target {
 				continue
 			}
+			// Contiguity protects label-joined members, whose ownership a reader can
+			// only infer from adjacency. A member with its own drawn trunk shows its
+			// host by the wire; drops of parallel trunks interleaving is normal.
+			if s.Wire != nil || a.Wire != nil && b.Wire != nil {
+				continue
+			}
 			if s.X > lo.MinX && s.X < lo.MaxX && s.Y >= lo.MinY && s.Y <= lo.MaxY ||
 				s.Y > lo.MinY && s.Y < lo.MaxY && s.X >= lo.MinX && s.X <= lo.MaxX {
 				t.Errorf("%s splits the %s group (%s, %s)", s.Role, target, a.Role, b.Role)
@@ -337,4 +387,130 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 		}
 		t.Logf("envelope %+v", env)
 	}
+}
+
+// bslTestHasFallback reports whether solver notes say a member fell back to the
+// grid or out of its trunk (distance-only notes are informational).
+func bslTestHasFallback(notes []string) bool {
+	for _, n := range notes {
+		if strings.Contains(n, "走网格") || strings.Contains(n, "退回外排") {
+			return true
+		}
+	}
+	return false
+}
+
+// bslTestTrunkPins is the set of host pin numbers some solved member is wired to.
+func bslTestTrunkPins(rel bslRelations, pins map[string]acPin, solved []bslSolved) map[string]bool {
+	out := map[string]bool{}
+	for _, s := range solved {
+		if s.Wire == nil {
+			continue
+		}
+		if _, tPin, ok := splitBlockPinRef(rel.Attach[s.Role]); ok {
+			out[pins[tPin].PinNumber] = true
+		}
+	}
+	return out
+}
+
+// checkTrunkWires: every planned trunk is orthogonal on the 5-grid, starts on its
+// host pin or on that host's earlier trunk, leaves the host outward, ends on the
+// member's net pin (body centre ± bslPassivePinHalf, facing the trunk), never
+// crosses another member's body or the host body, and wires of different host
+// pins never touch.
+func checkTrunkWires(t *testing.T, blk blocks.Block, rel bslRelations, pins map[string]acPin, anchor layoutBBox, solved []bslSolved) {
+	t.Helper()
+	type seg struct {
+		a, b [2]float64
+		host string
+	}
+	var segs []seg
+	bodies := map[string]layoutBBox{}
+	for _, s := range solved {
+		b := bslPartBox(blk.Parts[s.Role].Part)
+		bodies[s.Role] = layoutBBox{MinX: s.X + b.MinX, MinY: s.Y + b.MinY, MaxX: s.X + b.MaxX, MaxY: s.Y + b.MaxY}
+	}
+	for _, s := range solved {
+		if s.Wire == nil {
+			continue
+		}
+		_, tPin, _ := splitBlockPinRef(rel.Attach[s.Role])
+		host := pins[tPin]
+		P := [2]float64{host.X, host.Y}
+		w := s.Wire
+		if len(w) < 2 {
+			t.Fatalf("%s wire %v too short", s.Role, w)
+		}
+		end := w[len(w)-1]
+		if end[0] != s.X || math.Abs(math.Abs(end[1]-s.Y)-bslPassivePinHalf) > 1e-9 {
+			t.Errorf("%s wire ends at %v, not on its net pin (centre %.0f,%.0f)", s.Role, end, s.X, s.Y)
+		}
+		if w[0] != P && w[0][1] != P[1] {
+			t.Errorf("%s wire starts at %v, neither on host pin %v nor on its trunk row", s.Role, w[0], P)
+		}
+		for i := 1; i < len(w); i++ {
+			a, b := w[i-1], w[i]
+			if (a[0] != b[0] && a[1] != b[1]) || a == b || !plGrid(a[0]) || !plGrid(a[1]) || !plGrid(b[0]) || !plGrid(b[1]) {
+				t.Errorf("%s segment %v→%v is not a non-zero orthogonal 5-grid segment", s.Role, a, b)
+			}
+			if a == P && (b[0]-a[0])*(P[0]-(anchor.MinX+anchor.MaxX)/2) <= 0 {
+				t.Errorf("%s first segment %v→%v does not leave the host outward", s.Role, a, b)
+			}
+			if a != P && schSegmentCrossesBox(a[0], a[1], b[0], b[1], anchor) {
+				t.Errorf("%s segment %v→%v crosses the host body", s.Role, a, b)
+			}
+			for role, body := range bodies {
+				if role != s.Role && schSegmentCrossesBox(a[0], a[1], b[0], b[1], body) {
+					t.Errorf("%s segment %v→%v crosses %s", s.Role, a, b, role)
+				}
+			}
+			segs = append(segs, seg{a, b, rel.Attach[s.Role]})
+		}
+	}
+	for i, x := range segs {
+		for _, y := range segs[:i] {
+			if x.host != y.host && bapSegsIntersect(x.a, x.b, y.a, y.b) {
+				t.Errorf("trunks of %s and %s touch: %v→%v / %v→%v", x.host, y.host, x.a, x.b, y.a, y.b)
+			}
+		}
+	}
+}
+
+// checkExecutorWiresPassives feeds a solve to the live wire planner
+// (bapPlanBlockWires) and requires a route for every discrete attach member.
+func checkExecutorWiresPassives(t *testing.T, blk blocks.Block, rel bslRelations, solved []bslSolved, ox, oy float64) {
+	t.Helper()
+	l, _ := blk.SchematicLayout()
+	devices := map[string]bapDevice{}
+	for _, p := range blk.Parts {
+		devices[p.Part] = bapDevice{DeviceUUID: "dev", LibraryUUID: "lib"}
+	}
+	plan, err := planBlockApply(bapInput{Block: blk, Topology: bslBlockNets(blk), Devices: devices, Layout: l, OriginX: ox, OriginY: oy, AtExplicit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, pins := esp32s3r8Pins(ox, oy)
+	var passives []bslSolved
+	for _, s := range solved {
+		if bslIsDiscrete(blk.Parts[s.Role].Part) {
+			passives = append(passives, s)
+		}
+	}
+	raw := trunkTestReadback(plan, passives, anchor, pins, ox, oy)
+	wp := bapPlanBlockWires(trunkTestWireInput(t, plan, rel, raw))
+	desig := map[string]string{}
+	for _, p := range plan.Placements {
+		desig[p.Role] = p.Designator
+	}
+	routed := map[string]bool{}
+	for _, r := range wp.Routes {
+		routed[strings.SplitN(r.Member, ":", 2)[0]] = true
+	}
+	for _, s := range passives {
+		if !routed[desig[s.Role]] {
+			t.Errorf("executor drew no route for %s (%s); fallbacks %+v", s.Role, desig[s.Role], wp.Fallback)
+		}
+	}
+	t.Logf("executor routes %d wires for %d vertical passives", len(wp.Routes), len(passives))
 }

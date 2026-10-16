@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CLI：`sch block-apply` 把 attach 外围按「干线」用真实导线接到所贴核心脚（竖放 2 脚分立件挂在核心脚引出方向的干线上，同一只脚的件共用一棵线树）；证不清白的成员退回同名标签并逐条写进 manifest `wiring.fallback`。现场 ESP32-S3R8 芯片级块：14 根干线全部画上、16 网与实时网表一致（去耦、EN/IO0 RC、晶振与负载电容）；Flash 多脚信号仍为标签。修复的几何根因：竖放阻容引脚连接点离中心实测 20（原按 10，落线被吃掉）；回读坐标的浮点噪声改为圆整后判定；下发前去掉重复点（宿主拒绝零长度线段）。
+
 - CLI：20 处只用引脚几何的原理图回读（`sch connect --pin` 目标解析、块内直连、移动内核、zone move/tidy/arrange/plan、group move/arrange/tidy、autolayout、destagger、clusters、marker 几何、layout-score）改为 `includePinNets:false`，不再顺带跑网表导出——导出后紧跟的写入会被宿主以 cmdKey 拒绝（#256/#257）。需要引脚网名的读取（autoconnect 幂等、外围直连、compose/design-diff 对账、gate 导线交叉、block-apply 写前硬门、power-layout 回放断言）保持不变。
 
 ## [1.13.1] - 2026-10-16

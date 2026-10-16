@@ -333,6 +333,12 @@ func bslAttachSeed(pinX, pinY float64, host layoutBBox, side string, ownHalf flo
 // reach 是这一侧 marker 的伸出上限(调用方传宿主角色的 reachOf);网名用代理口径:
 // 有 PORT 用 PORT 名,否则用宿主自己的脚名(与 bslRoleReach 同口径)。
 func bslHostPinLanes(nets [][]string, anchorRole string, pins map[string]acPin, host layoutBBox, reach float64) []layoutBBox {
+	return bslHostPinLanesExcept(nets, anchorRole, pins, host, reach, nil)
+}
+
+// bslHostPinLanesExcept 同 bslHostPinLanes,但跳过 skip 里的宿主脚(按编号)—— 走干线的
+// 宿主脚不挂 marker,它的通道由干线自己的几何(bslSolveTrunks)占位。
+func bslHostPinLanesExcept(nets [][]string, anchorRole string, pins map[string]acPin, host layoutBBox, reach float64, skip map[string]bool) []layoutBBox {
 	if len(pins) == 0 {
 		return nil
 	}
@@ -371,7 +377,7 @@ func bslHostPinLanes(nets [][]string, anchorRole string, pins map[string]acPin, 
 	cx := (host.MinX + host.MaxX) / 2
 	for _, p := range pins {
 		key := fmt.Sprintf("%s|%.3f|%.3f", p.PinNumber, p.X, p.Y)
-		if seen[key] {
+		if seen[key] || skip[p.PinNumber] {
 			continue
 		}
 		seen[key] = true
@@ -553,6 +559,9 @@ type bslSolved struct {
 	X, Y     float64
 	Rotation float64
 	Source   string // "anchor" | "attach" | "flow" | "pair" | "grid"
+	// Wire 是干线贴件(bslSolveTrunks)规划的导线折线:宿主脚(或干线已有的末端/
+	// 拐点)→ 拐点 → 本件接网脚,5 网格、正交。nil = 这件走标签连接。
+	Wire [][2]float64
 }
 
 // bslSolveAround 用锚件的**实测几何**求解其余件的位姿。
@@ -591,6 +600,41 @@ func bslSolveAroundOpt(
 	usable *layoutBBox,
 	failFast bool,
 ) ([]bslSolved, []string) {
+	// 干线宿主一个件都没挂上时,它的脚要照旧挂 marker —— 把它退回旧路径(恢复通道)
+	// 整体重解一次。每轮至少退回一个宿主,所以必然收敛。
+	skip := map[string]bool{}
+	var dropped []string
+	for {
+		out, notes, trunk := bslSolveAroundCore(blk, rel, nets, roleReach, anchorRole, anchorPins,
+			anchorBBox, obstacles, usable, failFast, skip)
+		progressed := false
+		for _, k := range trunk.Empty {
+			if !skip[k] {
+				skip[k], progressed = true, true
+			}
+		}
+		if !progressed {
+			return out, append(dropped, notes...)
+		}
+		dropped = append(dropped, trunk.EmptyNotes...)
+	}
+}
+
+// bslSolveAroundCore 是一轮求解;trunkSkip 里的宿主脚不走干线。返回值第三项是本轮的
+// 干线结果(其中 Empty 是一个件都没挂上的干线宿主)。
+func bslSolveAroundCore(
+	blk blocks.Block,
+	rel bslRelations,
+	nets [][]string,
+	roleReach map[string]float64,
+	anchorRole string,
+	anchorPins map[string]acPin,
+	anchorBBox layoutBBox,
+	obstacles []layoutBBox,
+	usable *layoutBBox,
+	failFast bool,
+	trunkSkip map[string]bool,
+) ([]bslSolved, []string, bslTrunkResult) {
 
 	var out []bslSolved
 	var notes []string
@@ -655,7 +699,7 @@ func bslSolveAroundOpt(
 	// attach 阶段的额外约束(其余阶段为空,行为不变):贴脚件连同自己的 marker 不许
 	// 压进宿主任何一只有连接的脚的桩线/marker 通道(hostLanes),也不许与已贴好的件的
 	// marker 簇相压(memberClusters)、不许把 marker 印到页面已有图元上(live)。
-	var hostLanes, memberClusters []layoutBBox
+	var hostLanes, memberClusters, wiredObs []layoutBBox
 	attachPhase := false
 	clusterFree := func(role string, cx, cy float64) bool {
 		if !attachPhase {
@@ -663,7 +707,7 @@ func bslSolveAroundOpt(
 		}
 		c := clusterOf(role)
 		abs := layoutBBox{MinX: cx + c.MinX, MinY: cy + c.MinY, MaxX: cx + c.MaxX, MaxY: cy + c.MaxY}
-		for _, set := range [][]layoutBBox{hostLanes, memberClusters, live} {
+		for _, set := range [][]layoutBBox{hostLanes, memberClusters, live, wiredObs} {
 			for _, o := range set {
 				if boxesGapOverlap(abs, o, bslPartGap) {
 					return false
@@ -846,21 +890,32 @@ func bslSolveAroundOpt(
 		return a < b
 	})
 	hull := bslHostHull(anchorBBox, anchorPins)
-	hostLanes = bslHostPinLanes(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole))
-	attachPhase = true
-	for _, role := range attachRoles {
+	// ⓪ 干线:左右列宿主脚上的竖放分立件先用导线贴脚(bsl_attach_trunk.go)。它们的宿主脚
+	//    不挂 marker,所以那些脚的通道不再算进 hostLanes;干线的导线、标签、成员 marker
+	//    簇改由 wiredObs/memberClusters 占位,之后的贴件照样避开。
+	trunkHosts := bslTrunkHosts(blk, rel, nets, anchorRole, anchorPins, trunkSkip)
+	trunkKeys := map[string]bool{}
+	trunkMember := map[string]bool{}
+	for _, h := range trunkHosts {
+		trunkKeys[h.Key] = true
+		for _, r := range h.Members {
+			trunkMember[r] = true
+		}
+	}
+	// placeOld 是贴件的旧路径(外排 → 上/下回退);返回 true = failFast 下第一个放不下的件。
+	placeOld := func(role string) bool {
 		target := rel.Attach[role]
 		tRole, tPin, ok := splitBlockPinRef(target)
 		if !ok || tRole != anchorRole {
 			if ok && tRole != anchorRole {
 				notes = append(notes, fmt.Sprintf("%s 贴的是非锚件 %s 的脚,本版只按锚件实测求解 —— 该件走网格", role, tRole))
 			}
-			continue
+			return false
 		}
 		pin, found := anchorPins[tPin]
 		if !found {
 			notes = append(notes, fmt.Sprintf("%s: 锚件上找不到引脚 %q(实测引脚表里没有这个名字/编号)—— 该件走网格", role, tPin))
-			continue
+			return false
 		}
 		pinSide := outwardDirection(pin)
 		if pinSide == "" {
@@ -873,7 +928,7 @@ func bslSolveAroundOpt(
 		verticalRole[role] = vertical
 		rot := 0.0
 		if vertical {
-			rot = 270 // 竖放:pin1 朝上(电)、pin2 朝下(地),与 orientation 真值表一致
+			rot = 270 // 竖放(下发 270 实测为 pin1 朝下;非干线件靠标签连接,朝向不影响连通)
 		}
 		// 左/右列的脚:先沿引出方向放到外带(越过宿主所有有连接的脚的通道),外带被
 		// 图纸边/别的图元占满时才回退到宿主上/下侧(bslAttachSide 给的那条路)。
@@ -886,7 +941,7 @@ func bslSolveAroundOpt(
 			if x, y, ok := fitOutward(role, refX, refY, follow, pinSide, hull); ok {
 				groupLast[target] = [2]float64{x, y}
 				out = append(out, bslSolved{Role: role, X: x, Y: y, Rotation: rot, Source: "attach"})
-				continue
+				return false
 			}
 		}
 		// 上/下是**二选一的启发式**(走离引脚最近的那一头),不是电气语义 —— 所以首选
@@ -995,14 +1050,74 @@ func bslSolveAroundOpt(
 			notes = append(notes, fmt.Sprintf("%s: 贴 %s 的位置放不下(%s 侧都被占或出图纸)—— 该件走网格",
 				role, target, strings.Join(sides, "/")))
 			if failFast {
-				return out, notes
+				return true
 			}
-			continue
+			return false
 		}
 		groupLast[target] = [2]float64{x, y}
 		out = append(out, bslSolved{Role: role, X: x, Y: y, Rotation: rot, Source: "attach"})
+		return false
+	}
+	// 顺序:①干线第一遍,只在贴近上限内用导线贴件(近区先给贴件);②大件(FLASH、晶振这类
+	// 多脚件)外排 —— 还有成员没挂上的干线宿主仍按 marker 通道 + 近区预留让出来,大件不会
+	// 落进去;③干线第二遍,剩下的件把干线拉远、绕开大件;④其余小件(非干线宿主的、干线
+	// 放不下退回的)外排,避开干线的导线与标签。
+	var trunk bslTrunkResult
+	attachPhase = true
+	nonTrunkLanes := bslHostPinLanesExcept(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole), trunkKeys)
+	ts := newBslTrunkSolver(nets, trunkHosts, anchorBBox, hull, anchorPins, anchorRole, live, nonTrunkLanes, usable)
+	ts.pass(true)
+	nearBodies, nearClusters, nearWired := ts.snapshot()
+	liveN, clusterN := len(live), len(memberClusters)
+	live = append(live, nearBodies...)
+	memberClusters = append(memberClusters, nearClusters...)
+	wiredObs = nearWired
+	pendingKeys := ts.pending()
+	var pendingHosts []*bslTrunkHost
+	for _, h := range trunkHosts {
+		if pendingKeys[h.Key] {
+			pendingHosts = append(pendingHosts, h)
+		}
+	}
+	skipDone := map[string]bool{}
+	for k := range trunkKeys {
+		if !pendingKeys[k] {
+			skipDone[k] = true
+		}
+	}
+	hostLanes = append(bslHostPinLanesExcept(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole), skipDone),
+		bslTrunkZones(pendingHosts, hull, usable)...)
+	for _, role := range attachRoles {
+		if !trunkMember[role] && !bslIsDiscrete(partKey(role)) && placeOld(role) {
+			return out, notes, trunk
+		}
+	}
+	bigBodies := append([]layoutBBox(nil), live[liveN+len(nearBodies):]...)
+	bigClusters := append([]layoutBBox(nil), memberClusters[clusterN+len(nearClusters):]...)
+	ts.addObstacles(append(append([]layoutBBox(nil), bigBodies...), bigClusters...))
+	ts.pass(false)
+	trunk = ts.finish()
+	trunkSolved := map[string]bool{}
+	for _, s := range trunk.Solved {
+		trunkSolved[s.Role] = true
+		verticalRole[s.Role] = true
+	}
+	live = append(append(live[:liveN], bigBodies...), trunk.Bodies...)
+	memberClusters = append(append(memberClusters[:clusterN], bigClusters...), trunk.Clusters...)
+	wiredObs = trunk.Wired
+	out = append(out, trunk.Solved...)
+	notes = append(notes, trunk.Notes...)
+	hostLanes = nonTrunkLanes
+	for _, role := range attachRoles {
+		if trunkSolved[role] || (!trunkMember[role] && !bslIsDiscrete(partKey(role))) {
+			continue
+		}
+		if placeOld(role) {
+			return out, notes, trunk
+		}
 	}
 	attachPhase = false
+	live = append(live, wiredObs...) // 之后的 flow/pair 件也不许压干线导线与标签
 
 	// ② flow:沿 +x 顺链排,以锚件为基准。锚件左边的逆序向 −x 长,右边的顺序向 +x 长。
 	if len(rel.Flow) > 0 {
@@ -1089,7 +1204,7 @@ func bslSolveAroundOpt(
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Role < out[j].Role })
-	return out, notes
+	return out, notes, trunk
 }
 
 // bslRoleReach 是某个角色的 marker 最远能伸出多少 —— 取它沾到的所有网里标签最宽的

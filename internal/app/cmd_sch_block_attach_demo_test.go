@@ -68,8 +68,11 @@ func checkBlockAttachDemo(t *testing.T, anchor layoutBBox) {
 	// connected host pin's stub + marker lane (no longer above/below the host),
 	// and stay near their pin: within that side's lane depth plus their own
 	// marker cluster.
+	// 2026-10-16: a host pin wired by a trunk carries no marker and owns no lane;
+	// its trunk members sit within bslTrunkMaxReach of the pin instead.
 	nets := bslBlockNets(blk)
-	lanes := bslHostPinLanes(nets, "U", pins, anchor, bslRoleReach(nets, "U"))
+	lanes := bslHostPinLanesExcept(nets, "U", pins, anchor, bslRoleReach(nets, "U"), bslTestTrunkPins(rel, pins, solved))
+	checkTrunkWires(t, blk, rel, pins, anchor, solved)
 	hull := bslHostHull(anchor, pins)
 	pinOf := map[string]string{"C_VDD": "3V3", "C_BULK": "3V3", "R_EN": "EN", "C_EN": "EN", "R_IO0": "IO0"}
 	for role, pn := range pinOf {
@@ -86,7 +89,11 @@ func checkBlockAttachDemo(t *testing.T, anchor layoutBBox) {
 			depth = math.Max(depth, l.MaxX-l.MinX)
 		}
 		v := math.Max(bslMarkerVReach, bslRoleReach(nets, role))
-		if d := math.Hypot(s.X-pin.X, s.Y-pin.Y); d > depth+2*(box.MaxY+v)+bslPartGap {
+		if s.Wire != nil {
+			if d := math.Abs(s.X - pin.X); d > bslTrunkMaxReach {
+				t.Errorf("%s is wired %.0f out from its pin %s (want ≤ %d)", role, d, pn, bslTrunkMaxReach)
+			}
+		} else if d := math.Hypot(s.X-pin.X, s.Y-pin.Y); d > depth+2*(box.MaxY+v)+bslPartGap {
 			t.Errorf("%s is %.0f from its pin %s (want ≤ lane depth %.0f + its own cluster)", role, d, pn, depth)
 		}
 		switch outwardDirection(pin) {

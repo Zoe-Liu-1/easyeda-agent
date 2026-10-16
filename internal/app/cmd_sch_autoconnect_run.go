@@ -74,6 +74,10 @@ type acConnSpec struct {
 	X, Y   *float64 // explicit coordinate override
 	Kind   string   // raw CLI/spec kind ("gnd", "power", "netport", …)
 	Net    string
+	// Outward 只对显式坐标生效:把这个点当成一只朝该方向(0=右 90=上 180=左 270=下)
+	// 引出的脚,首段只许沿它离开 —— block-apply 在干线末端补端口标签时用它把桩线锁在
+	// 干线的延长线上,不让评分器把标签折回干线或压到外围件上。
+	Outward *float64
 }
 
 // acConnResult is the per-connection output (issue #24 result shape).
@@ -476,7 +480,7 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 		// Resolve pin coordinate: explicit --x/--y wins; else designator:pin.
 		var pin acPin
 		if c.X != nil && c.Y != nil {
-			pin = acPin{X: *c.X, Y: *c.Y}
+			pin = acPin{X: *c.X, Y: *c.Y, PinRotation: c.Outward}
 		} else if c.PinRef != "" {
 			cr.Pin = c.PinRef
 			p, perr := resolvePinCoord(scene, c.PinRef)

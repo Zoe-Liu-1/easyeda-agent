@@ -70,6 +70,9 @@ type bapManifest struct {
 	// and PartialState is true whenever the canvas cannot be proven restored.
 	// This is intentionally not presented as a transaction — EasyEDA mutations
 	// autosave independently.
+	// Wiring 是块内真实导线的结果:画上的线、退回标签的成员(带原因)、干线末端补的
+	// 端口标签。nil = 本块没有可画的连接。
+	Wiring       *bapWireReport     `json:"wiring,omitempty"`
 	Failure      string             `json:"failure,omitempty"`
 	PartialState bool               `json:"partialState,omitempty"`
 	Rollback     *bapRollbackReport `json:"rollback,omitempty"`
@@ -1134,10 +1137,27 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 		fmt.Fprintf(stderr, "warn: %s\n", w)
 	}
 
-	// 6. wire — facing internal two-pin nets get one direct wire; everything else
-	// is delegated to autoconnect, which owns the stub geometry + idempotency.
-	direct := bapWireDirectPairs(cfg, window, plan.Nets, stderr)
-	var conns []acConnSpec
+	// 6. wire — attach 外围件用真实导线接到它贴的核心脚(干线),信号网其余脚直线 T 进
+	// 同网导线,正对的块内两脚网拉直线(bap_block_wire.go);证不清的成员退回 autoconnect
+	// 标签并写进 manifest.wiring.fallback。autoconnect 仍负责其余 stub+marker 与幂等。
+	direct, labelConns, wiring := bapWireBlock(cfg, window, plan, stderr)
+	if wiring != nil {
+		man.Wiring = wiring
+		if len(wiring.Fallback) > 0 {
+			refs := make([]string, 0, len(wiring.Fallback))
+			for _, f := range wiring.Fallback {
+				refs = append(refs, f.Member)
+			}
+			w := fmt.Sprintf("%d 个块内连接没能用导线证清白地接上,退回同名标签(sch check 的 peripheral-not-direct 会指出受影响的外围件):%s —— 原因逐条见 manifest.wiring.fallback",
+				len(refs), strings.Join(refs, ", "))
+			man.Warnings = append(man.Warnings, w)
+			fmt.Fprintf(stderr, "warn: %s\n", w)
+		}
+		if wiring.Skipped != "" {
+			man.Warnings = append(man.Warnings, "wiring skipped: "+wiring.Skipped)
+		}
+	}
+	conns := append([]acConnSpec(nil), labelConns...)
 	for _, n := range plan.Nets {
 		for _, m := range n.Members {
 			if direct[m] {
@@ -1408,6 +1428,16 @@ func emitBapManifest(m bapManifest, asJSON bool, stdout io.Writer) error {
 			}
 		}
 		fmt.Fprintf(stdout, "%-14s %-9s %s%s\n", n.Net, n.Kind, strings.Join(n.Members, " "), tag)
+	}
+	if w := m.Wiring; w != nil {
+		fmt.Fprintf(stdout, "\nwires: %d drawn, %d fell back to labels, %d port label(s) at trunk ends\n",
+			len(w.Wired), len(w.Fallback), len(w.Labels))
+		for _, f := range w.Fallback {
+			fmt.Fprintf(stdout, "  label-only %-10s %-12s %s\n", f.Member, f.Net, f.Reason)
+		}
+		if w.Skipped != "" {
+			fmt.Fprintf(stdout, "  skipped: %s\n", w.Skipped)
+		}
 	}
 	if len(m.Unconsumed) > 0 {
 		fmt.Fprintf(stdout, "\nNOT applied (v1 scope): %s\n", strings.Join(m.Unconsumed, ", "))
