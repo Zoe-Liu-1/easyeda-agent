@@ -16,6 +16,10 @@ import (
 // modules (sch groups) with compose's own ruler — schematicObservedOwnershipLayout
 // rebuilds wire roots from a fresh components.list, ValidateSchematicPeripheralDirect
 // decides — so a page compose would refuse is never green here.
+// schSimplePeripheralMaxPins: parts with at most this many pins count as simple
+// peripherals that must be wired to their core (2-pin passives, 4-pin crystals).
+const schSimplePeripheralMaxPins = 4
+
 func peripheralDirectFinding(cfg *appConfig, window string, comps []layoutComp, stderr io.Writer) []checkFinding {
 	parts := 0
 	for _, c := range comps {
@@ -95,11 +99,22 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 			}
 			return members[i] < members[j]
 		})
-		owned := map[string]bool{}
-		for _, ref := range members {
-			owned[ref] = true
+		// Only simple peripherals must be wired to the core; another IC in the
+		// module (≥5 pins, e.g. an SPI flash) is joined by net labels by design and
+		// judged as its own solo module. Pin count stands in for the part class
+		// block-apply uses (bslIsSimplePeripheral): passives have 2 pins, crystals 4.
+		owned := map[string]bool{members[0]: true}
+		var peripherals []string
+		for _, ref := range members[1:] {
+			if pinCount[ref] <= schSimplePeripheralMaxPins {
+				owned[ref] = true
+				peripherals = append(peripherals, ref)
+			}
 		}
-		mods := []connectivity.Module{{ID: m.name, CoreComponents: members[:1], PeripheralComponents: members[1:]}}
+		if len(peripherals) == 0 {
+			continue
+		}
+		mods := []connectivity.Module{{ID: m.name, CoreComponents: members[:1], PeripheralComponents: peripherals}}
 		for ref := range pinCount {
 			if !owned[ref] {
 				mods = append(mods, connectivity.Module{ID: "solo:" + ref, CoreComponents: []string{ref}})
@@ -115,7 +130,7 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 		out = append(out, checkFinding{
 			Type: "peripheral-not-direct", Level: "warn", Designator: members[0],
 			Message: fmt.Sprintf("模块 %s(核心 %s,外围 %s)没有全部用实际导线接到核心: %v — 同名标签不算直连;按 auto-layout-sop §2 走 `sch lib-layout` → `sch compose --preserve-instances` 重建",
-				m.name, members[0], strings.Join(members[1:], ","), err),
+				m.name, members[0], strings.Join(peripherals, ","), err),
 		})
 	}
 	return out

@@ -257,7 +257,7 @@ func checkTallAnchorOutward(t *testing.T, blk blocks.Block, rel bslRelations, ro
 	// every other connected U pin still does.
 	// Host pins on a dedicated two-pin net to an attach member (U.SPICLK ↔ FLASH.CLK
 	// …) are wired by the executor and own no lane either (bslWiredHostPins).
-	trunkPins := bslMergeSkip(bslTestTrunkPins(rel, pins, solved), bslWiredHostPins(nets, rel, "U", pins))
+	trunkPins := bslMergeSkip(bslTestTrunkPins(rel, pins, solved), bslWiredHostPins(blk, nets, rel, "U", pins))
 	lanes := bslHostPinLanesExcept(nets, "U", pins, anchor, reachOf("U"), trunkPins)
 	connected := map[string]bool{}
 	for _, net := range nets {

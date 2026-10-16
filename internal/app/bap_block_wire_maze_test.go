@@ -294,3 +294,20 @@ func TestSegClearAllowsBareCrossingButNotContact(t *testing.T) {
 		t.Fatalf("crossing a planned foreign wire must be allowed: %s", why)
 	}
 }
+
+// Direct wiring covers simple peripherals only: pins of another IC in the block
+// (the SPI flash) are left to net labels and its attach entry is dropped.
+func TestBapDirectWireScopeLeavesICsToLabels(t *testing.T) {
+	plan := bapPlan{AnchorRole: "U",
+		Placements: []bapPlacement{{Role: "U", PartKey: "mcu.esp32s3r8_chip", Designator: "U2"},
+			{Role: "FLASH", PartKey: "ic.w25q64_flash", Designator: "U1"},
+			{Role: "C_SPI", PartKey: "cap.100nf_0402", Designator: "C4"}},
+		Nets: []bapNet{{Net: "MCU_N3", Members: []string{"U2:29", "C4:1", "U1:8"}}, {Net: "MCU_N9", Members: []string{"U2:33", "U1:6"}}}}
+	nets, att := bapDirectWireScope(plan, map[string]string{"C4": "U2:29", "U1": "U2:SPICLK"})
+	if got := strings.Join(nets[0].Members, ",") + "|" + strings.Join(nets[1].Members, ","); got != "U2:29,C4:1|U2:33" {
+		t.Fatalf("flash pins must leave the wired scope, got %s", got)
+	}
+	if att["U1"] != "" || att["C4"] != "U2:29" {
+		t.Fatalf("attach scope wrong: %v", att)
+	}
+}

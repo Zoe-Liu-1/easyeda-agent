@@ -165,9 +165,9 @@ func fetchSchObstaclesAndKeepout(cfg *appConfig, window string) ([]layoutBBox, *
 // advisory(出图纸 —— 与 `sch layout-lint` 的分档一致,只警告不回滚:块比图纸大
 // 是版面决策,不该让 apply 变成不可能)。
 //
-// **这一步带 includePins,而带引脚的回读会顺带跑一次 netlist 导出** —— 导出之后紧接着
-// 发 component.modify 会被平台拒掉(见 bslMoveComponentX)。所以实测推让排在它**前面**,
-// 而它验的是推让之后的最终几何。
+// 这一步带 includePins 但 includePinNets:false:只要几何,不跑 netlist 导出 ——
+// 导出之后紧接着的写入(推让的 component.modify、随后的 wire.create)会被平台拒掉
+// (#256)。实测推让仍排在它前面,它验的是推让之后的最终几何。
 func verifyBlockLayout(cfg *appConfig, window string, placed []bapPlacement) ([]layoutFinding, []layoutFinding, error) {
 	// includePins is load-bearing: PIN COINCIDENCE is the failure this check exists
 	// for. Two parts can sit at a clean bbox distance and still land a pin of one
@@ -178,7 +178,7 @@ func verifyBlockLayout(cfg *appConfig, window string, placed []bapPlacement) ([]
 	// 预算要显式给足:includePins 的代价随页面引脚数涨(一颗 81 脚模组实测 18s),
 	// 默认 20s 会随机超时 —— 而这一步超时等于**硬门没跑成**,比慢更糟。
 	res, err := requestActionTimed(cfg, "schematic.components.list", window,
-		map[string]any{"includeBBox": true, "includePins": true}, 90*time.Second)
+		map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}, 90*time.Second)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read components with real bbox/pin geometry: %w", err)
 	}
@@ -298,22 +298,12 @@ func validateBlockLayoutResult(result map[string]any) error {
 		if !ok {
 			return fmt.Errorf("layout geometry incomplete: component %s has no pins array", blockLayoutComponentLabel(m, i))
 		}
-		// Pin GEOMETRY being proven is not pin→NET being proven. A muted netlist export
-		// leaves every pin's `net` null while `pinsAvailable` stays true (that flag only
-		// covers the pin API), and downstream readers treat a null net as an unconnected
-		// pin. Require the connector's explicit netlist verdict: an absent key means an
-		// older connector, which is "not proven", not "fine".
-		if netlistAvailable, reported := m["netlistAvailable"].(bool); !reported || !netlistAvailable {
-			cause := "connector did not report netlist availability"
-			if reported {
-				cause = "the netlist export was unavailable, so every pin's net reads as null"
-				if detail := strings.TrimSpace(asString(m["netlistError"])); detail != "" {
-					cause += ": " + detail
-				}
-			}
-			return fmt.Errorf("layout geometry incomplete: component %s pin→net attribution was not proven (%s)",
-				blockLayoutComponentLabel(m, i), cause)
-		}
+		// No pin→net requirement here: this gate's only readers (analyzeLayout's
+		// overlap / pin-coincidence scan and the out-of-sheet check) use geometry.
+		// The read is taken with includePinNets:false because the netlist export it
+		// used to trigger made the host reject the wires block-apply issues next
+		// (#256, live 2026-10-16: 22/22 wire.create refused within 3 s of this read;
+		// earlier runs only passed because maze planning happened to take 10 s+).
 		for pinIndex, item := range pins {
 			pin, ok := item.(map[string]any)
 			if !ok {

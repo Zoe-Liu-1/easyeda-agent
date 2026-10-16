@@ -74,6 +74,9 @@ type bapWireReport struct {
 
 // bapWireInput 是纯规划的输入。
 type bapWireInput struct {
+	// AllNets is the block's full net list, used to know which pins still need a
+	// label exit; Nets may be narrowed to the directly wired scope.
+	AllNets []bapNet
 	Nets []bapNet
 	// Attach 是外围件位号 → 它贴的核心脚(DESIG:PIN),来自块模板的 schematic_layout.attach。
 	Attach map[string]string
@@ -146,7 +149,11 @@ func (p *bapWirePlanner) pinWired(q acPin) bool {
 func (p *bapWirePlanner) pinNetOf(q acPin) string {
 	if p.pinNets == nil {
 		p.pinNets = map[string]string{}
-		for _, n := range p.in.Nets {
+		all := p.in.AllNets
+		if all == nil {
+			all = p.in.Nets
+		}
+		for _, n := range all {
 			for _, m := range n.Members {
 				p.pinNets[m] = n.Net
 			}
@@ -593,7 +600,8 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 		fmt.Fprintf(stderr, "wire ✗ %s\n", rep.Skipped)
 		return done, nil, rep
 	}
-	wp := bapPlanBlockWires(bapWireInput{Nets: plan.Nets, Attach: attach, Scene: buildScene(res.Result), Comps: comps, Raw: res.Result})
+	nets, attach := bapDirectWireScope(plan, attach)
+	wp := bapPlanBlockWires(bapWireInput{Nets: nets, AllNets: plan.Nets, Attach: attach, Scene: buildScene(res.Result), Comps: comps, Raw: res.Result})
 	rep.Fallback = append(rep.Fallback, wp.Fallback...)
 	brokenTree := map[string]string{} // 干线一段没画上,同一棵树后面的线可能 T 在缺的那段上
 	brokenNet := map[string]string{}  // 迷宫线可能 T 在同网任何一段已规划的线上
@@ -742,4 +750,40 @@ func bapRouteBrokenDependency(r bapWireRoute, brokenTree, brokenNet map[string]s
 		return "同网先前的一根线没画上(" + brokenNet[r.Net] + "),这根线可能接在缺的那段上"
 	}
 	return ""
+}
+
+// bapDirectWireScope keeps only what a schematic wires directly: members on
+// simple peripherals and the anchor. Pins of another IC/connector/module in the
+// block are left to autoconnect's net labels by design (not a fallback), and
+// attach entries for those parts are dropped. Planned wires carry their net
+// name, so a label on the complex part's pin still joins the wired tree.
+func bapDirectWireScope(plan bapPlan, attach map[string]string) ([]bapNet, map[string]string) {
+	labelOnly := map[string]bool{}
+	for _, p := range plan.Placements {
+		if p.Role != plan.AnchorRole && !bslIsSimplePeripheral(p.PartKey) {
+			labelOnly[p.Designator] = true
+		}
+	}
+	if len(labelOnly) == 0 {
+		return plan.Nets, attach
+	}
+	nets := make([]bapNet, 0, len(plan.Nets))
+	for _, n := range plan.Nets {
+		var keep []string
+		for _, m := range n.Members {
+			if d, _, ok := strings.Cut(m, ":"); ok && labelOnly[d] {
+				continue
+			}
+			keep = append(keep, m)
+		}
+		n.Members = keep
+		nets = append(nets, n)
+	}
+	att := map[string]string{}
+	for m, h := range attach {
+		if d, _, _ := strings.Cut(m, ":"); !labelOnly[d] {
+			att[m] = h
+		}
+	}
+	return nets, att
 }

@@ -77,6 +77,24 @@ func bslIsDiscrete(partKey string) bool {
 	return false
 }
 
+// bslIsSimplePeripheral reports whether a block part is a simple peripheral that
+// a schematic wires straight to its core (passives, crystals, ferrites, fuses,
+// small switches). Another IC, a connector or a module is joined by net labels
+// instead: decoupled and readable (user correction 2026-10-16 — wiring a SPI
+// flash with maze routes and crossings exceeded normal schematic practice).
+func bslIsSimplePeripheral(partKey string) bool {
+	if bslIsDiscrete(partKey) {
+		return true
+	}
+	k := strings.ToLower(partKey)
+	for _, pre := range []string{"xtal.", "fb.", "fuse.", "zener.", "sw.", "mosfet.", "pmos."} {
+		if strings.HasPrefix(k, pre) {
+			return true
+		}
+	}
+	return false
+}
+
 // bslPartBox 是件的判定 box(以件中心为原点)。放置前它只有下限,落地后由硬门
 // (verifyBlockLayout / layout-lint 的真实 bbox)兜底。
 //
@@ -448,7 +466,7 @@ func bslHostPinLanesExcept(nets [][]string, anchorRole string, pins map[string]a
 // 推到 x≈940,离 SPI 脚 400 远,迷宫在信封里够不着,五根 SPI 全部退回标签。
 // 执行器绕线失败时这只脚仍会退回标签(manifest.wiring.fallback 逐条报),那是现场要看的
 // 退化,不是这里该预留的常态。
-func bslWiredHostPins(nets [][]string, rel bslRelations, anchorRole string, pins map[string]acPin) map[string]bool {
+func bslWiredHostPins(blk blocks.Block, nets [][]string, rel bslRelations, anchorRole string, pins map[string]acPin) map[string]bool {
 	out := map[string]bool{}
 	for _, net := range nets {
 		if bslNetIsGround(net) {
@@ -475,6 +493,11 @@ func bslWiredHostPins(nets [][]string, rel bslRelations, anchorRole string, pins
 			continue
 		}
 		if tRole, _, ok := splitBlockPinRef(rel.Attach[other]); !ok || tRole != anchorRole {
+			continue
+		}
+		// Only a simple peripheral is wired; a dedicated net to another IC (the
+		// SPI flash) is joined by labels and keeps its lane (bapDirectWireScope).
+		if !bslIsSimplePeripheral(blk.Parts[other].Part) {
 			continue
 		}
 		if q, ok := pins[hostPin]; ok {
@@ -1122,7 +1145,7 @@ func bslSolveAroundCore(
 	var trunk bslTrunkResult
 	attachPhase = true
 	// 专线宿主脚(bslWiredHostPins)由执行器用导线接、不挂 marker:与干线宿主脚一样不占通道。
-	wiredPins := bslWiredHostPins(nets, rel, anchorRole, anchorPins)
+	wiredPins := bslWiredHostPins(blk, nets, rel, anchorRole, anchorPins)
 	nonTrunkLanes := bslHostPinLanesExcept(nets, anchorRole, anchorPins, anchorBBox, reachOf(anchorRole), bslMergeSkip(trunkKeys, wiredPins))
 	ts := newBslTrunkSolver(nets, trunkHosts, anchorBBox, hull, anchorPins, anchorRole, live, nonTrunkLanes, usable)
 	ts.pass(true)
@@ -1595,7 +1618,7 @@ func bslRelocateAnchor(blk blocks.Block, rel bslRelations, nets [][]string, role
 		reach = r
 	}
 	hull := bslHostHull(anchorBBox, pins)
-	lanes := bslHostPinLanesExcept(nets, anchorRole, pins, anchorBBox, reach, bslWiredHostPins(nets, rel, anchorRole, pins))
+	lanes := bslHostPinLanesExcept(nets, anchorRole, pins, anchorBBox, reach, bslWiredHostPins(blk, nets, rel, anchorRole, pins))
 	foot := append([]layoutBBox{hull}, lanes...)
 	lo, hi := hull, hull
 	for _, l := range lanes {

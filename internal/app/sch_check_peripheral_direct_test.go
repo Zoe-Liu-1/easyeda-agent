@@ -45,3 +45,56 @@ func TestPeripheralDirectFindingCatchesLabelOnlyModules(t *testing.T) {
 		t.Fatalf("merged subgroups judge as one module, got %+v", got)
 	}
 }
+
+// User correction 2026-10-16: a module's simple peripherals are wired to the
+// core, but another IC in it (an SPI flash) is joined by net labels by design.
+// A label-only ≥5-pin member must not fail the check; a label-only 2-pin member
+// still must.
+func TestPeripheralDirectFindingExemptsLabelJoinedICs(t *testing.T) {
+	load := func() map[string]any {
+		raw, err := os.ReadFile("testdata/peripheral-direct/composed.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	// clone copies a component of the fixture under a new designator, shifted
+	// far from everything so it touches no wire (label-only by construction).
+	clone := func(page map[string]any, from, to string) {
+		comps := page["components"].([]any)
+		for _, c := range comps {
+			m := c.(map[string]any)
+			if m["designator"] != from {
+				continue
+			}
+			raw, _ := json.Marshal(m)
+			var cp map[string]any
+			_ = json.Unmarshal(raw, &cp)
+			cp["designator"], cp["primitiveId"] = to, "id-"+to
+			for _, p := range cp["pins"].([]any) {
+				pm := p.(map[string]any)
+				pm["x"] = pm["x"].(float64) + 5000
+			}
+			page["components"] = append(comps, cp)
+			return
+		}
+		t.Fatalf("fixture has no %s", from)
+	}
+	groups := func(extra string) []*schGroup {
+		return []*schGroup{{ID: "g1", Name: "MCU", Members: []string{"U1", "C3", "C1", "R1", "C2", "R2", extra}}}
+	}
+	ic := load()
+	clone(ic, "U1", "U9")
+	if got := peripheralDirectFindingsFor(ic, groups("U9")); len(got) != 0 {
+		t.Fatalf("a label-joined IC in the module must not fail peripheral-direct, got %+v", got)
+	}
+	cap := load()
+	clone(cap, "C1", "C9")
+	if got := peripheralDirectFindingsFor(cap, groups("C9")); len(got) == 0 {
+		t.Fatal("a label-only 2-pin peripheral must still fail peripheral-direct")
+	}
+}
