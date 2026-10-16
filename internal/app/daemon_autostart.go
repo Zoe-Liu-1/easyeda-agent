@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -52,6 +53,14 @@ func autoStartAllowed() bool {
 // ~/.easyeda-agent/daemon.log) and waits until /health answers. It returns the
 // port the daemon answered on.
 func startDaemonBackground(cfg *appConfig, stderr io.Writer, extraArgs ...string) (int, error) {
+	return startDaemonBackgroundFrom(cfg, stderr, "", extraArgs...)
+}
+
+// startDaemonBackgroundFrom is startDaemonBackground with an explicit binary;
+// "" means this process's own executable. `update` passes the freshly swapped
+// path: after an atomic replace, os.Executable on Linux names the deleted
+// old inode.
+func startDaemonBackgroundFrom(cfg *appConfig, stderr io.Writer, exe string, extraArgs ...string) (int, error) {
 	portStart, portEnd, err := cfg.portRange()
 	if err != nil {
 		return 0, err
@@ -87,7 +96,7 @@ func startDaemonBackground(cfg *appConfig, stderr io.Writer, extraArgs ...string
 		// Another CLI is starting it right now (or a crashed start left the lock).
 		if st, serr := os.Stat(lock); serr == nil && time.Since(st.ModTime()) > 2*daemonStartWait {
 			_ = os.Remove(lock)
-			return startDaemonBackground(cfg, stderr, extraArgs...)
+			return startDaemonBackgroundFrom(cfg, stderr, exe, extraArgs...)
 		}
 		if p := waitUp(); p != 0 {
 			return p, nil
@@ -99,9 +108,10 @@ func startDaemonBackground(cfg *appConfig, stderr io.Writer, extraArgs ...string
 	if p := scan(); p != 0 { // started by someone else meanwhile
 		return p, nil
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return 0, err
+	if exe == "" {
+		if exe, err = os.Executable(); err != nil {
+			return 0, err
+		}
 	}
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -125,4 +135,52 @@ func startDaemonBackground(cfg *appConfig, stderr io.Writer, extraArgs ...string
 		return p, nil
 	}
 	return 0, fmt.Errorf("daemon (pid %d) did not answer /health within %s; see %s", pid, daemonStartWait, logPath)
+}
+
+// installedBuild reports whether v is what the installer produces (a tagged
+// release or a local -dev.N bundle) — never a source build that make dev runs
+// under air, which this package must not stop or replace.
+func installedBuild(v string) bool {
+	return releaseVersionPattern.MatchString(v) || selfupdate.IsLocalVersion(v)
+}
+
+// staleInstalledDaemon reports whether an installed daemon runs an older release
+// than this installed CLI — the state left behind when the binary was upgraded
+// (by `update`, install.sh or a package manager) while the daemon kept running.
+func staleInstalledDaemon(daemonVersion, cliVersion string) bool {
+	return installedBuild(daemonVersion) && installedBuild(cliVersion) && selfupdate.SemverLess(daemonVersion, cliVersion)
+}
+
+// daemonVersionAt reads the version an identified daemon reports on port.
+func daemonVersionAt(cfg *appConfig, port int) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	r := scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: port, portEnd: port})
+	if r.Found == nil {
+		return "", false
+	}
+	return healthVersion(r.Found.Raw), true
+}
+
+func healthVersion(raw []byte) string {
+	var h struct {
+		Version string `json:"version"`
+	}
+	_ = json.Unmarshal(raw, &h)
+	return h.Version
+}
+
+// restartInstalledDaemon replaces the identified daemon on port with exe ("" =
+// this binary) in the background. still re-checks the live version right before
+// stopping, so two CLIs that saw the same stale daemon do not stop each other's
+// fresh replacement. Startup flags of the old process are not inherited.
+func restartInstalledDaemon(cfg *appConfig, port int, exe string, still func(version string) bool, stderr io.Writer) error {
+	if v, ok := daemonVersionAt(cfg, port); ok && !still(v) {
+		return nil
+	}
+	if err := stopLocalDaemon(cfg.host, port, stderr); err != nil {
+		return err
+	}
+	_, err := startDaemonBackgroundFrom(cfg, stderr, exe)
+	return err
 }

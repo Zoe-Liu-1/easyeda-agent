@@ -113,7 +113,8 @@ easyeda daemon health
    easyeda update --check    # 只看不改:cli / skill / connector 三方版本一次列清
    sudo easyeda update       # 二进制装在 /usr/local/bin 等 root 目录时
    ```
-   升完 **daemon 仍在跑旧二进制,要重启 daemon**;命令会提示。
+   升完会**自动在后台重启**仍在跑旧二进制的 daemon(启动参数回到默认;`--restart-daemon=false` 关闭;`make dev` 的 daemon 不动)。
+   用安装脚本或包管理器升级的,下一条命令发现已安装的 daemon 比 CLI 旧,也会自动重启它。
    开发机上的 dev 构建(git-describe 版本号)默认不覆盖 —— 这是有意的,`--force` 才强升。
    一键脚本仍是**首次安装**(和重装连接器)的路径:
    ```bash

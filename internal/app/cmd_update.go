@@ -32,12 +32,21 @@ type updateReport struct {
 	CLI             *selfupdate.CLIOutcome `json:"cli,omitempty"`
 	Skills          []updateSkillRow       `json:"skills,omitempty"`
 	Connector       *connectorReport       `json:"connector,omitempty"`
+	DaemonRestart   *daemonRestartReport   `json:"daemonRestart,omitempty"`
 	Behind          int                    `json:"behind"`          // components behind the target
 	Mismatched      int                    `json:"mismatched"`      // components at a different or unknown version
 	Unverified      int                    `json:"unverified"`      // live components that could not be checked
 	RestartRequired bool                   `json:"restartRequired"` // deprecated compatibility field; always false
 	Ready           bool                   `json:"ready"`           // exact CLI/Skill/daemon + compatible connector
 	Notes           []string               `json:"notes,omitempty"`
+}
+
+// daemonRestartReport records the automatic restart of a daemon left running on
+// the previous binary (`--restart-daemon`).
+type daemonRestartReport struct {
+	From   string `json:"from"`
+	Status string `json:"status"` // restarted | failed
+	Error  string `json:"error,omitempty"`
 }
 
 // updateSkillRow is one skill dir's before/after. In check mode only the
@@ -80,6 +89,7 @@ func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		jsonOut       bool
 		localDir      string
 		localBinary   string
+		restartDaemon bool
 	)
 	c := &cobra.Command{
 		Use:     "update",
@@ -227,6 +237,21 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 				}
 			}
 
+			// ── daemon left on the previous binary ───────────────────────────
+			if shouldRestartDaemonAfterUpdate(rep, checkOnly, skillOnly, restartDaemon) {
+				exe := rep.CLI.Path
+				if exe == "" {
+					exe, _ = selfupdate.CurrentBinaryPath()
+				}
+				dr := &daemonRestartReport{From: rep.Connector.DaemonVersion, Status: "restarted"}
+				differs := func(v string) bool { return selfupdate.SemverCore(v) != target }
+				if err := restartInstalledDaemon(cfg, rep.Connector.DaemonPort, exe, differs, stderr); err != nil {
+					dr.Status, dr.Error = "failed", err.Error()
+				}
+				rep.DaemonRestart = dr
+				rep.Connector = probeConnector(cfg, target)
+			}
+
 			rep.Behind = countBehind(rep)
 			rep.Mismatched, rep.Unverified = countVersionGateProblems(rep)
 			rep.RestartRequired = false
@@ -263,7 +288,21 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 	c.Flags().BoolVar(&force, "force", false, "overwrite a dev build / re-install even when already at the target")
 	c.Flags().BoolVar(&createMissing, "create-missing", false, "install the skill into a client dir that doesn't exist yet")
 	c.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	c.Flags().BoolVar(&restartDaemon, "restart-daemon", true, "restart an installed daemon still running a different version on the updated binary (background; a make dev daemon is never touched)")
 	return c
+}
+
+// shouldRestartDaemonAfterUpdate: only an applied update whose CLI binary now
+// matches the target, and only an installed daemon (never a source build under
+// make dev) that reports a different version.
+func shouldRestartDaemonAfterUpdate(rep updateReport, checkOnly, skillOnly, enabled bool) bool {
+	if !enabled || checkOnly || skillOnly || rep.CLI == nil || rep.Connector == nil {
+		return false
+	}
+	if rep.CLI.Status != "updated" && rep.CLI.Status != "up-to-date" {
+		return false
+	}
+	return rep.Connector.DaemonRunning && rep.Connector.DaemonStatus == "mismatch" && installedBuild(rep.Connector.DaemonVersion)
 }
 
 // checkCLI is the read-only half of the CLI update: same verdicts as
@@ -459,9 +498,15 @@ func countVersionGateProblems(rep updateReport) (mismatched, unverified int) {
 // after an update: restart the daemon, re-import the connector, install skills.
 func updateNotes(rep updateReport) []string {
 	var notes []string
+	if d := rep.DaemonRestart; d != nil && d.Status == "restarted" {
+		notes = append(notes, fmt.Sprintf("daemon %s restarted in the background on v%s (startup flags reset to defaults)", d.From, rep.Target))
+	}
+	if d := rep.DaemonRestart; d != nil && d.Status == "failed" {
+		notes = append(notes, "automatic daemon restart failed: "+d.Error)
+	}
 	if rep.Connector != nil && rep.Connector.DaemonStatus == "mismatch" {
 		notes = append(notes, "daemon is still running a DIFFERENT binary — restart it with v"+rep.Target+
-			" (stop the current `easyeda daemon start`, then start it again)")
+			" (`easyeda daemon stop`, then `easyeda daemon start --background`; a make dev daemon restarts with its own build)")
 	}
 	if rep.Connector != nil && (rep.Connector.Status == "behind" || rep.Connector.Status == "mismatch") {
 		notes = append(notes, fmt.Sprintf(

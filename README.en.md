@@ -147,7 +147,8 @@ silently: if that directory is not on the user PATH it prints the exact command
 to add it, and only changes the user PATH when you pass `-AddToPath` (running it
 as a file) or set `$env:EASYEDA_ADD_TO_PATH=1`. The machine PATH is never
 touched. If `easyeda.exe` is locked by a running daemon, the old file is renamed
-aside so the upgrade still completes — restart the daemon afterwards.
+aside so the upgrade still completes; the next command notices the installed daemon is older than
+the CLI and restarts it in the background (`easyeda update` restarts it right after the swap).
 
 **Hitting `403` / GitHub API rate limit?** The script calls `api.github.com` once to
 resolve the latest release, and unauthenticated calls are capped at 60 requests/hour

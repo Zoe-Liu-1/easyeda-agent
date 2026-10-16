@@ -103,8 +103,8 @@ SHA-256 校验。`EASYEDA_GITHUB_PROXY=https://mirror.example/{url}` 可替换�
 同一套 `EASYEDA_INSTALL_DIR` / `CODEX_HOME` / `CLAUDE_CONFIG_DIR`，默认装到
 `%USERPROFILE%\.local\bin`，全部资产先校验 SHA-256 再替换；目录不在用户 PATH 上时
 只打印添加命令，`-AddToPath` 或 `EASYEDA_ADD_TO_PATH=1` 才写入用户 PATH，机器级
-PATH 不动；`easyeda.exe` 被运行中的 daemon 占用时改名旧文件后换入新文件，随后需
-重启 daemon。回退的手工步骤仍然有效：下载 `easyeda_windows_amd64.exe` 并命名为
+PATH 不动；`easyeda.exe` 被运行中的 daemon 占用时改名旧文件后换入新文件，下一条命令
+发现已安装的 daemon 比 CLI 旧会自动在后台重启它（`easyeda update` 换完二进制当场重启）。回退的手工步骤仍然有效：下载 `easyeda_windows_amd64.exe` 并命名为
 `easyeda.exe`，把所在目录加入 PATH，再运行
 `easyeda update --skill-only --create-missing --version <version>` 安装 Skill。
 Git Bash/WSL 与原生 Windows 是不同运行环境，选择相应的二进制。

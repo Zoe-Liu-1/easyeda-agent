@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CLI：`easyeda update` 换完二进制后自动在后台重启仍在跑旧版本的已安装 daemon（`--restart-daemon`，默认开启，启动参数回到默认），报告新增 `daemonRestart`；任何命令发现已安装的 daemon 比当前 CLI 旧（安装脚本、包管理器升级后）也会自动重启它。`make dev` 等源码构建的 daemon 一律不动。思路来自 #278（@XianD7），按 v1.12.0 已有的按需后台启动收窄实现，不引入系统服务注册。
+
 ## [1.13.0] - 2026-10-16
 
 - CLI：关系块 `sch block-apply` 的预留包络按行折返、在锚件上下交替，外围件多的块不再被预检误判放不下；实测引脚下原位解不开时，锚件平移到最近可整块解开的位置。求解前的引脚回读改为 `includePinNets:false`（只要几何），不再跑网表导出，紧随的锚件平移不再被宿主以 cmdKey 拒绝（ESP32-S3R8 芯片级块现场整块落图、16 网与实时网表一致；外围仍以网标签相连，`peripheral-not-direct` 照常报出）。

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
 )
 
 const (
@@ -691,6 +692,19 @@ func listWindows(cfg *appConfig) ([]healthWindow, error) {
 	}
 	if scan.Found == nil {
 		return nil, fmt.Errorf("no easyeda-agent daemon found on %s:%s (start it with `easyeda daemon start --background`)", cfg.host, scan.Ports)
+	}
+	// An installed daemon older than this installed CLI was left running across
+	// an upgrade: replace it the same way a missing one is started.
+	if dv := healthVersion(scan.Found.Raw); autoStartAllowed() && staleInstalledDaemon(dv, version.Version) {
+		fmt.Fprintf(os.Stderr, "↻ daemon %s 落后于 CLI %s，正在后台重启…\n", dv, version.Version)
+		stale := func(v string) bool { return staleInstalledDaemon(v, version.Version) }
+		if err := restartInstalledDaemon(cfg, scan.Found.Port, "", stale, os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "daemon restart failed, continuing with %s: %v\n", dv, err)
+		}
+		scan = scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
+		if scan.Found == nil {
+			return nil, fmt.Errorf("no easyeda-agent daemon found on %s:%s after restarting it (see %s)", cfg.host, scan.Ports, daemonLogPath())
+		}
 	}
 	var parsed struct {
 		Windows []healthWindow `json:"windows"`
