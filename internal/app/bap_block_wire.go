@@ -603,6 +603,13 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 	nets, attach := bapDirectWireScope(plan, attach)
 	wp := bapPlanBlockWires(bapWireInput{Nets: nets, AllNets: plan.Nets, Attach: attach, Scene: buildScene(res.Result), Comps: comps, Raw: res.Result})
 	rep.Fallback = append(rep.Fallback, wp.Fallback...)
+	// A wire created with its net prints the name on itself, and the trunk's
+	// port label prints it again at the trunk end (live: XTAL_P / XTAL_N shown
+	// twice). A trunk that will carry that label is drawn bare and named by the
+	// label alone; every other wire keeps its net, which is what joins e.g. the
+	// separate decoupling trunks of one supply on several pins.
+	labelled := bapLabelledTrunks(wp.Labels)
+	bareHost := map[string]bool{} // trunk hosts drawn bare: their label is mandatory
 	brokenTree := map[string]string{} // 干线一段没画上,同一棵树后面的线可能 T 在缺的那段上
 	brokenNet := map[string]string{}  // 迷宫线可能 T 在同网任何一段已规划的线上
 	for _, r := range wp.Routes {
@@ -618,7 +625,12 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 		for _, q := range pts {
 			flat = append(flat, q[0], q[1])
 		}
-		if _, werr := requestAction(cfg, "schematic.wire.create", window, map[string]any{"points": flat, "net": r.Net}); werr != nil {
+		payload := map[string]any{"points": flat, "net": r.Net}
+		bare := bapWireBare(r, labelled)
+		if bare {
+			delete(payload, "net")
+		}
+		if _, werr := requestAction(cfg, "schematic.wire.create", window, payload); werr != nil {
 			fmt.Fprintf(stderr, "wire ✗ %s → %s (%s) points=%v: %v — 退回 autoconnect 标签\n", r.Member, r.Host, r.Net, pts, werr)
 			rep.Fallback = append(rep.Fallback, bapWireFallback{Member: r.Member, Net: r.Net, Host: r.Host, Reason: "下发失败: " + werr.Error()})
 			if r.Kind == "trunk" {
@@ -628,6 +640,9 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 			continue
 		}
 		fmt.Fprintf(stderr, "wire ✓ %s %s → %s as %s\n", r.Kind, r.Member, bapOr(r.Host, "tree"), r.Net)
+		if bare {
+			bareHost[r.Host+"\x00"+r.Net] = true
+		}
 		rep.Wired = append(rep.Wired, r)
 		done[r.Member] = true
 		if r.Host != "" {
@@ -648,14 +663,29 @@ func bapWireBlock(cfg *appConfig, window string, plan bapPlan, stderr io.Writer)
 				complete = complete && done[m]
 			}
 		}
-		if !complete {
-			continue // 有成员退回了标签,网名已经会印出来
+		if !complete && !bareHost[l.Host+"\x00"+l.Net] {
+			continue // 有成员退回了标签,网名已经会印出来(带网名画的干线自己也有名字)
 		}
 		x, y, rot := l.X, l.Y, l.Rotation
 		labels = append(labels, acConnSpec{X: &x, Y: &y, Kind: l.Kind, Net: l.Net, Outward: &rot})
 		rep.Labels = append(rep.Labels, l)
 	}
 	return done, labels, rep
+}
+
+// bapLabelledTrunks keys the trunks that carry a port label at their end.
+func bapLabelledTrunks(labels []bapWireLabel) map[string]bool {
+	out := map[string]bool{}
+	for _, l := range labels {
+		out[l.Host+"\x00"+l.Net] = true
+	}
+	return out
+}
+
+// bapWireBare reports whether a route is drawn without its net: it belongs to a
+// trunk whose end label names the net, so the wire must not print it again.
+func bapWireBare(r bapWireRoute, labelled map[string]bool) bool {
+	return r.Host != "" && labelled[r.Host+"\x00"+r.Net]
 }
 
 func bapOr(s, alt string) string {

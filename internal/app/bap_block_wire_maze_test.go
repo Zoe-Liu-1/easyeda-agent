@@ -328,3 +328,24 @@ func TestPickTrunkLabelAvoidsBlockedEnd(t *testing.T) {
 		t.Fatalf("a blocked end must move the label onto the trunk, leaving perpendicular: got (%v,%v) %s", x, y, dir)
 	}
 }
+
+// Live 2026-10-17: XTAL_P / XTAL_N showed twice in the crystal tile — the
+// trunk wire was created with its net (which prints the name) and the port
+// label printed it again at the trunk end. Only a labelled trunk is drawn bare;
+// other wires keep their net, which is what names an unlabelled trunk (a
+// supply's decoupling trunk on a second pin).
+func TestBapWireBareOnlyForLabelledTrunks(t *testing.T) {
+	labelled := bapLabelledTrunks([]bapWireLabel{{Net: "XTAL_P", Host: "X1:1"}})
+	if !bapWireBare(bapWireRoute{Kind: "trunk", Net: "XTAL_P", Host: "X1:1"}, labelled) {
+		t.Fatal("a trunk with an end label is drawn bare")
+	}
+	for _, r := range []bapWireRoute{
+		{Kind: "trunk", Net: "3V3", Host: "U1:2"},       // no label on this trunk
+		{Kind: "trunk", Net: "XTAL_N", Host: "X1:1"},    // other net on that host
+		{Kind: "branch", Net: "XTAL_P", Member: "C7:1"}, // no host
+	} {
+		if bapWireBare(r, labelled) {
+			t.Fatalf("%+v must keep its net", r)
+		}
+	}
+}
