@@ -1172,7 +1172,7 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 	// 跳过 —— 画布上留下 29/30 连好的电路,却没有虚拟组,上层拿不到刚体,而用户看到
 	// 的只是一句 "wire: 1 connection(s) failed"。现在照常走完,最后再统一决定退出码。
 	var wireErr error
-	if err := runAutoconnect(cfg, window, conns, defaultAutoconnectRules(), false, false, false, false, stderr, stderr); err != nil {
+	if _, err := runAutoconnectOpts(cfg, window, conns, defaultAutoconnectRules(), acRunOpts{FreshPins: true}, stderr, stderr); err != nil {
 		wireErr = err
 	}
 
@@ -1674,6 +1674,9 @@ func bapRegisterGroup(cfg *appConfig, window string, plan bapPlan, man *bapManif
 // bapGroupName 是这个实例的人类可读组名:块名(去 block. 前缀)+ 实例号,
 // 例如 ch340c_usb_serial(C7)。
 func bapGroupName(plan bapPlan) string {
+	if b, ok, err := blocks.Get(plan.BlockID); err == nil && ok && b.Title != "" {
+		return b.Title // a frame heading as printed on the sheet
+	}
 	id := strings.TrimPrefix(plan.BlockID, "block.")
 	if plan.Instance == "" {
 		return id

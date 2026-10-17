@@ -376,6 +376,12 @@ type acRunOpts struct {
 	// Strict:选中候选「落点带痕」(见 selectedCandidateWarning)时直接失败不落地,
 	// 而不是打 WARN 后照连。
 	Strict bool
+	// FreshPins: every target pin was just placed by the caller and carries no
+	// net yet, so the scene read skips pin nets. Reading them exports the
+	// netlist, after which the host refuses writes for seconds (#256) — the
+	// first stubs then fail "create failed!" (live 2026-10-17, tiled
+	// block-apply: two crystal labels, a manual retry later landed both).
+	FreshPins bool
 }
 
 // runAutoconnect is the command core: build the scene once, then plan → (dispatch)
@@ -422,8 +428,9 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 		defer setDispatchDryRun(true)()
 	}
 	res, err := requestAction(cfg, "schematic.components.list", window, map[string]any{
-		"includeBBox": true,
-		"includePins": true,
+		"includeBBox":    true,
+		"includePins":    true,
+		"includePinNets": !opts.FreshPins,
 		// includeWires attaches existing wire segments (issue #64) so the scorer can
 		// hard-reject any stub that would touch a foreign-net wire (silent merge).
 		"includeWires": true,
@@ -605,7 +612,7 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 		lanes[laneKeyOf(pin.Designator, selected.Direction)] = selected.Offset
 		// Stagger: register the just-placed label so later connections in this
 		// batch avoid stacking on it (clustered-pin staggering).
-		if rules.StaggerLabels {
+		if rules.StaggerLabels && canonicalKind != "net_label" { // net labels stand in one even row
 			scene.Flags = append(scene.Flags, predictedMarkerBBox(
 				selected.EndPoint.X, selected.EndPoint.Y, canonicalKind, selected.Direction, c.Net,
 			))

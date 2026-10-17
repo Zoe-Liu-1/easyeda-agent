@@ -115,6 +115,20 @@ func bapPrefixFor(partKey string) (string, error) {
 //
 // It is a NAME heuristic and can be wrong for an unconventionally named rail —
 // `--kind NET=kind` overrides it per net.
+// bapNetKind is the marker a block draws for one of its nets: the rail/ground
+// family by name, signals as the block's signal_marker (netport by default),
+// and a --kind override above both.
+func bapNetKind(in bapInput, net string) string {
+	if k, ok := in.KindOver[strings.ToUpper(net)]; ok {
+		return k
+	}
+	kind := bapFlagKind(net)
+	if kind == "netport" && in.Block.SignalMarker == "net_label" {
+		return "net_label"
+	}
+	return kind
+}
+
 func bapFlagKind(net string) string {
 	u := strings.ToUpper(strings.TrimSpace(net))
 	switch u {
@@ -875,10 +889,7 @@ func planBlockApply(in bapInput) (bapPlan, error) {
 		}
 
 		name, bound := bapNetName(in, port, i)
-		kind := bapFlagKind(name)
-		if k, ok := in.KindOver[strings.ToUpper(name)]; ok {
-			kind = k
-		}
+		kind := bapNetKind(in, name)
 		plan.Nets = append(plan.Nets, bapNet{
 			Net: name, Kind: kind, Port: port, Bound: bound,
 			Members: members, Roles: roleRef,
@@ -921,10 +932,7 @@ func planBlockApply(in bapInput) (bapPlan, error) {
 			return plan, fmt.Errorf("port %q: `at` 指向未知 role %q", portName, role)
 		}
 		name, bound := bapNetName(in, portName, 0)
-		kind := bapFlagKind(name)
-		if k, ok := in.KindOver[strings.ToUpper(name)]; ok {
-			kind = k
-		}
+		kind := bapNetKind(in, name)
 		plan.Nets = append(plan.Nets, bapNet{
 			Net: name, Kind: kind, Port: portName, Bound: bound,
 			Members: []string{d + ":" + pin}, Roles: []string{p.At},

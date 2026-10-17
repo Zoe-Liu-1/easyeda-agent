@@ -14,7 +14,10 @@ import (
 // are joined by labels, the convention of a drafted reference schematic where
 // a many-pin MCU never carries its peripherals on its own pins.
 type SchematicTile struct {
-	Name  string   `json:"name"`
+	Name string `json:"name"`
+	// Title is the frame's printed heading ("晶振电路", "滤波电容"), as on a
+	// drafted reference sheet; empty prints the block id and instance.
+	Title string   `json:"title,omitempty"`
 	Roles []string `json:"roles"`
 	// Layout is the tile's own template (relational or legacy offsets); nil
 	// lets the fallback grid place the tile.
@@ -164,6 +167,12 @@ func (b Block) Tile(name string) (Block, error) {
 		"category": b.Category, "author": b.Author, "contributors": b.Contributors,
 		"added": b.Added, "updated": b.Updated, "source": b.Source, "validated": b.Validated,
 		"parts": parts, "internal_nets": nets, "ports": ports,
+	}
+	if b.SignalMarker != "" {
+		doc["signal_marker"] = b.SignalMarker
+	}
+	if tile.Title != "" {
+		doc["title"] = tile.Title
 	}
 	if tile.Layout != nil {
 		doc["schematic_layout"] = tile.Layout

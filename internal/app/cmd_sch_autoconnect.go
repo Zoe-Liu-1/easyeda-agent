@@ -381,6 +381,12 @@ func outwardDirection(pin acPin) string {
 // (Near=9.5 / Far=19.5,与 ground profile 吻合)。原注释和当时的代码一起把竖直
 // 碰撞检查指到了空位置。改这两支前请照上面那条命令实测,别照注释推理。
 func predictedMarkerBBox(x, y float64, canonicalKind, direction, net string) layoutBBox {
+	if canonicalKind == "net_label" {
+		// A native net label is a name on the wire: the text runs to the right
+		// of its point and sits just above it, whatever the stub direction (live
+		// 2026-10-17, ESP32 left column: the names ran back over the stub).
+		return layoutBBox{MinX: x, MinY: y, MaxX: x + acNetLabelTextWidth(net), MaxY: y + acNetLabelTextHeight}
+	}
 	body := predictedMarkerBody(x, y, canonicalKind, direction, net)
 	if band := predictedFlagTextBand(x, y, body, canonicalKind, direction, net); band != nil {
 		return layoutBBox{
@@ -762,7 +768,28 @@ func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind, target
 // 所以标准档位必须常驻:浅档 = OffsetMin,之后每档一个完整 laneStepFor。这就是用户
 // 要的「不要阶梯,长短循环」——一档浅一档深,两档都是标准长度,相邻脚交替用。
 // 三档封顶(再深就该换方向或挪件了,extendedOffsets 仍是最后的兜底)。
+// acNetLabelCharWidth / acNetLabelTextHeight are a native net label's rendered
+// text cell (live: TLBL_GPIO6, ten characters, measured 42 wide, one text row).
+const (
+	acNetLabelCharWidth  = 4.5
+	acNetLabelTextHeight = 9.0
+)
+
+func acNetLabelTextWidth(net string) float64 { return acNetLabelCharWidth * float64(len(net)) }
+
+// acNetLabelStub is the one stub length every net label of a name up to seven
+// characters gets: long enough that a left-hand pin's name, which runs back
+// over its stub, stops short of the pin. Labels are not staggered — a column
+// of them reads as one even row, the drafted convention (user, 2026-10-17:
+// "网络标签可以不用错开 保持一致即可").
+func acNetLabelStub(net string) float64 {
+	return math.Max(8*acSchGrid, math.Ceil((acNetLabelTextWidth(net)+2*acSchGrid)/acSchGrid)*acSchGrid)
+}
+
 func candidateOffsets(rules autoconnectRules, canonicalKind, net string) []float64 {
+	if canonicalKind == "net_label" {
+		return []float64{acNetLabelStub(net)}
+	}
 	min, max, step := rules.OffsetMin, rules.OffsetMax, rules.OffsetStep
 	if step <= 0 {
 		step = 6
@@ -825,7 +852,7 @@ func planConnection(pin acPin, canonicalKind, targetNet string, scene acScene, r
 	// 所以「更远」不等于「更差」,只有真正干净的位置才会赢。
 	// 两种情况要铺更远的候选:常规档位里一个干净的都没有,**或者**同侧 lane 已经
 	// 占到了常规范围之外(那时不铺,applyLaneStagger 手里根本没有够远的可选)。
-	if noCleanCandidate(all) || laneFloor > rules.OffsetMax {
+	if canonicalKind != "net_label" && (noCleanCandidate(all) || laneFloor > rules.OffsetMax) {
 		all = append(all, score(extendedOffsets(rules, laneFloor))...)
 	}
 	all = append(all, elbowCandidates(pin, canonicalKind, targetNet, scene, rules)...)

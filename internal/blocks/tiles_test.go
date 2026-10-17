@@ -19,6 +19,9 @@ func TestTiledChipBlockDerivesLinkedTiles(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("xtal tile: ok=%v err=%v", ok, err)
 	}
+	if core.Title == "" || xtal.Title == "" || core.Title == xtal.Title {
+		t.Fatalf("each tile carries its own printed frame title: %q / %q", core.Title, xtal.Title)
+	}
 	if len(core.Parts) != 1 || core.Parts["U"].Part == "" {
 		t.Fatalf("core tile must hold only U, got %v", core.Parts)
 	}

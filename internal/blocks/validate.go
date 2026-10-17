@@ -66,6 +66,9 @@ func Validate(b Block) []error {
 	}
 
 	validateBomNoteCount(b, add)
+	if b.SignalMarker != "" && b.SignalMarker != "netport" && b.SignalMarker != "net_label" {
+		add("signal_marker", fmt.Sprintf("must be netport or net_label, got %q", b.SignalMarker))
+	}
 
 	var topology struct {
 		InternalNets [][]string `json:"internal_nets"`

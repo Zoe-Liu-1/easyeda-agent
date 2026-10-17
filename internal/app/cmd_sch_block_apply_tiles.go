@@ -102,14 +102,26 @@ func bapPlaceTile(cfg *appConfig, window string, tile blocks.Block, in *bapInput
 	if err != nil {
 		return
 	}
-	x, y, ok := bapFirstFitOrigin(foot, obstacles, schUsableArea(*sheet), title)
+	// The slot must hold the tile's partition frame, not just its content:
+	// zone-draw frames every tile (title band on top, note band below) and frames
+	// may not overlap. Judged with the tightest frame zone-plan accepts
+	// (partitionFrameFloor: the side padding yields, the bands do not), applied
+	// to the new tile and to every primitive already placed.
+	opts := defaultPartitionOpts()
+	frame := func(b layoutBBox) layoutBBox { return partitionFrameFloor(b, opts.TitleBand, opts.NoteBand) }
+	bounds := layoutBBox{MinX: sheet.MinX + opts.Margin, MinY: sheet.MinY + opts.Margin, MaxX: sheet.MaxX - opts.Margin, MaxY: sheet.MaxY - opts.Margin}
+	// A relational tile is also judged before placement by the planner's own
+	// body rectangle (relational preflight); a slot must pass that ruler too, or
+	// the tile is refused after the slot was chosen (live: the crystal tile).
+	accept := bapTilePreflight(tile, in.PerRow, obstacles, title)
+	x, y, ok := bapFirstFitOrigin(foot, frame, opts.Gutter, obstacles, bounds, title, accept)
 	if !ok {
 		// The staggered second lane is the estimate's slack (live W25Q64: 494
 		// measured against 600 estimated); one label lane still keeps every
 		// label off the neighbours, and the scorer turns away what is left.
 		if lane := bapTileLaneSlack(tile, in.Instance, in.Bind); lane > 0 {
 			slim := layoutBBox{MinX: foot.MinX + lane, MinY: foot.MinY, MaxX: foot.MaxX - lane, MaxY: foot.MaxY}
-			x, y, ok = bapFirstFitOrigin(slim, obstacles, schUsableArea(*sheet), title)
+			x, y, ok = bapFirstFitOrigin(slim, frame, opts.Gutter, obstacles, bounds, title, accept)
 		}
 	}
 	if !ok {
@@ -129,7 +141,7 @@ func bapPlaceTile(cfg *appConfig, window string, tile blocks.Block, in *bapInput
 // carries power/ground symbols and elbowed labels above and below
 // (bapTileSymbolReach) and little sideways; a chip or a trunk carries its pin
 // labels sideways in two staggered lanes (label halo + one lane step) and
-// little above and below; a trunk tile one port label per trunk end.
+// little above and below; a trunk tile short trunks ending in a port label.
 func bapTileFootprint(b blocks.Block, perRow int, instance string, bind map[string]string) (layoutBBox, error) {
 	layout, err := b.SchematicLayout()
 	if err != nil {
@@ -152,8 +164,11 @@ func bapTileFootprint(b blocks.Block, perRow int, instance string, bind map[stri
 	wide := false
 	for r, p := range b.Parts {
 		roles = append(roles, r)
-		halfOf[r] = bapRoleHalfExtent(p.Part)
+		// Measured, not the placement grid's floor (bapPartMargin): a vertical
+		// passive with its designator spans ±20, an SOP-class chip ±80.
+		halfOf[r] = math.Min(bapRoleHalfExtent(p.Part), bapTileChipHalf)
 		if bslIsSimplePeripheral(p.Part) {
+			halfOf[r] = bapTilePassiveHalf
 			halfH[r] = bslPassivePinHalf
 		} else {
 			wide = true
@@ -180,7 +195,7 @@ func bapTileFootprint(b blocks.Block, perRow int, instance string, bind map[stri
 	first := true
 	var box layoutBBox
 	for role, o := range offsets {
-		hw, hh := math.Max(halfOf[role], bapPartMargin), halfH[role]
+		hw, hh := halfOf[role], halfH[role]
 		r := layoutBBox{MinX: o.dx - hw, MinY: o.dy - hh, MaxX: o.dx + hw, MaxY: o.dy + hh}
 		if first {
 			box, first = r, false
@@ -190,25 +205,76 @@ func bapTileFootprint(b blocks.Block, perRow int, instance string, bind map[stri
 			MaxX: math.Max(box.MaxX, r.MaxX), MaxY: math.Max(box.MaxY, r.MaxY)}
 	}
 	halo := bapMarkerHalo(b, instance, bind)
-	side := float64(4 * schAnchorGrid) // a power/ground-only row: designators, nothing sideways
+	side := float64(2 * schAnchorGrid) // a power/ground-only row: nothing sideways
+	longest := ""
 	for port, p := range b.Ports {
-		if bapFlagKind(bapOr(bind[port], bapOr(p.DefaultNet, port))) == "netport" {
-			side = bapEdgeMarkerReach // elbowed labels turn sideways
-			break
+		n := bapOr(bind[port], bapOr(p.DefaultNet, port))
+		if bapFlagKind(n) != "netport" {
+			continue
+		}
+		if len(n) > len(longest) {
+			longest = n
+		}
+		if b.SignalMarker == "net_label" {
+			side = math.Max(side, acNetLabelTextWidth(longest)) // the name runs right of its stub
+		} else {
+			side = bapEdgeMarkerReach // elbowed ports turn sideways
 		}
 	}
 	switch {
+	case wide && b.SignalMarker == "net_label": // one even row: stub + name
+		side = acNetLabelStub(longest) + acNetLabelTextWidth(longest)
 	case wide: // a chip's pin labels stand in two staggered lanes
 		side = halo + (halo - defaultAutoconnectRules().OffsetMin) + acLaneGap
-	case trunk: // one port label at each trunk end
-		side = halo
+	case trunk: // short trunks with a port label at the end (live crystal tile: 155 wide)
+		side = float64(4 * schAnchorGrid)
 	}
 	return layoutBBox{MinX: box.MinX - side, MinY: box.MinY - rise, MaxX: box.MaxX + side, MaxY: box.MaxY + rise}, nil
+}
+
+// bapTilePreflight is planBlockApply's relational preflight as a slot test:
+// the planner's seed body rectangle must clear the existing geometry and the
+// title block by bapObstacleGap (nil for a non-relational tile).
+func bapTilePreflight(b blocks.Block, perRow int, obstacles []layoutBBox, title *layoutBBox) func(x, y float64) bool {
+	layout, err := b.SchematicLayout()
+	if err != nil {
+		return nil
+	}
+	rel, ok := bslRelationsFrom(layout)
+	if !ok {
+		return nil
+	}
+	anchor, err := bslAnchorRole(b, rel, bslBlockNets(b))
+	if err != nil {
+		return nil
+	}
+	roles := make([]string, 0, len(b.Parts))
+	for r := range b.Parts {
+		roles = append(roles, r)
+	}
+	sort.Strings(roles)
+	offsets := bslSeedOffsets(b, rel, anchor, roles)
+	half := func(role string) float64 { return math.Max(bapRoleHalfExtent(b.Parts[role].Part), bapPartMargin) }
+	return func(x, y float64) bool {
+		rect := bapBlockRect(x, y, offsets, half)
+		if title != nil && boxesGapOverlap(rect, *title, bapObstacleGap) {
+			return false
+		}
+		for _, o := range obstacles {
+			if boxesGapOverlap(rect, o, bapObstacleGap) {
+				return false
+			}
+		}
+		return true
+	}
 }
 
 // bapTileLaneSlack is the second label lane bapTileFootprint adds on each side
 // of a chip tile (zero for other tiles).
 func bapTileLaneSlack(b blocks.Block, instance string, bind map[string]string) float64 {
+	if b.SignalMarker == "net_label" {
+		return 0 // net labels do not stagger
+	}
 	for _, p := range b.Parts {
 		if !bslIsSimplePeripheral(p.Part) {
 			return bapMarkerHalo(b, instance, bind) - defaultAutoconnectRules().OffsetMin + acLaneGap
@@ -216,6 +282,14 @@ func bapTileLaneSlack(b blocks.Block, instance string, bind map[string]string) f
 	}
 	return 0
 }
+
+// bapTilePassiveHalf / bapTileChipHalf are measured half widths for the tile
+// footprint (live 2026-10-17): a vertical passive with its designator text, and
+// an SOP-class chip with its pins (W25Q64 box ±71 + pin 10).
+const (
+	bapTilePassiveHalf = 20.0
+	bapTileChipHalf    = 80.0
+)
 
 // bapTileSymbolReach is how far a passive row's markers rise past its pins: a
 // power/ground symbol with its name band, or a netport elbowed up and turned
@@ -227,25 +301,31 @@ const bapTileSymbolReach = 65.0
 const bapTileScanStep = 4 * schAnchorGrid
 
 // bapFirstFitOrigin scans origins in reading order (y-up: top row first) and
-// returns the first whose footprint stays inside the usable sheet and clears
-// the title block and every obstacle by bapObstacleGap.
-func bapFirstFitOrigin(foot layoutBBox, obstacles []layoutBBox, usable layoutBBox, title *layoutBBox) (float64, float64, bool) {
-	w, h := bboxSize(foot)
-	for top := usable.MaxY; top-h >= usable.MinY; top -= bapTileScanStep {
-		for left := usable.MinX; left+w <= usable.MaxX; left += bapTileScanStep {
-			ox, oy := snapAnchor(left-foot.MinX), snapAnchor(top-foot.MaxY)
-			env := layoutBBox{MinX: foot.MinX + ox, MinY: foot.MinY + oy, MaxX: foot.MaxX + ox, MaxY: foot.MaxY + oy}
-			if !boxInside(env, usable) || (title != nil && boxesGapOverlap(env, *title, bapObstacleGap)) {
+// returns the first where grow(footprint) stays inside bounds, clears the title
+// block, and keeps gap from grow(o) for every obstacle o — grow is the frame
+// around a tile's content, so two grown boxes apart means two frames apart.
+func bapFirstFitOrigin(foot layoutBBox, grow func(layoutBBox) layoutBBox, gap float64, obstacles []layoutBBox, bounds layoutBBox, title *layoutBBox, accept func(x, y float64) bool) (float64, float64, bool) {
+	g := grow(foot)
+	w, h := bboxSize(g)
+	grown := make([]layoutBBox, len(obstacles))
+	for i, o := range obstacles {
+		grown[i] = grow(o)
+	}
+	for top := bounds.MaxY; top-h >= bounds.MinY; top -= bapTileScanStep {
+		for left := bounds.MinX; left+w <= bounds.MaxX; left += bapTileScanStep {
+			ox, oy := snapAnchor(left-g.MinX), snapAnchor(top-g.MaxY)
+			env := layoutBBox{MinX: g.MinX + ox, MinY: g.MinY + oy, MaxX: g.MaxX + ox, MaxY: g.MaxY + oy}
+			if !boxInside(env, bounds) || (title != nil && boxesGapOverlap(env, *title, gap)) {
 				continue
 			}
 			clear := true
-			for _, o := range obstacles {
-				if boxesGapOverlap(env, o, bapObstacleGap) {
+			for _, o := range grown {
+				if boxesGapOverlap(env, o, gap) {
 					clear = false
 					break
 				}
 			}
-			if clear {
+			if clear && (accept == nil || accept(ox, oy)) {
 				return ox, oy, true
 			}
 		}

@@ -2,6 +2,7 @@
   "id": "block.esp32s3r8_chip_minsys",
   "desc": "ESP32-S3R8 裸片(QFN-56)最小系统:外挂 W25Q64 8MB flash(SPI0 六线,VDD_SPI 供电)+ 40MHz 晶振/负载帽 + 全电源脚去耦 + EN 上电 RC + IO0 上拉;R8 内封 8MB Octal PSRAM,无需外挂 PSRAM(普通 S3 裸片才要外挂,见 alt mcu.esp32s3_chip)",
   "category": "mcu",
+  "signal_marker": "net_label",
   "author": "@zhoushoujianwork",
   "contributors": [],
   "added": "v0.12.1",
@@ -155,14 +156,13 @@
     }
   },
   "schematic_layout": {
-    "note": "功能框形态(2026-10-17,#43):照嘉立创考证参考原理图的排法 —— 核心芯片独占一框,每个脚只挂短网络标签;去耦电容单独排成一排(3V3 上/GND 下,经电源符号连);EN RC + IO0 上拉一框;晶振 + 两颗负载帽一框且框内直连;flash 与它的 VDD_SPI 去耦/CS 上拉各一框。框间网络标签名取芯片脚功能名(XTAL_P、SPICLK…)。此前把全部外围用干线挂在芯片脚旁(attach 关系形态),左侧 EN/IO0 一簇挤到 sch gate clusters 失败,而图纸其余大片空着 —— 拥挤是结构问题,不是间距参数问题。无源件排用 roles 偏移:框内是固定小排列,与落在页面哪里无关。电阻 rotation 270 = 2 脚(电源侧)朝上。",
+    "note": "功能框形态(2026-10-17,#43):照嘉立创考证参考原理图的排法 —— 核心芯片独占一框,每个脚只挂短网络标签;去耦电容单独排成一排(3V3 上/GND 下,经电源符号连);EN RC + IO0 上拉一框;晶振 + 两颗负载帽一框且框内直连;flash 与它的 VDD_SPI 去耦/CS 上拉同一框(上下两层:去耦挂电源符号、上拉挂标签)—— 每框都要占一份区名带+说明带+边距,A4 上 6 框装不下(实测框面积 ~65 万 vs 可用 ~72 万)。框间网络标签名取芯片脚功能名(XTAL_P、SPICLK…)。此前把全部外围用干线挂在芯片脚旁(attach 关系形态),左侧 EN/IO0 一簇挤到 sch gate clusters 失败,而图纸其余大片空着 —— 拥挤是结构问题,不是间距参数问题。无源件排用 roles 偏移:框内是固定小排列,与落在页面哪里无关。电阻 rotation 270 = 2 脚(电源侧)朝上。",
     "tiles": [
-      {"name": "core", "roles": ["U"]},
-      {"name": "decap", "roles": ["C_BULK", "C_VDD3P3", "C_VDDA", "C_RTC", "C_CPU"], "layout": {"roles": {"C_BULK": {"dx": 0, "dy": 0, "rotation": 90}, "C_VDD3P3": {"dx": 40, "dy": 0, "rotation": 90}, "C_VDDA": {"dx": 80, "dy": 0, "rotation": 90}, "C_RTC": {"dx": 120, "dy": 0, "rotation": 90}, "C_CPU": {"dx": 160, "dy": 0, "rotation": 90}}}},
-      {"name": "reset_boot", "roles": ["R_EN", "C_EN", "R_IO0"], "layout": {"roles": {"R_EN": {"dx": 0, "dy": 0, "rotation": 270}, "C_EN": {"dx": 60, "dy": 0, "rotation": 90}, "R_IO0": {"dx": 120, "dy": 0, "rotation": 270}}}},
-      {"name": "xtal", "roles": ["X", "C_X1", "C_X2"], "layout": {"anchor": "X", "attach": {"C_X1": "X.1", "C_X2": "X.3"}, "orient": {"C_X1": "vertical", "C_X2": "vertical"}}},
-      {"name": "flash", "roles": ["FLASH"]},
-      {"name": "flash_passives", "roles": ["C_FLASH", "C_SPI", "R_CS"], "layout": {"roles": {"C_FLASH": {"dx": 0, "dy": 0, "rotation": 90}, "C_SPI": {"dx": 40, "dy": 0, "rotation": 90}, "R_CS": {"dx": 100, "dy": 0, "rotation": 270}}}}
+      {"name": "core", "title": "主控 ESP32-S3R8", "roles": ["U"]},
+      {"name": "decap", "title": "滤波电容", "roles": ["C_BULK", "C_VDD3P3", "C_VDDA", "C_RTC", "C_CPU"], "layout": {"roles": {"C_BULK": {"dx": 0, "dy": 0, "rotation": 90}, "C_VDD3P3": {"dx": 40, "dy": 0, "rotation": 90}, "C_VDDA": {"dx": 80, "dy": 0, "rotation": 90}, "C_RTC": {"dx": 120, "dy": 0, "rotation": 90}, "C_CPU": {"dx": 160, "dy": 0, "rotation": 90}}}},
+      {"name": "reset_boot", "title": "复位与启动", "roles": ["R_EN", "C_EN", "R_IO0"], "layout": {"roles": {"R_EN": {"dx": 0, "dy": 0, "rotation": 270}, "C_EN": {"dx": 60, "dy": 0, "rotation": 90}, "R_IO0": {"dx": 120, "dy": 0, "rotation": 270}}}},
+      {"name": "xtal", "title": "晶振电路", "roles": ["X", "C_X1", "C_X2"], "layout": {"anchor": "X", "attach": {"C_X1": "X.1", "C_X2": "X.3"}, "orient": {"C_X1": "vertical", "C_X2": "vertical"}}},
+      {"name": "flash", "title": "SPI Flash", "roles": ["FLASH", "C_FLASH", "C_SPI", "R_CS"], "layout": {"roles": {"FLASH": {"dx": 0, "dy": 0}, "C_FLASH": {"dx": -60, "dy": -120, "rotation": 90}, "C_SPI": {"dx": -20, "dy": -120, "rotation": 90}, "R_CS": {"dx": 40, "dy": -120, "rotation": 270}}}}
     ]
   },
   "schematic_notes": [
