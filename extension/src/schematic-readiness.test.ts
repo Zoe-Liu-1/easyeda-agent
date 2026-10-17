@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { pendingDeadlines, sweepDeadlines } from './deadlines';
-import { captureSchematicReadiness, waitForSchematicReady } from './schematic-readiness';
+import { captureSchematicReadiness, readinessWaitMs, waitForSchematicReady } from './schematic-readiness';
+import { BUDGET_REPLY_MARGIN_MS, remainingBudgetMs, setActiveDeadline } from './request-budget';
 
 const context = { uuid: 'page', tabId: 'page@project' };
 function fixture(t: any) {
@@ -111,4 +112,23 @@ test('private document getter exceptions use a readiness error at initial captur
 	await assert.rejects(waitForSchematicReady(context), err => {
 		assert.equal((err as any).constructor.name, 'SchematicReadinessError'); return true;
 	});
+});
+
+// Live 2026-10-17: a background tab failed healthy writes after 5 s with
+// "bring the tab to the foreground" although the request had most of its 20 s
+// budget left. Background waits use the running request's remaining budget;
+// the foreground keeps the short wait.
+test('readiness waits for the remaining request budget in a background tab', () => {
+	assert.equal(readinessWaitMs(5000, false, 18000), 5000, 'foreground keeps its short wait');
+	assert.equal(readinessWaitMs(5000, true, 18000), 18000, 'background waits as long as the request allows');
+	assert.equal(readinessWaitMs(5000, true, 1000), 5000, 'never shorter than the foreground wait');
+	assert.equal(readinessWaitMs(5000, true, undefined), 5000, 'no running request: the given timeout');
+});
+
+test('the running request budget is visible to handler waits and cleared after', () => {
+	setActiveDeadline(10_000);
+	assert.equal(remainingBudgetMs(4_000), 10_000 - 4_000 - BUDGET_REPLY_MARGIN_MS);
+	assert.equal(remainingBudgetMs(20_000), 0);
+	setActiveDeadline(undefined);
+	assert.equal(remainingBudgetMs(), undefined);
 });

@@ -46,6 +46,37 @@ type fakeMoveOps struct {
 	docErr      error // resolveDoc 注入:目标页不可解析(工程被重建)
 
 	log []string
+
+	// Rigid re-lay (sch_move_kernel_rigid.go): the wire snapshot the kernel
+	// reads, and what it re-lays.
+	snapSegs   []moveWireSeg
+	snapLabels []moveWireLabel
+	createdSeg []moveWireSeg
+	labelsMade []moveWireLabel
+	refuseWire int // createWire refusals before it lands (host write window, #256)
+}
+
+func (f *fakeMoveOps) wireSnapshot() ([]moveWireSeg, []moveWireLabel, error) {
+	return f.snapSegs, f.snapLabels, nil
+}
+
+func (f *fakeMoveOps) createWire(seg [4]float64, net string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.refuseWire > 0 {
+		f.refuseWire--
+		return errors.New("create failed!")
+	}
+	f.createdSeg = append(f.createdSeg, moveWireSeg{Seg: seg, Net: net})
+	f.log = append(f.log, "createWire "+net)
+	return nil
+}
+
+func (f *fakeMoveOps) ensureNetLabel(x, y float64, net string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.labelsMade = append(f.labelsMade, moveWireLabel{X: x, Y: y, Net: net})
+	return nil
 }
 
 func (f *fakeMoveOps) resolveDoc() error {

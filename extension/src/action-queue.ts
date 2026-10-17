@@ -54,6 +54,7 @@
  */
 
 import { armDeadline, type DeadlineHandle } from './deadlines';
+import { setActiveDeadline } from './request-budget';
 
 /** 无 timeoutMs 的请求(裸 HTTP 调用方)用它兜底 —— 与 daemon 的 dispatchTimeout 同值。 */
 export const ABANDON_FALLBACK_MS = 60_000;
@@ -204,6 +205,9 @@ export class ActionQueue {
 			handle = armDeadline(deadlineMs, () => res({ kind: 'abandoned' }));
 		});
 
+		// The caller (daemon) gives up at its own budget; waits inside the handler
+		// may use the time up to there (request-budget.ts).
+		setActiveDeadline(startedAt + budget);
 		// run() 可能**同步抛**(payload 校验之类),那也算一次正常的 settle。
 		let running: Promise<{ kind: 'ok'; value: T } | { kind: 'error'; error: unknown }>;
 		try {
@@ -218,6 +222,7 @@ export class ActionQueue {
 
 		const outcome = await Promise.race([running, abandonSignal]);
 		handle?.cancel();
+		setActiveDeadline(undefined);
 
 		if (outcome.kind === 'abandoned') {
 			// 我们不再等它,但它**还在跑**:效果可能稍后才落地。这就是

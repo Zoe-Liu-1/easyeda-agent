@@ -2,6 +2,7 @@
 import { armDeadline } from './deadlines';
 import { pageVisibility } from './eda-context';
 import { ActionError, ErrorCodes } from './protocol';
+import { remainingBudgetMs } from './request-budget';
 
 export class SchematicReadinessError extends ActionError {}
 
@@ -74,15 +75,26 @@ export function assertSchematicReadinessContext(context: SchematicContext, token
  * sync, which is the usual cause; name it so the caller fixes visibility
  * instead of retrying writes.
  */
-function readinessTimeout(): SchematicReadinessError {
+function readinessTimeout(waitedMs: number): SchematicReadinessError {
 	const hidden = pageVisibility() === 'hidden';
 	return new SchematicReadinessError(ErrorCodes.INVALID_STATE, hidden
-		? 'Timed out waiting for schematic RealTimeSync while the EasyEDA tab is hidden (background tabs throttle timers and host sync); bring the EasyEDA tab to the foreground, then read back before any further write.'
+		? `Schematic RealTimeSync did not settle within the request budget (${waitedMs} ms) while the EasyEDA tab is in the background; read back before any further write, then retry with a longer timeout.`
 		: 'Timed out waiting for schematic RealTimeSync; no further writes are allowed.');
+}
+
+/**
+ * How long to wait. Foreground: the given timeout (the host settles in well
+ * under it). Background: the host's own sync is throttled, so a foreground-sized
+ * wait fails healthy requests; wait as long as the running request still allows.
+ */
+export function readinessWaitMs(timeoutMs: number, hidden: boolean, remainingMs: number | undefined): number {
+	if (!hidden || remainingMs === undefined) return timeoutMs;
+	return Math.max(timeoutMs, remainingMs);
 }
 
 /** Wait on observed RealTimeSync state, never on an assumed fixed settling delay. */
 export async function waitForSchematicReady(context: SchematicContext, timeoutMs = 5000, captured = captureSchematicReadiness(context)): Promise<void> {
+	timeoutMs = readinessWaitMs(timeoutMs, pageVisibility() === 'hidden', remainingBudgetMs());
 	const expiresAt = Date.now() + timeoutMs;
 	await new Promise<void>((resolve, reject) => {
 		let settled = false;
@@ -94,12 +106,12 @@ export async function waitForSchematicReady(context: SchematicContext, timeoutMs
 			poll?.cancel();
 			if (error) reject(error); else resolve();
 		};
-		const deadline = armDeadline(timeoutMs, () => finish(readinessTimeout()));
+		const deadline = armDeadline(timeoutMs, () => finish(readinessTimeout(timeoutMs)));
 		const check = async (): Promise<void> => {
 			try {
 				const current = await eda.dmt_SelectControl.getCurrentDocumentInfo();
 				if (settled) return; // A late identity response must never resume a timed-out wait.
-				if (Date.now() >= expiresAt) throw readinessTimeout();
+				if (Date.now() >= expiresAt) throw readinessTimeout(timeoutMs);
 				if (current?.uuid !== context.uuid || current.tabId !== context.tabId) {
 					throw new SchematicReadinessError(ErrorCodes.INVALID_STATE, 'Schematic document identity changed while waiting for readiness.');
 				}

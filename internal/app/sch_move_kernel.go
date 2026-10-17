@@ -245,6 +245,12 @@ type moveKernelOps interface {
 	autoconnect(conns []acConnSpec, replace bool, rules autoconnectRules) (succeeded, failed []string, err error)
 	// bridgeSignatures 返回当前全部 wire-bridge 的排序签名(如 "[GND,5V]")。
 	bridgeSignatures() ([]string, error)
+	// wireSnapshot reads every wire segment with its net and every native net
+	// label (sch_move_kernel_rigid.go); createWire / ensureNetLabel re-lay a
+	// tree that moves as a whole.
+	wireSnapshot() ([]moveWireSeg, []moveWireLabel, error)
+	createWire(seg [4]float64, net string) error
+	ensureNetLabel(x, y float64, net string) error
 }
 
 // movePinDeficit 是「与电气快照不符」的一只 pin —— **全页范围,不限移动集合**。
@@ -498,6 +504,28 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		return rep, fmt.Errorf("%s:成员不在当前页:%s —— 拒绝执行,画布零改动", label, strings.Join(missing, ","))
+	}
+	// Trees that move as a whole are re-laid by translation after the parts move
+	// (sch_move_kernel_rigid.go); read their shape now, before the sweep.
+	var rigid []moveRigidTree
+	if segs, labels, werr := ops.wireSnapshot(); werr != nil {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("导线快照读不到(%v)—— 本次所有导线树按标记重连", werr))
+	} else {
+		delta := map[string][2]float64{}
+		for _, it := range items {
+			d := strings.ToUpper(strings.TrimSpace(it.Designator))
+			m, ok := byDesig[d]
+			if !ok || !it.HasTarget || len(it.RotCandidates) > 0 || it.CenterOnPins || it.Terms != nil {
+				continue
+			}
+			if it.Rot != nil {
+				if cur, known := rotBefore[d]; !known || math.Abs(*it.Rot-cur) > 1e-6 {
+					continue
+				}
+			}
+			delta[d] = [2]float64{snap5(it.X) - m.X, snap5(it.Y) - m.Y}
+		}
+		rigid = moveKernelRigidTrees(segs, labels, comps, delta)
 	}
 	before := groupRebuildSnapshotOf(live)
 	// bridge 基线:没有基线就无法把「新增短路」归因给本次移动(fail-closed,
@@ -796,7 +824,16 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 	}
 
 	// ── 4. 重连 ────────────────────────────────────────────────────────────
-	covered := map[string]bool{}
+	// Trees that moved as a whole come back by translation first — wires and
+	// labels as they were; their pins are not reconnected through markers.
+	covered, relayNotes := relayRigidTrees(ops, rigid, max(opts.RetryDelay, 1500*time.Millisecond))
+	rep.Notes = append(rep.Notes, relayNotes...)
+	for _, n := range relayNotes {
+		fmt.Fprintf(stderr, "  ⚠ %s —— 这些引脚改走标记重连,由对账兜底\n", n)
+	}
+	if n := len(covered); n > 0 {
+		fmt.Fprintf(stdout, "  刚性重建:%d 棵整体移动的导线树按位移原样重建(%d 只引脚,不改走标记重连)\n", len(rigid), n)
+	}
 	var termFails []string
 	for _, it := range items {
 		if it.Terms == nil {
@@ -1118,6 +1155,38 @@ func (o *daemonMoveOps) scene() ([]layoutComp, []schGroupWire, error) {
 		return nil, nil, fmt.Errorf("读导线:%w", err)
 	}
 	return comps, wires, nil
+}
+
+func (o *daemonMoveOps) wireSnapshot() ([]moveWireSeg, []moveWireLabel, error) {
+	res, err := requestAutolayoutAction(o.cfg, "schematic.components.list", o.win,
+		map[string]any{"includeWires": true, "includePagePrimitives": true}, o.docUUID, "move-kernel 导线快照")
+	if err != nil {
+		return nil, nil, err
+	}
+	return parseMoveWireSnapshot(res.Result)
+}
+
+func (o *daemonMoveOps) createWire(seg [4]float64, net string) error {
+	payload := map[string]any{"points": []float64{seg[0], seg[1], seg[2], seg[3]}}
+	if net != "" {
+		payload["net"] = net
+	}
+	_, err := requestAutolayoutAction(o.cfg, "schematic.wire.create", o.win, payload, o.docUUID, "move-kernel 刚性重建")
+	return err
+}
+
+func (o *daemonMoveOps) ensureNetLabel(x, y float64, net string) error {
+	// A wire created with its net may already show the name there.
+	if _, labels, err := o.wireSnapshot(); err == nil {
+		for _, l := range labels {
+			if l.Net == net && math.Abs(l.X-x) <= moveRigidEps && math.Abs(l.Y-y) <= moveRigidEps {
+				return nil
+			}
+		}
+	}
+	_, err := requestAutolayoutAction(o.cfg, "schematic.netflag.create", o.win,
+		map[string]any{"kind": "net_label", "net": net, "x": x, "y": y}, o.docUUID, "move-kernel 网络标签")
+	return err
 }
 
 func (o *daemonMoveOps) liveNets() (map[string]map[string]bool, error) {
