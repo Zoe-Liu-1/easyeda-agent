@@ -37,10 +37,10 @@ type Block struct {
 	Verification  *Verification   `json:"verification,omitempty"`
 	Parts         map[string]Part `json:"parts"`
 	Ports         map[string]Port `json:"ports"`
-	// SignalMarker picks the marker for signal (non-power) nets: "" / "netport"
-	// is the hexagon port, "net_label" the plain name on the wire that drafted
-	// reference sheets use between functional frames — one text line, so labels
-	// on a 10-pitch pin column stand in one row instead of two staggered lanes.
+	// SignalMarker picks the marker for signal (non-power) nets: "" / "net_label"
+	// (the default) is the plain name on the wire that drafted reference sheets
+	// use — one text line, so labels on a 10-pitch pin column stand in one row —
+	// and "netport" the hexagon port.
 	SignalMarker string `json:"signal_marker,omitempty"`
 	// Title is a short printed heading for the block's frame (a tile carries
 	// its schematic_layout.tiles[].title); empty falls back to the id.

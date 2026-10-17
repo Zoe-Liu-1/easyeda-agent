@@ -327,9 +327,39 @@ function installLegacyScene(t: {after:(f:()=>void)=>void}, inputs: Array<{id:str
 		dmt_SelectControl:{getCurrentDocumentInfo:async()=>({uuid:'page',tabId:'page@project'})},
 		sch_PrimitiveComponent:{getAll:async()=>[part],getAllPinsByPrimitiveId:async()=>[{getState_PinNumber:()=> '1',getState_X:()=>-20,getState_Y:()=>0}],modify:async()=>{mutations++;throw new Error('component must not move before refusal');},delete:async()=>{mutations++;return true;}},
 		sch_PrimitiveWire:{getAll:async()=>live.map(mock),delete:async(ids:string[])=>{mutations++;live=live.filter(w=>!ids.includes(w.id));return true;},create:async(points:number[])=>{mutations++;created.push(points);const w={id:'new',line:points};live.push(w);return mock(w);}},
+		sch_PrimitiveAttribute:{getAll:async()=>[]},
 	};
 	return {mutations:()=>mutations,created};
 }
+
+// Live 2026-10-17: moving the crystal tile left its XTAL_P/XTAL_N stubs without
+// names — a native net label is the wire's Name attribute, deleted with the old
+// wire and not drawn back by wire.create(…, net). group-move must re-place it,
+// shifted, on the recreated wire.
+test('legacy group-move re-places a net label on the recreated wire', async t => {
+	const fx=installLegacyScene(t,[{id:'h',line:H}]);
+	const globals=globalThis as any;
+	const prevTypes=globals.EDMT_EditorDocumentType;
+	globals.EDMT_EditorDocumentType={HOME:-1,BLANK:0,SCHEMATIC_PAGE:1,PCB:3};
+	t.after(()=>{globals.EDMT_EditorDocumentType=prevTypes;});
+	const api=globals.eda;
+	api.dmt_Project={getCurrentProjectInfo:async()=>({uuid:'project'})};
+	api.dmt_SelectControl={getCurrentDocumentInfo:async()=>({uuid:'page',tabId:'tab',documentType:1})};
+	const attr=(id:string,parent:string,x:number,y:number):any=>new Proxy({},{get:(_t,k)=>String(k).startsWith('getState_')?()=>({PrimitiveId:id,ParentPrimitiveId:parent,Key:'Name',Value:'XTAL_P',X:x,Y:y,ValueVisible:true,KeyVisible:false} as Record<string,unknown>)[String(k).replace('getState_','')]??null:undefined});
+	let attrs:any[]=[attr('old-label','h',-20,20)];
+	const placed:number[][]=[];
+	api.sch_PrimitiveAttribute={
+		getAll:async()=>attrs,
+		createNetLabel:async(x:number,y:number,net:string)=>{placed.push([x,y]);const a=attr('new-label','new',x,y);attrs=[...attrs.filter(a=>a.getState_ParentPrimitiveId()!=='h'),a];assert.equal(net,'XTAL_P');return a;},
+	};
+	api.sch_PrimitiveWire.get=async(id:string)=>({getState_PrimitiveId:()=>id,getState_Net:()=> 'XTAL_P'});
+	const out:any=await runAction('schematic.group.move',{primitiveIds:['h'],dx:10,dy:20});
+	assert.deepEqual(fx.created,[[-10,20,30,20]]);
+	assert.deepEqual(placed,[[-10,40]],'the label moves by the same (dx,dy) as its wire');
+	assert.equal(out.result.movedLabels.length,1);
+	assert.equal(out.result.movedLabels[0].wire,'new');
+	assert.equal(out.result.partial,undefined);
+});
 
 test('legacy group-move preserves simple single-segment translation',async t=>{
 	const fx=installLegacyScene(t,[{id:'h',line:H}]);

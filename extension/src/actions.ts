@@ -3574,6 +3574,29 @@ const schematicGroupMove: Handler = async (payload) => {
 		movedFlags.push({ oldPrimitiveId: f.id, newPrimitiveId: created.getState_PrimitiveId(), kind: f.kind, net: f.net });
 	}
 
+	// A native net label is the wire's visible Name attribute: deleting the wire
+	// takes it along and wire.create(…, net) does not draw it back, so a moved
+	// stub came out nameless (live 2026-10-17, crystal tile XTAL_P/XTAL_N). Record
+	// each moved wire's labels first and re-place them on the recreated wire.
+	const labelsByWire = new Map<string, Array<{ x: number; y: number; net: string }>>();
+	const movedLabels: Array<Record<string, unknown>> = [];
+	const labelFailures: Array<Record<string, unknown>> = [];
+	if ([...wantIds].some(id => allWires.some(w => w.getState_PrimitiveId() === id))) {
+		const attrs = await eda.sch_PrimitiveAttribute.getAll();
+		if (!Array.isArray(attrs)) throw new ActionError(ErrorCodes.INVALID_STATE, 'group-move: attribute inventory unavailable — net labels on the moved wires could not be recorded; aborted BEFORE any mutation.');
+		for (const a of attrs) {
+			const parent = a.getState_ParentPrimitiveId?.();
+			if (!parent || !wantIds.has(parent) || a.getState_Key() !== 'Name') continue;
+			const x = a.getState_X(), y = a.getState_Y();
+			if (typeof x !== 'number' || typeof y !== 'number') {
+				throw new ActionError(ErrorCodes.INVALID_STATE, `group-move: net label on wire ${parent} has no readable position — aborted BEFORE any mutation.`);
+			}
+			const list = labelsByWire.get(parent) ?? [];
+			list.push({ x, y, net: String(a.getState_Value() ?? '') });
+			labelsByWire.set(parent, list);
+		}
+	}
+
 	for (const wire of allWires) {
 		const id = wire.getState_PrimitiveId();
 		if (!wantIds.has(id)) continue;
@@ -3592,6 +3615,12 @@ const schematicGroupMove: Handler = async (payload) => {
 		catch (err) { throw edaError(err, `group-move: failed to recreate wire ${id} at the shifted position (original was deleted — rerun with the same spec to retry).`); }
 		if (!created) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `group-move: recreating wire ${id} returned no primitive (original was deleted).`);
 		movedWires.push({ oldPrimitiveId: id, newPrimitiveId: created.getState_PrimitiveId(), net });
+		for (const label of labelsByWire.get(id) ?? []) {
+			const placed = await createVerifiedNetLabel(label.x + dx, label.y + dy, label.net, created.getState_PrimitiveId());
+			const r = placed.result as Record<string, unknown>;
+			if (r.verified === true) movedLabels.push({ wire: created.getState_PrimitiveId(), net: label.net, primitiveId: r.primitiveId });
+			else labelFailures.push({ wire: created.getState_PrimitiveId(), net: label.net, x: label.x + dx, y: label.y + dy, error: r.error });
+		}
 	}
 
 	for (const id of wantIds) {
@@ -3608,8 +3637,12 @@ const schematicGroupMove: Handler = async (payload) => {
 			movedComponents,
 			movedFlags,
 			movedWires,
+			movedLabels,
 			count: movedComponents.length + movedFlags.length + movedWires.length,
 			...(notFound.length ? { notFound } : {}),
+			// The canvas already moved: a label that could not be re-placed is a
+			// partial result to read back, never a thrown error (#151).
+			...(labelFailures.length ? { partial: true, verified: false, labelFailures } : {}),
 		},
 	};
 };

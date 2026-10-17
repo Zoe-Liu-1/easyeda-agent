@@ -34,3 +34,19 @@ func TestNetLabelsStandInOneEvenRow(t *testing.T) {
 		}
 	}
 }
+
+// A moved tile's net-label stubs have no marker primitive to preserve, so the
+// move kernel reconnects those pins. They must come back as net labels, not be
+// restyled into hexagon ports (live 2026-10-17, crystal tile); rails and
+// grounds keep their symbols.
+func TestMoveKernelReconnectsSignalsAsNetLabels(t *testing.T) {
+	specs, _ := moveKernelDeficitSpecs([]movePinDeficit{
+		{Ref: "X1:1", WantNet: "XTAL_P"}, {Ref: "C7:2", WantNet: "GND"}, {Ref: "C1:1", WantNet: "3V3"},
+	})
+	want := map[string]string{"XTAL_P": "net_label", "GND": "gnd", "3V3": "power"}
+	for _, s := range specs {
+		if s.Kind != want[s.Net] {
+			t.Fatalf("%s reconnected as %q, want %q", s.Net, s.Kind, want[s.Net])
+		}
+	}
+}

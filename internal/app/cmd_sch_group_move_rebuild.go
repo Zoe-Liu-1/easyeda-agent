@@ -325,7 +325,7 @@ func groupRebuildConnSpecs(comps []layoutComp, memberSet map[string]bool,
 			}
 			conns = append(conns, acConnSpec{
 				PinRef: fmt.Sprintf("%s:%s", c.Designator, p.Number),
-				Kind:   bapFlagKind(net),
+				Kind:   schSignalMarkerKind(net),
 				Net:    net,
 			})
 		}

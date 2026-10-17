@@ -328,7 +328,7 @@ func moveKernelDeficitSpecs(defs []movePinDeficit) (specs []acConnSpec, manual [
 			manual = append(manual, d)
 			continue
 		}
-		specs = append(specs, acConnSpec{PinRef: d.Ref, Kind: bapFlagKind(d.WantNet), Net: d.WantNet})
+		specs = append(specs, acConnSpec{PinRef: d.Ref, Kind: schSignalMarkerKind(d.WantNet), Net: d.WantNet})
 	}
 	return specs, manual
 }
@@ -887,7 +887,7 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 			if perr != nil {
 				// 读不到实测引脚就复现不了 —— 退回 autoconnect,不硬猜坐标。
 				for _, t := range preservedBy[d] {
-					rest = append(rest, acConnSpec{PinRef: d + ":" + t.Pin, Kind: bapFlagKind(t.Net), Net: t.Net})
+					rest = append(rest, acConnSpec{PinRef: d + ":" + t.Pin, Kind: schSignalMarkerKind(t.Net), Net: t.Net})
 				}
 				rep.Notes = append(rep.Notes, fmt.Sprintf("%s 原样重建读引脚失败(%v)—— 该件退回 autoconnect 评分", d, perr))
 				continue
@@ -895,7 +895,7 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 			for _, t := range preservedBy[d] {
 				px, py, okp := tidyPinCoord(pins, t.Pin)
 				if !okp {
-					rest = append(rest, acConnSpec{PinRef: d + ":" + t.Pin, Kind: bapFlagKind(t.Net), Net: t.Net})
+					rest = append(rest, acConnSpec{PinRef: d + ":" + t.Pin, Kind: schSignalMarkerKind(t.Net), Net: t.Net})
 					continue
 				}
 				cerr := ops.connectPin(px, py, t)

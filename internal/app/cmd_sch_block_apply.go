@@ -116,17 +116,32 @@ func bapPrefixFor(partKey string) (string, error) {
 // It is a NAME heuristic and can be wrong for an unconventionally named rail —
 // `--kind NET=kind` overrides it per net.
 // bapNetKind is the marker a block draws for one of its nets: the rail/ground
-// family by name, signals as the block's signal_marker (netport by default),
-// and a --kind override above both.
+// family by name, signals as a net label — the drafted convention, one even
+// row per pin column (user, 2026-10-17: "以后默认都是用网络标签") — unless the
+// block asks for hexagon ports (signal_marker: netport), and a --kind override
+// above both.
 func bapNetKind(in bapInput, net string) string {
 	if k, ok := in.KindOver[strings.ToUpper(net)]; ok {
 		return k
 	}
 	kind := bapFlagKind(net)
-	if kind == "netport" && in.Block.SignalMarker == "net_label" {
+	if kind == "netport" && in.Block.SignalMarker != "netport" {
 		return "net_label"
 	}
 	return kind
+}
+
+// schSignalMarkerKind is the marker drawn when a pin must be (re)connected and
+// nothing on the page says how it was drawn before: rails and grounds by name,
+// every signal as a net label — the default (bapNetKind). A net label is a
+// wire attribute, not a component, so move/rebuild paths never see one to
+// preserve; reconnecting such a pin with a hexagon port silently restyled the
+// sheet (live 2026-10-17: moving the crystal tile turned XTAL_P/XTAL_N into ports).
+func schSignalMarkerKind(net string) string {
+	if k := bapFlagKind(net); k != "netport" {
+		return k
+	}
+	return "net_label"
 }
 
 func bapFlagKind(net string) string {
@@ -263,6 +278,9 @@ type bapInput struct {
 	// parts file into a refusal with the canvas untouched; skipping it restores
 	// the old behaviour of finding out one failed placement at a time.
 	SkipDevicePreflight bool
+	// TileAt pins tile origins of a tiled block (tile name → x,y); the other
+	// tiles keep reading-order packing. Only the tiled runner reads it.
+	TileAt map[string][2]float64
 	// Sheet 是图纸边框 bbox。**它必须参与螺旋搜索**,不能只做事后 warning:
 	// origin 螺旋搜索从前给 inBounds 传 nil,于是"最近的空位"可以在图纸
 	// 外面 —— 实测把 J_USB 放到 x=-20、把 R6 放到 y=880(sheet 上界 825)。

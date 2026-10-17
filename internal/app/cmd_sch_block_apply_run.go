@@ -1445,7 +1445,7 @@ func newSchBlockApplyCmd(cfg *appConfig, window *string, stdout, stderr io.Write
 	var (
 		at, instance, partsPath string
 		specPath                string
-		binds, kinds            []string
+		binds, kinds, tileAts   []string
 		spacing                 float64
 		perRow, maxAttempts     int
 		dryRun, asJSON          bool
@@ -1539,7 +1539,12 @@ idempotent per pin — an already-connected pin is skipped rather than re-flagge
 			if err != nil {
 				return err
 			}
+			tileAt, err := parseTileAts(tileAts)
+			if err != nil {
+				return err
+			}
 			in := bapInput{
+				TileAt:   tileAt,
 				Instance: instance, OriginX: x, OriginY: y,
 				Spacing: spacing, PerRow: perRow, Bind: bind, KindOver: kindOver, SpecPath: specPath,
 				AtExplicit:          cmd.Flags().Changed("at"),
@@ -1555,6 +1560,8 @@ idempotent per pin — an already-connected pin is skipped rather than re-flagge
 	c.Flags().IntVar(&perRow, "per-row", 4, "parts per row before wrapping")
 	c.Flags().StringArrayVar(&binds, "bind", nil, "bind a block PORT to a host net: --bind CTRL=IO2 (repeatable)")
 	c.Flags().StringArrayVar(&kinds, "kind", nil, "override a net's flag kind: --kind LED_CTRL=netport (repeatable)")
+	c.Flags().StringArrayVar(&tileAts, "tile-at", nil, "tiled block: pin one tile's origin, --tile-at xtal=860,700 (repeatable; the other tiles keep reading-order packing). "+
+		"Layout is data: to realign frames, read their rectangles (sch zone-plan), compute the origins, clear the page and re-apply — no rewiring of a placed tile")
 	c.Flags().StringVar(&instance, "instance", "", "instance id used to name internal nets (default: the first allocated designator, e.g. LED1 → LED1_N2)")
 	c.Flags().StringVar(&partsPath, "parts", "", "path to standard-parts.json (auto-detected if omitted)")
 	c.Flags().StringVar(&specPath, "spec", "", "落块后把真实位号自动回填进这份 S0 spec 的 modules[].parts"+

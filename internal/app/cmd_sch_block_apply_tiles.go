@@ -41,6 +41,11 @@ func runTiledBlockApply(cfg *appConfig, window string, b blocks.Block, tiles []b
 			known[p] = true
 		}
 	}
+	for name := range in.TileAt {
+		if _, err := b.Tile(name); err != nil {
+			return fmt.Errorf("--tile-at %s=…: %w (tiles: %s)", name, err, strings.Join(blocks.TileNames(tiles), ", "))
+		}
+	}
 	for port := range in.Bind {
 		if !known[port] {
 			return fmt.Errorf("--bind %s=…: block %s has no port %q (tile links: %s)", port, b.ID, port, strings.Join(sortedKeys(known), ", "))
@@ -59,10 +64,12 @@ func runTiledBlockApply(cfg *appConfig, window string, b blocks.Block, tiles []b
 				tin.Bind[port] = net
 			}
 		}
-		if i > 0 {
+		if at, ok := in.TileAt[t.Name]; ok {
+			tin.OriginX, tin.OriginY, tin.AtExplicit = at[0], at[1], true
+		} else if i > 0 {
 			bapPlaceTile(cfg, window, derived[i], &tin, dryRun, stderr)
 		}
-		fmt.Fprintf(stderr, "tile %d/%d %s (%d part(s))\n", i+1, len(tiles), t.Name, len(t.Roles))
+		fmt.Fprintf(stderr, "tile %d/%d %s (%d part(s)) at %.0f,%.0f\n", i+1, len(tiles), t.Name, len(t.Roles), tin.OriginX, tin.OriginY)
 		if err := runBlockApply(cfg, window, derived[i].ID, tin, partsPath, dryRun, asJSON, maxAttempts, stdout, stderr); err != nil {
 			if len(applied) > 0 && !dryRun {
 				return fmt.Errorf("tile %s failed; tiles %s are already applied and stay on the page (PARTIAL STATE — each is a complete, reconciled block; delete them or apply the remaining tiles): %w",
@@ -215,14 +222,14 @@ func bapTileFootprint(b blocks.Block, perRow int, instance string, bind map[stri
 		if len(n) > len(longest) {
 			longest = n
 		}
-		if b.SignalMarker == "net_label" {
+		if b.SignalMarker != "netport" {
 			side = math.Max(side, acNetLabelTextWidth(longest)) // the name runs right of its stub
 		} else {
 			side = bapEdgeMarkerReach // elbowed ports turn sideways
 		}
 	}
 	switch {
-	case wide && b.SignalMarker == "net_label": // one even row: stub + name
+	case wide && b.SignalMarker != "netport": // one even row: stub + name
 		side = acNetLabelStub(longest) + acNetLabelTextWidth(longest)
 	case wide: // a chip's pin labels stand in two staggered lanes
 		side = halo + (halo - defaultAutoconnectRules().OffsetMin) + acLaneGap
@@ -272,7 +279,7 @@ func bapTilePreflight(b blocks.Block, perRow int, obstacles []layoutBBox, title 
 // bapTileLaneSlack is the second label lane bapTileFootprint adds on each side
 // of a chip tile (zero for other tiles).
 func bapTileLaneSlack(b blocks.Block, instance string, bind map[string]string) float64 {
-	if b.SignalMarker == "net_label" {
+	if b.SignalMarker != "netport" {
 		return 0 // net labels do not stagger
 	}
 	for _, p := range b.Parts {
@@ -331,4 +338,21 @@ func bapFirstFitOrigin(foot layoutBBox, grow func(layoutBBox) layoutBBox, gap fl
 		}
 	}
 	return 0, 0, false
+}
+
+// parseTileAts reads --tile-at NAME=x,y flags.
+func parseTileAts(items []string) (map[string][2]float64, error) {
+	out := map[string][2]float64{}
+	for _, it := range items {
+		name, xy, ok := strings.Cut(it, "=")
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("--tile-at %q: want NAME=x,y", it)
+		}
+		x, y, err := parseXY(xy)
+		if err != nil {
+			return nil, fmt.Errorf("--tile-at %q: %w", it, err)
+		}
+		out[strings.TrimSpace(name)] = [2]float64{x, y}
+	}
+	return out, nil
 }

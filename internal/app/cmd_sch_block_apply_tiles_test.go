@@ -79,3 +79,15 @@ func TestBapFirstFitOriginReservesPartitionFrames(t *testing.T) {
 		t.Fatalf("frames must keep the gutter apart and stay inside: new %+v placed %+v", got, frame(placed))
 	}
 }
+
+func TestParseTileAts(t *testing.T) {
+	got, err := parseTileAts([]string{"xtal=860,700", "flash=80,150"})
+	if err != nil || got["xtal"] != [2]float64{860, 700} || got["flash"] != [2]float64{80, 150} {
+		t.Fatalf("got %v %v", got, err)
+	}
+	for _, bad := range []string{"xtal", "=1,2", "xtal=1"} {
+		if _, err := parseTileAts([]string{bad}); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		}
+	}
+}
