@@ -214,6 +214,45 @@ func powerGroundOrientationFindings(comps []layoutComp) []checkFinding {
 	return out
 }
 
+// markerWireOverlapFindings 规则:网络标识(netflag/netport)本体压在导线上。
+// 标识自己的短桩(endpoint 恰在 anchor)不算;只有异线穿过标识 bbox 才报。
+func markerWireOverlapFindings(comps []layoutComp, wires []schGroupWire, eps float64) []checkFinding {
+	var out []checkFinding
+	for _, c := range comps {
+		if !isSchMarker(c.ComponentType) || c.BBox == nil {
+			continue
+		}
+		// 只认「真正穿入标识内部」:把标识 bbox 内缩 eps,擦边/贴边不算。
+		inner := layoutBBox{
+			MinX: c.BBox.MinX + eps, MinY: c.BBox.MinY + eps,
+			MaxX: c.BBox.MaxX - eps, MaxY: c.BBox.MaxY - eps,
+		}
+		if inner.MaxX <= inner.MinX || inner.MaxY <= inner.MinY {
+			continue
+		}
+		for _, w := range wires {
+			for _, s := range schDesignatorWireSegments(w) {
+				if (math.Abs(s[0]-c.X) < 0.5 && math.Abs(s[1]-c.Y) < 0.5) ||
+					(math.Abs(s[2]-c.X) < 0.5 && math.Abs(s[3]-c.Y) < 0.5) {
+					continue // 标识自己的短桩
+				}
+				if schSegmentCrossesBox(s[0], s[1], s[2], s[3], inner) {
+					out = append(out, checkFinding{
+						Type: "marker-wire-overlap", Level: "warn",
+						PrimitiveId: c.ID, MarkerPrimitiveId: c.ID, WirePrimitiveId: w.ID,
+						MarkerNet: c.Net, BBox: c.BBox,
+						Message: fmt.Sprintf("%s(%s) 压在导线 %s 上 — 挪开标识或改走线",
+							markerLabel(c), c.ComponentType, w.ID),
+					})
+					break
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PrimitiveId < out[j].PrimitiveId })
+	return out
+}
+
 // duplicateNetMarkerFindings groups net markers by (kind, net, quantized anchor)
 // and reports every group of 2+ as one finding carrying ALL coincident primitive
 // IDs plus a keep/delete suggestion. Different kinds, nets, or anchors never merge,
@@ -562,6 +601,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			visualWires = wires
 			geo = append(geo, redundantNetMarkerFindings(comps, wires)...)
 			geo = append(geo, reversedNetFlagFindings(comps, wires)...)
+			geo = append(geo, markerWireOverlapFindings(comps, wires, overlapEps)...)
 			geo = append(geo, schWireGeometryFindings(geometryResult.Result, wires)...)
 			geo = append(geo, sheetBoundaryFindings(comps, wires, sheetBBoxOf(comps), titleBlock, tbSource, overlapEps)...)
 		}
@@ -598,6 +638,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.OutOfSheet++
 		case "marker-overlap":
 			rep.Summary.MarkerOverlaps++
+		case "marker-wire-overlap":
+			rep.Summary.MarkerWireOverlaps++
 		case "visible-text-overlap":
 			rep.Summary.VisibleTextOverlaps++
 		case "missing-partition", "missing-titleblock":

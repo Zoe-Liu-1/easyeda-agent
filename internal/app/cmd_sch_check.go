@@ -108,6 +108,8 @@ type checkSummary struct {
 	// Any part/marker/wire leaving the sheet's usable area (sheet-boundary ruler).
 	OutOfSheet     int `json:"outOfSheet"`
 	MarkerOverlaps int `json:"markerOverlaps"`
+	// A net marker (netflag/netport) body sitting on a foreign wire.
+	MarkerWireOverlaps int `json:"markerWireOverlaps"`
 	// Visible text (free text + shown attributes, incl. Value/name text) overlapping
 	// a different owner's part body / marker / text.
 	VisibleTextOverlaps int `json:"visibleTextOverlaps"`
@@ -254,8 +256,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -364,6 +366,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.VisibleTextOverlaps > 0 {
 		fmt.Fprintln(w, "→ visible-text-overlap: 可见文字(阻值/网名/说明)压在别的器件、标识或文字上 — 挪开或调属性位置")
+	}
+	if s.MarkerWireOverlaps > 0 {
+		fmt.Fprintln(w, "→ marker-wire-overlap: 电源/地旗或端口本体压在导线上 — 挪开标识或改走线")
 	}
 	if s.PolarityConventionOutliers > 0 {
 		fmt.Fprintln(w, "→ polarity: verify the flagged caps' rail pin against the page majority (钽/电解 reverse = thermal-runaway/fire risk); MLCC numbering is arbitrary — ignore if non-polarized (#183)")
