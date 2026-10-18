@@ -705,12 +705,12 @@ V4 完全未接线页可能无法导出网表，此时 `sch list` 的 `pinNetsAv
 范围外既有错误允许保留但必须逐条相同；任何新增/改变、目标错误残留、陈旧快照、部分删除、
 超时或不完整回读均失败。普通 `wire.create/connect_pin` 继续要求整页几何基线为零。
 | `wires[]` | `{net,points:[[x,y],...]}`，正交、非零、落网格。JSON 网名本身不能给实际线树命名，须连接对应引脚/标记。 |
-| `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；kind 为 `power/ground/net_port_in/net_port_out/net_port_bi`，方向 `up/down/left/right`，offset 为正的网格长度。转换生成真实引线。 |
+| `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；kind 为 `power/ground/net_port_in/net_port_out/net_port_bi`，方向 `up/down/left/right`，offset 为正的网格长度。转换生成真实引线。电源/地硬朝向下，反向脚显式豁免用可选 `orientationExempt:true`（附 `reason`），检查门跳过并在豁免清单单独列出。裸 `sch netflag --rotation R` 是原始路径，存储角为 `(360-R) mod 360`；`connect_pin` 已补偿。 |
 | `terminals[]` | 可选 `{designator,pin,direction,kind?}`，默认 `net_port_bi`；引用本模块已测引脚，选择向外直出方向，不能与已有接线重复。 |
 | `titleMetrics` | 可选 `{title,fontSize,width,height}`，须与标题、字高相符的实测值；没有时采用保守预测，Apply 仍检查实际文字边界。 |
 
 局部外围沿核心引脚方向设计，电容/电阻用短线直接连接。电源/地就近重复放置可减少环绕线；
-跨模块信号使用网络端口。端子直出按 10～300 raw、5 raw 步进寻找最短合法直线，
+跨模块信号使用网络标签（线上网名），跨页信号使用网络端口。端子直出按 10～300 raw、5 raw 步进寻找最短合法直线，
 邻标签通过错落长短避让。无法直出就修源几何，不自动回退折线。
 
 组合器从模块上下空档选择标题位置，再从左上以 Z 字排列。每个框按自己的内容保持紧凑高度，

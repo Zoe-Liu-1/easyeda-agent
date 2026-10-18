@@ -1,0 +1,25 @@
+{
+  "_intent": "Absolute body-orientation rule (电源上/地上下): power body MUST be up, GND body MUST be down, independent of which side the wire approaches from. A correctly-wired-but-sideways power/GND flag MUST fire `power_ground_orientation`; the canonical one passes; an explicitly `orientationExempt` reverse pin is skipped and listed under exemptions.",
+  "parts": [
+    {"pid": "u1", "type": "part", "designator": "U1", "x": 100, "y": 100,
+     "pins": [
+       {"num": "1", "name": "P1", "x": 100, "y": 100},
+       {"num": "2", "name": "P2", "x": 200, "y": 100},
+       {"num": "3", "name": "P3", "x": 300, "y": 100},
+       {"num": "4", "name": "P4", "x": 400, "y": 120}
+     ],
+     "bbox": [100, 100, 400, 120]}
+  ],
+  "flags": [
+    {"pid": "f_ok",      "type": "netflag", "net": "+3V3_OK",   "x": 100, "y": 120, "rotation": 0},
+    {"pid": "f_side_pwr","type": "netflag", "net": "+3V3_SIDE", "x": 230, "y": 100, "rotation": 270},
+    {"pid": "f_side_gnd","type": "netflag", "net": "GND_SIDE",  "x": 270, "y": 100, "rotation": 270},
+    {"pid": "f_rev",     "type": "netflag", "net": "+3V3_REV",  "x": 400, "y": 100, "rotation": 180, "orientationExempt": true}
+  ],
+  "wires": [
+    {"pid": "w_ok",  "net": "+3V3_OK",   "line": [100, 100, 100, 120]},
+    {"pid": "w_pwr", "net": "+3V3_SIDE", "line": [200, 100, 230, 100]},
+    {"pid": "w_gnd", "net": "GND_SIDE",  "line": [300, 100, 270, 100]},
+    {"pid": "w_rev", "net": "+3V3_REV",  "line": [400, 120, 400, 100]}
+  ]
+}

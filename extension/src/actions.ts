@@ -7664,7 +7664,21 @@ const schematicVisibleTextBBoxes: Handler = async () => {
 				const id = a.getState_PrimitiveId();
 				const bbox = await measure(id);
 				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: String(c.getState_ComponentType()),
-					designator: c.getState_Designator?.() ?? null, key: a.getState_Key(), ...(bbox ? { bbox } : {}) });
+					designator: c.getState_Designator?.() ?? null, key: a.getState_Key(), value: a.getState_Value(), ...(bbox ? { bbox } : {}) });
+			}
+		}
+		// net label = 导线上的 Name 属性（线上网名），不是元件；sch_PrimitiveComponent
+		// 枚举不到它。单独把每条导线的可见属性测进来，否则文字重叠检查看不到 net label。
+		const wires = await eda.sch_PrimitiveWire.getAll();
+		for (const w of Array.isArray(wires) ? wires : []) {
+			const parentId = w.getState_PrimitiveId();
+			const attrs = await eda.sch_PrimitiveAttribute.getAll(parentId);
+			for (const a of Array.isArray(attrs) ? attrs : []) {
+				if (a.getState_ValueVisible() !== true && a.getState_KeyVisible() !== true) continue;
+				const id = a.getState_PrimitiveId();
+				const bbox = await measure(id);
+				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: 'wire',
+					designator: null, key: a.getState_Key(), value: a.getState_Value(), ...(bbox ? { bbox } : {}) });
 			}
 		}
 		const after = await eda.dmt_SelectControl.getCurrentDocumentInfo();

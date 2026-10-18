@@ -92,6 +92,7 @@ type visibleTextItem struct {
 	ComponentType string      `json:"componentType"`
 	Designator    string      `json:"designator"`
 	Key           string      `json:"key"`
+	Value         string      `json:"value"`
 	BBox          *layoutBBox `json:"bbox"`
 }
 
@@ -133,7 +134,7 @@ func visibleTextBoundaryFindings(items []visibleTextItem, sheet *layoutBBox, eps
 // An older connector without the action is reported once on stderr (no
 // finding: the rule simply does not exist there); a failed read or items the
 // host could not measure are surfaced, never treated as "inside".
-func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, eps float64, stderr io.Writer) []checkFinding {
+func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps []layoutComp, eps float64, stderr io.Writer) []checkFinding {
 	if sheet == nil {
 		return nil
 	}
@@ -154,9 +155,99 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, eps f
 		return []checkFinding{{Type: "visible-text-unverified", Level: "warn", Message: "可见文字/属性测量结果无法解析"}}
 	}
 	out := visibleTextBoundaryFindings(parsed.Items, sheet, eps)
+	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, eps)...)
 	if n := len(parsed.Unmeasured); n > 0 {
 		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "info",
 			Message: fmt.Sprintf("%d 个可见文字/属性宿主未给出 bbox，越界情况未核验", n)})
+	}
+	return out
+}
+
+// visibleTextOverlapFindings 把 schematic.visible_text.bboxes 测到的可见文字
+// （自由文字 + 器件可见属性，含 Value/阻值、Name/网名）与器件本体、网络标识的
+// bbox 做重叠判断。属性压自己的父器件不算（属性文字本来就画在自己器件附近）；
+// 跨 owner 的文字 vs 文字重叠同样报。net label 是导线 Name 属性，不在本数据内。
+func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, eps float64) []checkFinding {
+	type obstacle struct {
+		id, what string
+		bbox      *layoutBBox
+	}
+	var obstacles []obstacle
+	for _, c := range comps {
+		if c.BBox == nil {
+			continue
+		}
+		switch c.ComponentType {
+		case "part":
+			d := c.Designator
+			if d == "" {
+				d = c.ID
+			}
+			obstacles = append(obstacles, obstacle{c.ID, "器件 " + d, c.BBox})
+		case "netflag", "netport":
+			obstacles = append(obstacles, obstacle{c.ID, "标识 " + c.Net, c.BBox})
+		}
+	}
+	describe := func(it visibleTextItem) string {
+		if it.Kind == "attribute" {
+			if it.ComponentType == "wire" && it.Key == "Name" {
+				return "网络标签「" + it.Value + "」"
+			}
+			owner := it.Designator
+			if owner == "" {
+				owner = it.ComponentType
+			}
+			return fmt.Sprintf("%s 的可见属性 %s", owner, it.Key)
+		}
+		return "文字「" + it.Content + "」"
+	}
+	overlap := func(a, b *layoutBBox) (float64, float64) {
+		ix := math.Min(a.MaxX, b.MaxX) - math.Max(a.MinX, b.MinX)
+		iy := math.Min(a.MaxY, b.MaxY) - math.Max(a.MinY, b.MinY)
+		return ix, iy
+	}
+	var out []checkFinding
+	for _, it := range items {
+		if it.BBox == nil {
+			continue
+		}
+		for _, o := range obstacles {
+			if it.ParentID == o.id {
+				continue
+			}
+			ix, iy := overlap(it.BBox, o.bbox)
+			if ix > eps && iy > eps {
+				out = append(out, checkFinding{
+					Type: "visible-text-overlap", Level: "warn", PrimitiveId: it.ID,
+					Designator: it.Designator, BBox: it.BBox,
+					Message: fmt.Sprintf("%s 压在 %s 上（重叠 %.0f×%.0f）— 挪开或调整属性位置",
+						describe(it), o.what, ix, iy),
+				})
+				break
+			}
+		}
+	}
+	for i := 0; i < len(items); i++ {
+		a := items[i]
+		if a.BBox == nil {
+			continue
+		}
+		for j := i + 1; j < len(items); j++ {
+			b := items[j]
+			if b.BBox == nil || (a.ParentID != "" && a.ParentID == b.ParentID) {
+				continue
+			}
+			ix, iy := overlap(a.BBox, b.BBox)
+			if ix > eps && iy > eps {
+				out = append(out, checkFinding{
+					Type: "visible-text-overlap", Level: "warn", PrimitiveId: a.ID,
+					Designator: a.Designator, BBox: a.BBox,
+					Message: fmt.Sprintf("%s 与 %s 文字重叠（%.0f×%.0f）",
+						describe(a), describe(b), ix, iy),
+				})
+				break
+			}
+		}
 	}
 	return out
 }

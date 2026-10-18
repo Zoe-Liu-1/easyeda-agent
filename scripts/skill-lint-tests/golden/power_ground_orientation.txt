@@ -1,0 +1,8 @@
+== 概览 ==  parts=1 flags=4 wires=4 sheets=0 nets≈4
+
+🔴 电源/地标识朝向错误(应上/下) (2):
+  - netflag +3V3_SIDE @(230,100)  body=right 应为 up (电源上/地上下硬规则; 反向脚须标 orientationExempt)
+  - netflag  GND_SIDE @(270,100)  body=left 应为 down (电源上/地上下硬规则; 反向脚须标 orientationExempt)
+
+⚪ 反向豁免 (1):
+  - netflag +3V3_REV @(400,100) 反向豁免 (body 随引脚方向)

@@ -17,8 +17,8 @@
 // (family, body) → rotation MUST equal the table derived from orientation.json's
 // four facts (mirrored below — keep in sync). A real correctly-oriented flag
 // whose rotation disagrees with the table is a RULE BUG signal (报给人看).
-const CYCLE = ['up', 'right', 'down', 'left'];                 // == orientation.json rotationCycle
-const ANCHOR = { power: 'down', ground: 'up', port: 'right' }; // == orientation.json bodyAnchorAtRot0
+const CYCLE = ['up', 'left', 'down', 'right'];                 // == orientation.json rotationCycle
+const ANCHOR = { power: 'up', ground: 'down', port: 'right' }; // == orientation.json bodyAnchorAtRot0
 function tableRot(family, dir) {
   const ai = CYCLE.indexOf(ANCHOR[family]);
   return ((((CYCLE.indexOf(dir) - ai) % 4) + 4) % 4) * 90;

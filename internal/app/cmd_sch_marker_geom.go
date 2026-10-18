@@ -168,6 +168,52 @@ func reversedNetFlagFindings(comps []layoutComp, wires []schGroupWire) []checkFi
 	return out
 }
 
+// powerGroundOrientationFindings 规则 #2 的绝对朝向检查：电源 flag 的 body 必须
+// 朝上、地 flag 的 body 必须朝下（与 reversed-net-flag 的“顺着导线”相对检查互补）。
+// 反向脚（引脚外向与要求方向差 180°）的显式豁免由离线 lint.py 读源数据
+// `orientationExempt` 处理；现场 readback 暂不携带该标记，故这里先不豁免。
+func powerGroundOrientationFindings(comps []layoutComp) []checkFinding {
+	var out []checkFinding
+	for _, c := range comps {
+		if c.ComponentType != "netflag" || c.Rotation == nil {
+			continue
+		}
+		// 与离线 lint.py 的 family() 同一把尺:net 名含 GND/VSS/AGND/DGND/PGND →
+		// ground,其余 netflag 一律按 power(规则 #1 下信号走 net_label,不落 netflag)。
+		family := "power"
+		for _, g := range []string{"gnd", "vss", "agnd", "dgnd", "pgnd"} {
+			if strings.Contains(strings.ToLower(c.Net), g) {
+				family = "ground"
+				break
+			}
+		}
+		body, ok := flagDirectionOf(family, *c.Rotation)
+		if !ok {
+			continue
+		}
+		want := "up"
+		if family == "ground" {
+			want = "down"
+		}
+		if body == want {
+			continue
+		}
+		out = append(out, checkFinding{
+			Type:          "power-ground-orientation",
+			Level:         "warn",
+			PrimitiveId:   c.ID,
+			ComponentType: c.ComponentType,
+			MarkerNet:     c.Net,
+			BBox:          c.BBox,
+			At:            &checkPoint{X: c.X, Y: c.Y},
+			Message: fmt.Sprintf("%s 旗 body 朝 %s，应为 %s（电源上/地上下硬规则；反向脚显式豁免见 orientationExempt）",
+				c.Net, body, want),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PrimitiveId < out[j].PrimitiveId })
+	return out
+}
+
 // duplicateNetMarkerFindings groups net markers by (kind, net, quantized anchor)
 // and reports every group of 2+ as one finding carrying ALL coincident primitive
 // IDs plus a keep/delete suggestion. Different kinds, nets, or anchors never merge,
@@ -502,6 +548,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	}
 	titleBlock, tbSource := titleBlockKeepoutWithSource(sheetBBoxOf(comps))
 	geo := analyzeMarkerGeometry(comps, titleBlock, tbSource, overlapEps)
+	geo = append(geo, powerGroundOrientationFindings(comps)...)
 
 	// redundant-net-marker needs the wire trees (exec_js read, stable). Best-effort:
 	// a wire-read failure skips this rule only. Single-page only (wires are read
@@ -518,7 +565,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			geo = append(geo, schWireGeometryFindings(geometryResult.Result, wires)...)
 			geo = append(geo, sheetBoundaryFindings(comps, wires, sheetBBoxOf(comps), titleBlock, tbSource, overlapEps)...)
 		}
-		geo = append(geo, visibleTextFindings(cfg, window, sheetBBoxOf(comps), overlapEps, stderr)...)
+		geo = append(geo, visibleTextFindings(cfg, window, sheetBBoxOf(comps), comps, overlapEps, stderr)...)
 	}
 
 	// Layout-organization rule (铁律 #15): a multi-module page with no functional
@@ -551,6 +598,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.OutOfSheet++
 		case "marker-overlap":
 			rep.Summary.MarkerOverlaps++
+		case "visible-text-overlap":
+			rep.Summary.VisibleTextOverlaps++
 		case "missing-partition", "missing-titleblock":
 			// 交付件(区框/图签)共用一个聚合计数槽 —— 汇总行必须写成
 			// missing-deliverable 而不是 missing-partition:2026-08-17 真机上一条
@@ -561,6 +610,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.RedundantNetMarkers++
 		case "reversed-net-flag":
 			rep.Summary.ReversedNetFlags++
+		case "power-ground-orientation":
+			rep.Summary.PowerGroundOrientation++
 		case "folded-net-label":
 			rep.Summary.FoldedNetLabels++
 		}

@@ -58,6 +58,7 @@ def family(f):
 problems = defaultdict(list)
 
 # ---- Check 1: netflag/netport orientation (顺着导线) ----
+rel_fail = set()
 for f in flags:
     pt = (f['x'], f['y'])
     nbrs = wire_endpoints.get(pt)
@@ -69,9 +70,36 @@ for f in flags:
     fam = family(f)
     want = BODY_ROT[fam].get(body)
     if want is not None and f['rotation'] != want:
+        rel_fail.add(f.get('pid') or (pt, f['net']))
         problems['orientation'].append(
             f"{f['type']:>7} {f['net']:>9} @{pt}  rot={f['rotation']:>3} 应为 {want:>3}  "
             f"(导线朝{toward}, body应朝{body}, {fam})")
+
+# ---- Check 1b: absolute body orientation (电源上 / 地上下) + reverse-pin exemption ----
+# 规则 #2: 电源 flag body 必须朝上、地 flag body 必须朝下 (硬 MUST)。
+# 反向脚(引脚外向与要求方向差 180°)由源数据显式标记 `orientationExempt: true` 豁免,
+# 豁免脚单独列出、不静默放过。已在 Check 1 报过相对朝向的脚不重复报。
+REQUIRED_BODY = {'power': 'up', 'ground': 'down'}
+ROT_TO_BODY = {fam: {rot: d for d, rot in table.items()} for fam, table in BODY_ROT.items()}
+exempted = []
+for f in flags:
+    fam = family(f)
+    if fam not in REQUIRED_BODY:
+        continue
+    key = f.get('pid') or ((f['x'], f['y']), f['net'])
+    if key in rel_fail:
+        continue
+    if f.get('orientationExempt'):
+        exempted.append(f"{f['type']} {f['net']} @({f['x']},{f['y']}) 反向豁免 (body 随引脚方向)")
+        continue
+    body = ROT_TO_BODY[fam].get(f['rotation'])
+    if body is None:
+        continue  # 非 0/90/180/270, 由其它检查/写前守卫处理
+    want = REQUIRED_BODY[fam]
+    if body != want:
+        problems['power_ground_orientation'].append(
+            f"{f['type']:>7} {f['net']:>9} @({f['x']},{f['y']})  body={body} 应为 {want} "
+            f"(电源上/地上下硬规则; 反向脚须标 orientationExempt)")
 
 # ---- Check 2: flag overlaps a pin (DRC fatal) ----
 for f in flags:
@@ -235,13 +263,14 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
   'dangling_wire':'🔴 导线空连端点','floating_pin':'🟠 悬空引脚',
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
-  'orientation':'🟡 朝向不顺导线','bbox_overlap':'🟠 元件 bbox 重叠',
+  'orientation':'🟡 朝向不顺导线','power_ground_orientation':'🔴 电源/地标识朝向错误(应上/下)',
+  'bbox_overlap':'🟠 元件 bbox 重叠',
   'dup_designator':'🟠 重复位号','netport_hop':'🟡 net-port 同页近距离',
   'collinear_flags':'🟡 异网标识共线穿元件','unnamed_net':'🔵 多引脚网络未命名',
   'off_grid':'🔵 不在 5 网格',
@@ -253,10 +282,10 @@ labels = {
 findings = [{'rule': k, 'label': labels[k], 'msg': m} for k in order for m in problems[k]]
 summary = {'parts': len(parts), 'flags': len(flags), 'wires': len(wires), 'sheets': len(sheets),
            'nets': len([m for m in net_members.values() if m['pins'] or m['flags']]),
-           'problems': len(findings)}
+           'problems': len(findings), 'orientationExempted': len(exempted)}
 
 if JSON_OUT:
-    print(json.dumps({'summary': summary, 'findings': findings}, ensure_ascii=False))
+    print(json.dumps({'summary': summary, 'findings': findings, 'exemptions': exempted}, ensure_ascii=False))
 else:
     print(f"== 概览 ==  parts={summary['parts']} flags={summary['flags']} wires={summary['wires']} sheets={summary['sheets']} nets≈{summary['nets']}")
     if not findings:
@@ -266,3 +295,7 @@ else:
             print(f"\n{labels[k]} ({len(problems[k])}):")
             for line in problems[k]:
                 print(f"  - {line}")
+    if exempted:
+        print(f"\n⚪ 反向豁免 ({len(exempted)}):")
+        for line in exempted:
+            print(f"  - {line}")

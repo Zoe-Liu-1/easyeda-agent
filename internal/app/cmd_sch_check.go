@@ -108,6 +108,9 @@ type checkSummary struct {
 	// Any part/marker/wire leaving the sheet's usable area (sheet-boundary ruler).
 	OutOfSheet     int `json:"outOfSheet"`
 	MarkerOverlaps int `json:"markerOverlaps"`
+	// Visible text (free text + shown attributes, incl. Value/name text) overlapping
+	// a different owner's part body / marker / text.
+	VisibleTextOverlaps int `json:"visibleTextOverlaps"`
 	// Layout-organization rule (铁律 #15): a multi-module page with zero functional
 	// zone frames. Mechanical backstop so "分区分区" is enforced by
 	// the check, not by remembering the rule (which is unreliable — it was skipped
@@ -121,6 +124,9 @@ type checkSummary struct {
 	// Orientation rule: a netflag whose stored rotation contradicts its stub
 	// direction per the orientation truth table (reversed/upside-down flag).
 	ReversedNetFlags int `json:"reversedNetFlags"`
+	// Absolute orientation rule (电源上/地上下): power flag body must point up,
+	// GND flag body must point down — independent of which side the wire enters.
+	PowerGroundOrientation int `json:"powerGroundOrientation"`
 	// Polarity-convention outliers (#183 phase 1): caps whose rail-side pin
 	// number contradicts the same-page supermajority — the mechanically
 	// detectable core of a reversed tantalum that once sailed through this gate.
@@ -248,8 +254,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -352,6 +358,12 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.FoldedNetLabels > 0 {
 		fmt.Fprintln(w, "→ folded-net-label: netport 竖排、网名侧向难读 — `sch disconnect` 后重连(autoconnect 现已惩罚竖排,水平错列优先),或显式 --direction left|right")
+	}
+	if s.PowerGroundOrientation > 0 {
+		fmt.Fprintln(w, "→ power-ground-orientation: 电源/地旗 body 未朝上/下 — 按三层策略重连(直桩/折线),反向脚显式 orientationExempt")
+	}
+	if s.VisibleTextOverlaps > 0 {
+		fmt.Fprintln(w, "→ visible-text-overlap: 可见文字(阻值/网名/说明)压在别的器件、标识或文字上 — 挪开或调属性位置")
 	}
 	if s.PolarityConventionOutliers > 0 {
 		fmt.Fprintln(w, "→ polarity: verify the flagged caps' rail pin against the page majority (钽/电解 reverse = thermal-runaway/fire risk); MLCC numbering is arbitrary — ignore if non-polarized (#183)")

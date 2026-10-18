@@ -149,13 +149,23 @@ buffer:
 
 ### 3.3 电源/接地特殊约定
 
-| | 方向 | 推荐长度 | netflag kind |
+| | 方向（硬 MUST） | 推荐长度 | netflag kind |
 |---|---|---|---|
-| `+3V3` / `3V3` / `+5V` / `VBAT` / `VDD_*` | 优先向上出线，stored rotation 按 §3.5 校准表 | pin → netflag 20–40 | `power` |
-| `GND` / `AGND` | 优先向下出线，stored rotation 按 §3.5 校准表 | pin → netflag 10–40 | `ground` |
-| `IN/OUT` 端口 | 向外出线，朝向按真实引脚/标记几何 | pin → netflag 20–60 | `net_port_in/out/bi` |
+| `+3V3` / `3V3` / `+5V` / `VBAT` / `VDD_*` | **body 朝上**（= 接线点朝下，末段导线自下而上接入） | pin → netflag 20–40 | `power` |
+| `GND` / `AGND` | **body 朝下**（= 接线点朝上，末段导线自上而下接入） | pin → netflag 10–40 | `ground` |
+| `IN/OUT` 端口 | 向外出线（信号跨页例外，见 §3.3.1） | pin → netflag 20–60 | `net_port_in/out/bi` |
 
 电源/地的 netflag **绝不**与 pin 同坐标——必须用 wire 引出一段（即使只有 10 units 也行）。
+
+**电源/地 body 朝向是硬约束**，按三层策略处理（离线 `scripts/lint.py` 的
+`power_ground_orientation` 检查 + 现场 `sch check` 门禁）：
+
+1. 引脚外向与要求方向同向（电源脚朝上 / 地脚朝下）→ 直桩。
+2. 引脚外向与要求方向垂直（横向电源/地脚）→ 首段沿引脚外向出线，再 90° 折线到目标方向；
+   body 朝向 = 末段接入方向。
+3. 引脚外向与要求方向相差 180°（电源脚朝下 / 地脚朝上）→ 反向脚显式豁免：body 随引脚方向
+   放置，源数据标记 `orientationExempt: true`（附原因），检查门跳过该脚并在豁免清单中单独
+   列出，不静默放过。
 
 #### 3.3.1 电源符号复用与最少导线算法（1.4）
 
@@ -167,8 +177,9 @@ buffer:
 - 连接树采用无环最小森林：候选边按线长、拐点和障碍惩罚排序，禁止跨页大环、长距离
   环绕母线和为了“看起来同网”重复画线。一个网络可以有多个局部树，只要它们都通过
   同名全局符号或明确的模块端口归并。
-- 普通信号也先尝试模块内直连；只有明确的跨模块/跨页策略才使用 netport/netlabel。
-  标签是边界表达，不是外围电路的替代导线。
+- 普通信号先尝试模块内直连；模块内放不下或需按名字连通时，用同名**网络标签**（线上网名）。
+  网络标签只在本页内按名字连通；跨页信号必须用 `net_port`（同名端口）。标签是边界表达，
+  不是外围电路的替代导线。
 - Apply 的最小验收集固定为 `sch read`、`sch check`、`sch bridge-check`、DRC；任何
   wire-crossing、multi-net-wire、dangling-wire、orphan-stub 或拓扑变化都阻止后续队列。
 
@@ -187,9 +198,9 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 **netflag / netport 的 rotation 规则**（已编码进 `schematic.power.connect_pin`）：
 
-引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 stored rotation 把 body 按 **up → right → down → left** 每 +90° 循环。各类型 rot=0 时的 body 朝向：power=下、ground=上、net_port=右；这些是 `orientation.json` 的已校准视觉真值，与端点坐标的正负号独立。
+引脚先用一小段 wire 引出到某个方向 `direction`，flag 放在 wire 末端，body 朝 `direction` 继续朝外。EasyEDA 的 stored rotation 把 body 按 **up → left → down → right** 每 +90° 循环。各类型 rot=0 时的 body 朝向：power=上、ground=下、net_port=右；这些是 `orientation.json` 的已校准视觉真值，与端点坐标的正负号独立。
 
-> **整张表只由 4 个事实决定，单一真源不会漂移**：上面的循环顺序 + 三个 rot=0 锚点（power=下 / ground=上 / port=右）。这 4 个事实存放在本 skill 的 [`orientation.json`](./orientation.json)，由它**推导**出 12 项表——`connect_pin`（`extension/src/actions.ts` 的 `deriveBodyRotation()`）与 linter（`scripts/orient.py`）**推导同一张表**，二者不可能各写各的。校验由仓库的 `make lint-test`（`scripts/skill-lint-tests/run.py`）保证：① 结构上 `orientation.json` 必须推回自己的 `frozenTable`、循环律成立；② 锚点的活体 ground truth 由 [`calibrate.js`](../scripts/calibrate.js) 对 `getPrimitivesBBox` 中心偏移实测复核（导入新 .eext 后跑一次）。**永远不要手改那 12 个数字**——改锚点 / 循环后在仓库重跑 `scripts/skill-lint-tests/run.py --update`。
+> **整张表只由 4 个事实决定，单一真源不会漂移**：上面的循环顺序 + 三个 rot=0 锚点（power=上 / ground=下 / port=右）。这 4 个事实存放在本 skill 的 [`orientation.json`](./orientation.json)，由它**推导**出 12 项表——`connect_pin`（`extension/src/actions.ts` 的 `deriveBodyRotation()`）与 linter（`scripts/orient.py`）**推导同一张表**，二者不可能各写各的。校验由仓库的 `make lint-test`（`scripts/skill-lint-tests/run.py`）保证：① 结构上 `orientation.json` 必须推回自己的 `frozenTable`、循环律成立；② 锚点的活体 ground truth 由 [`calibrate.js`](../scripts/calibrate.js) 对 `getPrimitivesBBox` 中心偏移实测复核（导入新 .eext 后跑一次）。**永远不要手改那 12 个数字**——改锚点 / 循环后在仓库重跑 `scripts/skill-lint-tests/run.py --update`。
 
 > ⚠️ **createNetFlag / createNetPort 存储时取反**（2026-06 build）：传 `R` → 存储/渲染是 `(360-R)`。**坑**：建完**立即** `getState_Rotation()` 会回显 `R`（看着像恒等），**重新拉取**（`getAll`）才看到真正的取反值。`connect_pin` 已**运行时自探测并补偿**（`detectRotationNegation`），所以**经 connect_pin 传下表的值就能得到正确朝向**，对调用者透明;若直接调 raw `eda.createNetFlag`（debug.exec_js），需自己传取反值 `(360-表值)`。
 >
@@ -201,9 +212,9 @@ EasyEDA 默认 lineWidth = 1。约定：
 
 | kind | body 朝 `up` | `left` | `down` | `right` |
 |---|---|---|---|---|
-| power (`+3V3`/`+5V`/`VDD_*`) | **180°** | 90° | 0° | 270° |
-| ground (`GND`/`AGND`) | 0° | 270° | **180°** | 90° |
-| net_port (`IN`/`OUT`/`BI`) | 270° | 180° | 90° | **0°** |
+| power (`+3V3`/`+5V`/`VDD_*`) | **0°** | 90° | 180° | 270° |
+| ground (`GND`/`AGND`) | 180° | 270° | **0°** | 90° |
+| net_port (`IN`/`OUT`/`BI`) | 90° | 180° | 270° | **0°** |
 
 > 加粗的是各类型的**默认/最常见**朝向（power 朝上、ground 朝下、port 朝右）。**power/ground** 由 `calibrate.js` 对活体 bbox 实测验证（ceshi 10/10 通过）。**net_port 是箭头符号，bbox 中心读不出它的指向**——已用 **connect_pin 放置 + 肉眼确认**：`direction=right` 的 port 渲染出来确实朝右（朝外），所以 port 行也是对的；`calibrate.js` 对 port 报的 WARN 是 bbox 读不准导致的，**属正常、不是表的 bug**。其余未观测方向由同一条循环律从已验证锚点推导，构造上一致。必要时用 `schematic.power.connect_pin` 的 `rotation` 参数显式覆盖。
 

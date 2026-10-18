@@ -44,6 +44,10 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 先保存并回读，不能盲重试或仅因返回空而删除桩线。
 兼容性与验证说明见 [schematic.md](schematic.md#原生-net_label-超时191)。
 
+**网络标签必须经 `sch connect --kind net_label` 带短桩创建。** 裸 `sch netflag --kind net_label`
+（无线）是部分写入：只留下一条带网名的导线、没有可见的 Name 文字，且返回
+`verified:false`；不要用它。网络标签只在本页内按名字连通，跨页信号用 `net_port`。
+
 **批次内互斥 (issue #138):** 同一批(--spec / 多 --pin)里**已规划的短桩会当作
 既存导线注册回 scene**,后续连接对它做同样的异网硬拒——同器件相邻异网引脚
 (隔离 DC-DC 的 B0512S 类四域脚)不再出现短桩共线相触被 EasyEDA 合并成隐性
