@@ -1,0 +1,19 @@
+{
+  "_intent": "离线近似:异线经过电源标识锚点附近(<5 raw)必须报 marker_wire_overlap;标识自己的短桩和远离的线不算。SIG 两脚网无标识会附带 unnamed_net(预期)。",
+  "parts": [
+    {"pid": "u1", "type": "part", "designator": "U1", "x": 100, "y": 100,
+     "pins": [
+       {"num": "1", "name": "P1", "x": 100, "y": 100},
+       {"num": "2", "name": "P2", "x": 90, "y": 147},
+       {"num": "3", "name": "P3", "x": 110, "y": 147}
+     ],
+     "bbox": [90, 100, 110, 150]}
+  ],
+  "flags": [
+    {"pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 150, "rotation": 0}
+  ],
+  "wires": [
+    {"pid": "w_stub", "net": "+3V3", "line": [100, 100, 100, 150]},
+    {"pid": "w_cross", "net": "SIG", "line": [90, 147, 110, 147]}
+  ]
+}

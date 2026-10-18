@@ -2,6 +2,7 @@
 """Data-only schematic linter: read full layout JSON, report problem points."""
 import json, sys
 from collections import defaultdict, Counter
+from math import hypot
 import orient
 
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -170,6 +171,37 @@ for pt, dgr in deg.items():
     if dgr == 1 and pt not in pin_pts and pt not in flag_pts:
         problems['dangling_wire'].append(f"导线端点 @{pt} 空连（degree=1，无引脚/标识）")
 
+# ---- Check 10b: marker_wire_overlap (异线经过标识锚点附近, 近似) ----
+# 离线模型没有 flag bbox,这里用「异线到标识锚点的距离 < MARKER_WIRE_EPS」做粗筛;
+# 现场 sch check 用真实 bbox 判同一类缺陷。标识自己的短桩(endpoint 在锚点)不计。
+MARKER_WIRE_EPS = 5
+def seg_dist_point(px, py, a, b):
+    x0, y0 = a; x1, y1 = b
+    if x0 == x1:
+        lo, hi = min(y0, y1), max(y0, y1)
+        if lo <= py <= hi:
+            return abs(px - x0)
+        return min(hypot(px - x0, py - lo), hypot(px - x0, py - hi))
+    lo, hi = min(x0, x1), max(x0, x1)
+    if lo <= px <= hi:
+        return abs(py - y0)
+    return min(hypot(px - lo, py - y0), hypot(px - hi, py - y0))
+
+for f in flags:
+    ax, ay = f['x'], f['y']
+    for w in wires:
+        for (a, b) in segs(w.get('line') or []):
+            if a == b:
+                continue
+            if (a[0] == ax and a[1] == ay) or (b[0] == ax and b[1] == ay):
+                continue  # 标识自己的短桩
+            d = seg_dist_point(ax, ay, a, b)
+            if d < MARKER_WIRE_EPS:
+                problems['marker_wire_overlap'].append(
+                    f"{f['type']} {f['net']} @({ax},{ay}) 与导线 {w['pid']} 段 {a}->{b} "
+                    f"距离 {d:.1f} < {MARKER_WIRE_EPS}（异线经过标识附近，锚点近似）")
+                break
+
 # ---- net trace (union-find) for power/ground audit ----
 uf = {}
 def ufind(x):
@@ -263,12 +295,13 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','marker_wire_overlap','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
   'dangling_wire':'🔴 导线空连端点','floating_pin':'🟠 悬空引脚',
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
+  'marker_wire_overlap':'🟠 标识压在导线上(锚点近似)',
   'orientation':'🟡 朝向不顺导线','power_ground_orientation':'🔴 电源/地标识朝向错误(应上/下)',
   'bbox_overlap':'🟠 元件 bbox 重叠',
   'dup_designator':'🟠 重复位号','netport_hop':'🟡 net-port 同页近距离',
