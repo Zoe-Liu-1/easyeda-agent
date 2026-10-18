@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -129,6 +130,11 @@ type checkSummary struct {
 	// Absolute orientation rule (电源上/地上下): power flag body must point up,
 	// GND flag body must point down — independent of which side the wire enters.
 	PowerGroundOrientation int `json:"powerGroundOrientation"`
+	// Power/ground flags explicitly exempted from the absolute orientation rule
+	// (reverse pins): read from otherProperty.orientationExempt or declared via
+	// --orientation-exempt/--orientation-exempt-file. Listed separately as INFO
+	// findings — never silently dropped.
+	OrientationExempted int `json:"orientationExempted"`
 	// Polarity-convention outliers (#183 phase 1): caps whose rail-side pin
 	// number contradicts the same-page supermajority — the mechanically
 	// detectable core of a reversed tantalum that once sailed through this gate.
@@ -145,7 +151,7 @@ type checkReport struct {
 // runSchCheck runs the reconstructed design check, renders it, and (only with
 // strict) returns a non-zero exit when there are findings. By default it is
 // informational — floating IO pins are normal on an MCU board until NC-marked.
-func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, overlapEps float64, stdout, stderr io.Writer) error {
+func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, overlapEps float64, orientationExempt map[string]bool, stdout, stderr io.Writer) error {
 	payload := map[string]any{}
 	if allPages {
 		payload["allPages"] = true
@@ -171,7 +177,7 @@ func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, o
 	// components.list `sch layout-lint` uses, and fold the findings into the report
 	// so `sch check` is the single delivery gate. Best-effort: a components.list
 	// failure leaves the electrical findings intact.
-	mergeMarkerGeomFindings(cfg, window, allPages, overlapEps, &rep, stderr)
+	mergeMarkerGeomFindings(cfg, window, allPages, overlapEps, &rep, stderr, orientationExempt)
 
 	if asJSON {
 		// Wrap the reconstructed report in the same {id,type,version,ok,result}
@@ -208,6 +214,46 @@ func parseCheckReport(result map[string]any) (checkReport, error) {
 		return rep, fmt.Errorf("unexpected check result shape: %w", err)
 	}
 	return rep, nil
+}
+
+// parseOrientationExemptSet 把命令行声明的电源/地朝向豁免拼成一个 primitiveId
+// 集合。inline 是逗号分隔的 primitiveId 列表;file 是 JSON 文件,内容可为字符串
+// 数组 ["id1","id2"] 或对象数组 [{"primitiveId":"id1","reason":"..."}](reason 仅
+// 供审计,参与判定的只有 primitiveId)。两个入口可同时使用,取并集。
+func parseOrientationExemptSet(inline, file string) (map[string]bool, error) {
+	set := make(map[string]bool)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			set[id] = true
+		}
+	}
+	if strings.TrimSpace(inline) != "" {
+		for _, id := range strings.Split(inline, ",") {
+			add(id)
+		}
+	}
+	if strings.TrimSpace(file) != "" {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("read orientation-exempt file: %w", err)
+		}
+		var items []any
+		if err := json.Unmarshal(b, &items); err != nil {
+			return nil, fmt.Errorf("parse orientation-exempt file %q (expect a JSON array of primitiveId strings or {primitiveId,reason} objects): %w", file, err)
+		}
+		for _, it := range items {
+			switch v := it.(type) {
+			case string:
+				add(v)
+			case map[string]any:
+				if id, ok := v["primitiveId"].(string); ok {
+					add(id)
+				}
+			}
+		}
+	}
+	return set, nil
 }
 
 // checkLevelBlocks is the ONE severity ruler for whether a check finding blocks
@@ -256,8 +302,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -363,6 +409,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.PowerGroundOrientation > 0 {
 		fmt.Fprintln(w, "→ power-ground-orientation: 电源/地旗 body 未朝上/下 — 按三层策略重连(直桩/折线),反向脚显式 orientationExempt")
+	}
+	if s.OrientationExempted > 0 {
+		fmt.Fprintln(w, "→ orientation-exempt: 已按反向脚豁免电源/地朝向检查,明细见上方 INFO 行(不静默放过)")
 	}
 	if s.VisibleTextOverlaps > 0 {
 		fmt.Fprintln(w, "→ visible-text-overlap: 可见文字(阻值/网名/说明)压在别的器件、标识或文字上 — 挪开或调属性位置")

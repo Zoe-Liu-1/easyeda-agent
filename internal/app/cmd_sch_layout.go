@@ -56,6 +56,13 @@ type layoutComp struct {
 	// (markers carry it; the reversed-net-flag rule reads it against the
 	// orientation truth table). Nil when absent/non-numeric.
 	Rotation       *float64
+	// OrientationExempt marks a netflag whose absolute power/ground body
+	// orientation is intentionally left non-canonical because the pin it serves
+	// is a reverse pin (outward direction is 180° from the required direction).
+	// Read from the netflag's otherProperty.orientationExempt (live-readback form
+	// of the source-data `orientationExempt: true` exemption). The check gate
+	// skips these flags but still lists them separately — never silently passes.
+	OrientationExempt bool
 	BBox           *layoutBBox
 	Pins           []layoutPin
 	PinsAvailable  bool // true when the connector confirmed the pins read succeeded
@@ -782,6 +789,9 @@ func parseLayoutComps(result map[string]any) ([]layoutComp, error) {
 		if rot, rotOK := finiteFloat(m["rotation"]); rotOK {
 			c.Rotation = &rot
 		}
+		if op, opOK := m["otherProperty"].(map[string]any); opOK {
+			c.OrientationExempt = truthyProperty(op["orientationExempt"])
+		}
 		if c.ID == "" {
 			c.GeometryErrors = append(c.GeometryErrors, "primitiveId is empty")
 		}
@@ -870,6 +880,25 @@ func asString(v any) string {
 		return s
 	}
 	return ""
+}
+
+// truthyProperty 把连接器回读的 otherProperty 值判成布尔:平台既可能存布尔,
+// 也可能把布尔规范化成字符串 "true"/"1"/"yes"。缺键或无法判读一律 false。
+func truthyProperty(v any) bool {
+	switch n := v.(type) {
+	case bool:
+		return n
+	case string:
+		switch strings.ToLower(strings.TrimSpace(n)) {
+		case "true", "1", "yes", "on":
+			return true
+		}
+	case float64:
+		return n != 0
+	case int:
+		return n != 0
+	}
+	return false
 }
 
 func asFloat(v any) float64 {

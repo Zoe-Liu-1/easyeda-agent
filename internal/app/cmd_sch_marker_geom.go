@@ -170,10 +170,13 @@ func reversedNetFlagFindings(comps []layoutComp, wires []schGroupWire) []checkFi
 
 // powerGroundOrientationFindings 规则 #2 的绝对朝向检查：电源 flag 的 body 必须
 // 朝上、地 flag 的 body 必须朝下（与 reversed-net-flag 的“顺着导线”相对检查互补）。
-// 反向脚（引脚外向与要求方向差 180°）的显式豁免由离线 lint.py 读源数据
-// `orientationExempt` 处理；现场 readback 暂不携带该标记，故这里先不豁免。
-func powerGroundOrientationFindings(comps []layoutComp) []checkFinding {
-	var out []checkFinding
+// 反向脚（引脚外向与要求方向差 180°）的显式豁免同时来自两个入口:
+//  1. 持久形态:netflag 的 otherProperty.orientationExempt=true(现场 readback 携带,
+//     存进 layoutComp.OrientationExempt,保存重载后依然有效);
+//  2. 命令行形态:sch check --orientation-exempt/--orientation-exempt-file 按
+//     primitiveId 声明(供尚未写入 EDA 文档的源数据豁免)。
+// 豁免项不静默放过:以 info 级 findings 单独列出,并计入 OrientationExempted。
+func powerGroundOrientationFindings(comps []layoutComp, exempt map[string]bool) (problems, exempted []checkFinding) {
 	for _, c := range comps {
 		if c.ComponentType != "netflag" || c.Rotation == nil {
 			continue
@@ -195,10 +198,23 @@ func powerGroundOrientationFindings(comps []layoutComp) []checkFinding {
 		if family == "ground" {
 			want = "down"
 		}
+		if c.OrientationExempt || exempt[c.ID] {
+			exempted = append(exempted, checkFinding{
+				Type:          "orientation-exempt",
+				Level:         "info",
+				PrimitiveId:   c.ID,
+				ComponentType: c.ComponentType,
+				MarkerNet:     c.Net,
+				At:            &checkPoint{X: c.X, Y: c.Y},
+				Message: fmt.Sprintf("%s 旗豁免电源/地朝向检查(反向脚 orientationExempt,body 朝 %s)",
+					c.Net, body),
+			})
+			continue
+		}
 		if body == want {
 			continue
 		}
-		out = append(out, checkFinding{
+		problems = append(problems, checkFinding{
 			Type:          "power-ground-orientation",
 			Level:         "warn",
 			PrimitiveId:   c.ID,
@@ -210,8 +226,9 @@ func powerGroundOrientationFindings(comps []layoutComp) []checkFinding {
 				c.Net, body, want),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].PrimitiveId < out[j].PrimitiveId })
-	return out
+	sort.Slice(problems, func(i, j int) bool { return problems[i].PrimitiveId < problems[j].PrimitiveId })
+	sort.Slice(exempted, func(i, j int) bool { return exempted[i].PrimitiveId < exempted[j].PrimitiveId })
+	return problems, exempted
 }
 
 // markerWireOverlapFindings 规则:网络标识(netflag/netport)本体压在导线上。
@@ -563,12 +580,12 @@ func markerLabel(c layoutComp) string {
 // geometric rules into an existing electrical check report, updating its summary
 // counts and passed/total. Best-effort: a components.list failure is logged to
 // stderr and leaves the report untouched.
-func mergeMarkerGeomFindings(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer) {
-	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, rep, stderr, nil)
+func mergeMarkerGeomFindings(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer, exempt map[string]bool) {
+	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, rep, stderr, nil, exempt)
 }
 
 // mergeMarkerGeomFindingsWith 是带**预读快照**的版本(geom=nil 时行为不变)。
-func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer, geom *schGeomSnapshot) {
+func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer, geom *schGeomSnapshot, exempt map[string]bool) {
 	payload := map[string]any{"includeBBox": true, "includePins": true, "includePinNets": false}
 	if allPages {
 		payload["allPages"] = true
@@ -587,7 +604,9 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	}
 	titleBlock, tbSource := titleBlockKeepoutWithSource(sheetBBoxOf(comps))
 	geo := analyzeMarkerGeometry(comps, titleBlock, tbSource, overlapEps)
-	geo = append(geo, powerGroundOrientationFindings(comps)...)
+	pgProblems, pgExempted := powerGroundOrientationFindings(comps, exempt)
+	geo = append(geo, pgProblems...)
+	geo = append(geo, pgExempted...)
 
 	// redundant-net-marker needs the wire trees (exec_js read, stable). Best-effort:
 	// a wire-read failure skips this rule only. Single-page only (wires are read
@@ -654,6 +673,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.ReversedNetFlags++
 		case "power-ground-orientation":
 			rep.Summary.PowerGroundOrientation++
+		case "orientation-exempt":
+			rep.Summary.OrientationExempted++
 		case "folded-net-label":
 			rep.Summary.FoldedNetLabels++
 		}
