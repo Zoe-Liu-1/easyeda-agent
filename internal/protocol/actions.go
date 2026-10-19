@@ -443,9 +443,9 @@ func AllActions() []ActionSpec {
 			Phase:       1,
 			Mutates:     false,
 			NeedsWindow: true,
-			Description: "Read-only official bboxes of every VISIBLE text-like object on the ACTIVE schematic page: free text primitives plus each component's attributes whose key or value is shown (parts and the sheet frame). Feeds sch check's out-of-sheet rule; anything unmeasurable is listed in unmeasured, never dropped.",
+			Description: "Read-only official bboxes of every VISIBLE text-like object on the ACTIVE schematic page: free text primitives plus each component's attributes whose key or value is shown (parts, the sheet frame, and wire Name net labels). Items expose parentId, componentType, parentType and rotation so sch check can distinguish a net label's own wire and detect vertical/folded labels. Feeds out-of-sheet, text-overlap and label-orientation rules; anything unmeasurable is listed in unmeasured, never dropped.",
 			Inputs:      []string{},
-			Outputs:     []string{"documentId", "count", "items[].id", "items[].kind (text|attribute)", "items[].bbox", "items[].parentId", "items[].key", "unmeasured[]"},
+			Outputs:     []string{"documentId", "count", "items[].id", "items[].kind (text|attribute)", "items[].bbox", "items[].parentId", "items[].parentType", "items[].componentType", "items[].key", "items[].value", "items[].rotation", "unmeasured[]"},
 		},
 		{
 			Name:        "schematic.image.create",

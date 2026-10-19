@@ -90,9 +90,11 @@ type visibleTextItem struct {
 	Content       string      `json:"content"`
 	ParentID      string      `json:"parentId"`
 	ComponentType string      `json:"componentType"`
+	ParentType    string      `json:"parentType"`
 	Designator    string      `json:"designator"`
 	Key           string      `json:"key"`
 	Value         string      `json:"value"`
+	Rotation      *float64    `json:"rotation"`
 	BBox          *layoutBBox `json:"bbox"`
 }
 

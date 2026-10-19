@@ -1326,6 +1326,51 @@ test('schematic.text.move moves texts by modify with read-back, never deletes, a
 	finally { delete (globalThis as any).eda; }
 });
 
+test('schematic.visible_text.bboxes exposes rotation, parentId and parentType for labels and attributes', async () => {
+	const boxes: Record<string, any> = {
+		'attr-part-value': { minX: 10, minY: 20, maxX: 40, maxY: 30 },
+		'attr-wire-name': { minX: 50, minY: 20, maxX: 80, maxY: 30 },
+	};
+	const part = {
+		getState_PrimitiveId: () => 'part-1',
+		getState_ComponentType: () => 'part',
+		getState_Designator: () => 'R1',
+	};
+	const wire = { getState_PrimitiveId: () => 'wire-1' };
+	const attr = (id: string, key: string, value: string, rotation: number) => ({
+		getState_PrimitiveId: () => id,
+		getState_ValueVisible: () => true,
+		getState_KeyVisible: () => false,
+		getState_Key: () => key,
+		getState_Value: () => value,
+		getState_Rotation: () => rotation,
+	});
+	(globalThis as any).eda = {
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page-1' }) },
+		sch_PrimitiveText: { getAll: async () => [] },
+		sch_PrimitiveComponent: { getAll: async () => [part] },
+		sch_PrimitiveWire: { getAll: async () => [wire] },
+		sch_PrimitiveAttribute: {
+			getAll: async (parentId: string) => parentId === 'part-1'
+				? [attr('attr-part-value', 'Value', '10k', 0)]
+				: parentId === 'wire-1'
+					? [attr('attr-wire-name', 'Name', 'SIG', 0)]
+					: [],
+		},
+		sch_Primitive: { getPrimitivesBBox: async ([id]: string[]) => boxes[id] ?? null },
+	};
+	try {
+		const res: any = await runAction('schematic.visible_text.bboxes', {});
+		const value = res.result.items.find((x: any) => x.id === 'attr-part-value');
+		const label = res.result.items.find((x: any) => x.id === 'attr-wire-name');
+		assert.deepEqual([value.parentId, value.parentType, value.rotation], ['part-1', 'part', 0]);
+		assert.deepEqual([label.parentId, label.parentType, label.rotation], ['wire-1', 'wire', 0]);
+	}
+	finally {
+		delete (globalThis as any).eda;
+	}
+});
+
 test('library Device delete requires exact expected name and verifies absence', async () => {
 	let live: any = { uuid: 'DEV-1', name: 'EA_AGENT__TEST' };
 	let deleteCalls = 0;

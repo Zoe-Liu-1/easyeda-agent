@@ -7653,7 +7653,8 @@ const schematicVisibleTextBBoxes: Handler = async () => {
 		for (const t of Array.isArray(texts) ? texts : []) {
 			const id = t.getState_PrimitiveId();
 			const bbox = await measure(id);
-			(bbox ? items : unmeasured).push({ id, kind: 'text', content: t.getState_Content(), ...(bbox ? { bbox } : {}) });
+			(bbox ? items : unmeasured).push({ id, kind: 'text', content: t.getState_Content(),
+				parentType: 'text', rotation: t.getState_Rotation(), ...(bbox ? { bbox } : {}) });
 		}
 		const comps = await eda.sch_PrimitiveComponent.getAll(undefined, false);
 		for (const c of Array.isArray(comps) ? comps : []) {
@@ -7663,8 +7664,10 @@ const schematicVisibleTextBBoxes: Handler = async () => {
 				if (a.getState_ValueVisible() !== true && a.getState_KeyVisible() !== true) continue;
 				const id = a.getState_PrimitiveId();
 				const bbox = await measure(id);
-				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: String(c.getState_ComponentType()),
-					designator: c.getState_Designator?.() ?? null, key: a.getState_Key(), value: a.getState_Value(), ...(bbox ? { bbox } : {}) });
+				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId,
+					componentType: String(c.getState_ComponentType()), parentType: String(c.getState_ComponentType()),
+					designator: c.getState_Designator?.() ?? null, key: a.getState_Key(), value: a.getState_Value(),
+					rotation: Number(a.getState_Rotation?.() ?? 0), ...(bbox ? { bbox } : {}) });
 			}
 		}
 		// net label = 导线上的 Name 属性（线上网名），不是元件；sch_PrimitiveComponent
@@ -7677,8 +7680,9 @@ const schematicVisibleTextBBoxes: Handler = async () => {
 				if (a.getState_ValueVisible() !== true && a.getState_KeyVisible() !== true) continue;
 				const id = a.getState_PrimitiveId();
 				const bbox = await measure(id);
-				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: 'wire',
-					designator: null, key: a.getState_Key(), value: a.getState_Value(), ...(bbox ? { bbox } : {}) });
+				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: 'wire', parentType: 'wire',
+					designator: null, key: a.getState_Key(), value: a.getState_Value(),
+					rotation: Number(a.getState_Rotation?.() ?? 0), ...(bbox ? { bbox } : {}) });
 			}
 		}
 		const after = await eda.dmt_SelectControl.getCurrentDocumentInfo();
