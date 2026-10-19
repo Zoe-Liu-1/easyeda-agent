@@ -175,6 +175,7 @@ func reversedNetFlagFindings(comps []layoutComp, wires []schGroupWire) []checkFi
 //     存进 layoutComp.OrientationExempt,保存重载后依然有效);
 //  2. 命令行形态:sch check --orientation-exempt/--orientation-exempt-file 按
 //     primitiveId 声明(供尚未写入 EDA 文档的源数据豁免)。
+//
 // 豁免项不静默放过:以 info 级 findings 单独列出,并计入 OrientationExempted。
 func powerGroundOrientationFindings(comps []layoutComp, exempt map[string]bool) (problems, exempted []checkFinding) {
 	for _, c := range comps {
@@ -624,7 +625,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			geo = append(geo, schWireGeometryFindings(geometryResult.Result, wires)...)
 			geo = append(geo, sheetBoundaryFindings(comps, wires, sheetBBoxOf(comps), titleBlock, tbSource, overlapEps)...)
 		}
-		geo = append(geo, visibleTextFindings(cfg, window, sheetBBoxOf(comps), comps, overlapEps, stderr)...)
+		geo = append(geo, visibleTextFindings(cfg, window, sheetBBoxOf(comps), comps, visualWires, overlapEps, stderr)...)
 	}
 
 	// Layout-organization rule (铁律 #15): a multi-module page with no functional
@@ -659,6 +660,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.MarkerOverlaps++
 		case "marker-wire-overlap":
 			rep.Summary.MarkerWireOverlaps++
+		case "non-orthogonal-wire":
+			rep.Summary.NonOrthogonalWires++
 		case "visible-text-overlap":
 			rep.Summary.VisibleTextOverlaps++
 		case "missing-partition", "missing-titleblock":

@@ -118,6 +118,15 @@ for p in parts:
 for pid, pt in all_zero_wires:
     problems['zero_wire'].append(f"wire {pid} @{pt} 零长度（DRC 会报错）")
 
+# ---- Check 4b: diagonal / non-orthogonal wires ----
+for w in wires:
+    for (a, b) in segs(w.get('line') or []):
+        if a == b:
+            continue
+        if a[0] != b[0] and a[1] != b[1]:
+            problems['diagonal_wire'].append(
+                f"wire {w['pid']} 段 {a}->{b} 不是水平/竖直（dx={b[0]-a[0]:g}, dy={b[1]-a[1]:g}）")
+
 # ---- Check 5: off-grid ----
 for p in parts + flags:
     if p['x'] % 5 or p['y'] % 5:
@@ -187,6 +196,33 @@ def seg_dist_point(px, py, a, b):
         return abs(py - y0)
     return min(hypot(px - lo, py - y0), hypot(px - hi, py - y0))
 
+def seg_intersects_box(a, b, box):
+    """Closed segment/AABB intersection: edge or corner contact counts."""
+    x0, y0 = a
+    x1, y1 = b
+    minx, miny, maxx, maxy = box
+    dx, dy = x1 - x0, y1 - y0
+    p = (-dx, dx, -dy, dy)
+    q = (x0 - minx, maxx - x0, y0 - miny, maxy - y0)
+    u1, u2 = 0.0, 1.0
+    for pi, qi in zip(p, q):
+        if pi == 0:
+            if qi < 0:
+                return False
+            continue
+        r = qi / pi
+        if pi < 0:
+            if r > u2:
+                return False
+            if r > u1:
+                u1 = r
+        else:
+            if r < u1:
+                return False
+            if r < u2:
+                u2 = r
+    return True
+
 for f in flags:
     ax, ay = f['x'], f['y']
     for w in wires:
@@ -201,6 +237,61 @@ for f in flags:
                     f"{f['type']} {f['net']} @({ax},{ay}) 与导线 {w['pid']} 段 {a}->{b} "
                     f"距离 {d:.1f} < {MARKER_WIRE_EPS}（异线经过标识附近，锚点近似）")
                 break
+
+# ---- Check 10c: visible text vs wire (closed collision) ----
+def visible_text_boxes():
+    out = []
+    raw = data.get('visible_text') or data.get('text_bboxes') or data.get('textBboxes') or []
+    for i, item in enumerate(raw):
+        box = None
+        if isinstance(item, dict):
+            box = item.get('bbox')
+            if box is None:
+                box = [item.get('minX'), item.get('minY'), item.get('maxX'), item.get('maxY')]
+        if not box or len(box) != 4 or any(v is None for v in box):
+            continue
+        try:
+            box = [float(v) for v in box]
+        except (TypeError, ValueError):
+            continue
+        if box[0] > box[2]:
+            box[0], box[2] = box[2], box[0]
+        if box[1] > box[3]:
+            box[1], box[3] = box[3], box[1]
+        label = (item.get('label') or item.get('text') or item.get('content')
+                 or item.get('value') or item.get('key') or f"text{i+1}")
+        out.append({'label': str(label), 'bbox': box,
+                    'parentWireId': (item.get('parentWireId') or item.get('parent_wire')
+                                     or item.get('parentId'))})
+    for p in parts:
+        for i, item in enumerate(p.get('textBboxes') or p.get('text_bboxes') or []):
+            box = item.get('bbox') if isinstance(item, dict) else item
+            if not box or len(box) != 4:
+                continue
+            try:
+                box = [float(v) for v in box]
+            except (TypeError, ValueError):
+                continue
+            out.append({'label': f"{p.get('designator', 'part')}.text{i+1}",
+                        'bbox': box, 'parentWireId': None})
+    return out
+
+for t in visible_text_boxes():
+    for w in wires:
+        if t['parentWireId'] == w.get('pid'):
+            continue
+        hit = False
+        for (a, b) in segs(w.get('line') or []):
+            if a == b:
+                continue
+            if seg_intersects_box(a, b, t['bbox']):
+                problems['text_wire_overlap'].append(
+                    f"{t['label']} bbox=({t['bbox'][0]:g},{t['bbox'][1]:g})-"
+                    f"({t['bbox'][2]:g},{t['bbox'][3]:g}) 被导线 {w['pid']} 段 {a}->{b} 穿过")
+                hit = True
+                break
+        if hit:
+            break
 
 # ---- net trace (union-find) for power/ground audit ----
 uf = {}
@@ -294,14 +385,16 @@ if SOP_SCALE:
             problems['local_net_as_flag'].append(
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
-order = ['flag_on_pin','zero_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','marker_wire_overlap','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
+         'flag_no_wire','marker_wire_overlap','text_wire_overlap','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
+  'diagonal_wire':'🔴 斜线/非正交导线',
   'dangling_wire':'🔴 导线空连端点','floating_pin':'🟠 悬空引脚',
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
   'marker_wire_overlap':'🟠 标识压在导线上(锚点近似)',
+  'text_wire_overlap':'🟠 可见文字被导线穿过',
   'orientation':'🟡 朝向不顺导线','power_ground_orientation':'🔴 电源/地标识朝向错误(应上/下)',
   'bbox_overlap':'🟠 元件 bbox 重叠',
   'dup_designator':'🟠 重复位号','netport_hop':'🟡 net-port 同页近距离',

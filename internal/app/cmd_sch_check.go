@@ -30,6 +30,7 @@ import (
 //	multi-net-wire      WARN  one wire primitive carrying multiple net names
 //	wire-crossing       WARN  two wires cross mid-segment
 //	wire-over-pin       WARN  a wire body runs through a pin it doesn't end on
+//	non-orthogonal-wire ERROR a diagonal/non-axis wire segment
 //	zero-length-wire    WARN  degenerate zero-length segment
 //	dangling-wire       WARN  wire end anchored to nothing (incl. orphan stubs)
 //	polarity-convention-outlier WARN cap whose rail-side pin contradicts the
@@ -101,6 +102,7 @@ type checkSummary struct {
 	MultiNetWires          int `json:"multiNetWires"`
 	WireCrossings          int `json:"wireCrossings"`
 	WireOverPins           int `json:"wireOverPins"`
+	NonOrthogonalWires     int `json:"nonOrthogonalWires"`
 	ZeroLengthWires        int `json:"zeroLengthWires"`
 	DanglingWires          int `json:"danglingWires"`
 	// Go-side geometric marker rules (issues #146/#147/#148).
@@ -302,8 +304,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -372,6 +374,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.WireCrossings > 0 || s.WireOverPins > 0 {
 		fmt.Fprintln(w, "→ routing: reroute crossings in clear channels (L-bends); never run a wire through a pin")
+	}
+	if s.NonOrthogonalWires > 0 {
+		fmt.Fprintln(w, "→ non-orthogonal-wire: split every diagonal/non-axis segment into horizontal/vertical runs, then rerun bridge-check")
 	}
 	if s.NetMarkerMismatches > 0 || s.MultiNetWires > 0 {
 		fmt.Fprintln(w, "→ net names: fix mismatched flags/ports/labels before treating schematic DRC as clean")

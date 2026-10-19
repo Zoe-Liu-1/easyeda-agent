@@ -1,0 +1,22 @@
+{
+  "_intent": "A single diagonal wire must be reported as invalid even when its endpoints, pin and netport orientation are otherwise valid.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 100,
+      "y": 100,
+      "pins": [
+        { "num": "1", "name": "P", "x": 100, "y": 100 }
+      ],
+      "bbox": [90, 90, 110, 110]
+    }
+  ],
+  "flags": [
+    { "pid": "p1", "type": "netport", "net": "SIG", "x": 150, "y": 150, "rotation": 0 }
+  ],
+  "wires": [
+    { "pid": "w1", "net": "SIG", "line": [100, 100, 150, 150] }
+  ]
+}

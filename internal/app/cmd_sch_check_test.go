@@ -54,16 +54,17 @@ func TestRenderCheck_Routing(t *testing.T) {
 	at := &checkPoint{X: 90, Y: 135}
 	rep := checkReport{
 		Passed:  false,
-		Summary: checkSummary{WireCrossings: 1, WireOverPins: 1, Total: 2},
+		Summary: checkSummary{WireCrossings: 1, WireOverPins: 1, NonOrthogonalWires: 1, Total: 3},
 		Findings: []checkFinding{
 			{Type: "wire-crossing", Level: "warn", Count: 1, Message: "两条导线交叉", At: at},
 			{Type: "wire-over-pin", Level: "warn", Designator: "U1", Pins: []string{"5"}, Message: "导线穿过该引脚", At: at},
+			{Type: "non-orthogonal-wire", Level: "error", WirePrimitiveId: "w9", Message: "wire segments must be orthogonal", At: at},
 		},
 	}
 	var buf bytes.Buffer
 	renderCheckReport(rep, &buf)
 	out := buf.String()
-	for _, want := range []string{"wire-crossing", "@(90.00,135.00)", "wire-over-pin", "U1", "routing"} {
+	for _, want := range []string{"wire-crossing", "@(90.00,135.00)", "wire-over-pin", "non-orthogonal-wire", "non-orthogonal-wire(s)", "split every diagonal", "U1", "routing"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
 		}

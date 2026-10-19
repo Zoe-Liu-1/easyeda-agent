@@ -130,6 +130,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `label-orientation` | 可见网络标签竖排/折叠。只对 net label 生效；netflag/netport 仍按电源/端口朝向规则检查。 |
 | `direct-connect-opportunity` | 存在不交叉的正交短路径却用标签。必须给出路径证据；有器件、文字、导线或引脚首段障碍时不报。 |
 | `designator-wire-overlap` | 导线进入可见文字 bbox。应扩展到 Value、网络名和自由文字；网络标签只排除自身挂载线，Designator/Value/自由文字的全部导线都参与碰撞。 |
+| `visible-text-overlap` | 可见文字压器件/标识/其他文字，或压在导线上；net label 只排除自身挂载线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
 | `out-of-sheet` | 包含可见属性文字；只包器件 body 不算入框或出图通过。 |
 
 这些 finding 都不能用“电气已经连通”代替；`bridge-check` 只证明线树无桥接/孤儿，
