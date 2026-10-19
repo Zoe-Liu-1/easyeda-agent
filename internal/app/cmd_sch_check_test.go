@@ -71,6 +71,25 @@ func TestRenderCheck_Routing(t *testing.T) {
 	}
 }
 
+func TestRenderCheck_LabelRules(t *testing.T) {
+	rep := checkReport{
+		Passed:  false,
+		Summary: checkSummary{LabelEconomy: 1, LabelOrientations: 1, Total: 2},
+		Findings: []checkFinding{
+			{Type: "label-economy", Level: "warn", Message: "duplicate same-net label"},
+			{Type: "label-orientation", Level: "warn", Message: "label is vertical"},
+		},
+	}
+	var buf bytes.Buffer
+	renderCheckReport(rep, &buf)
+	out := buf.String()
+	for _, want := range []string{"label-economy(s)", "label-orientation(s)", "one label per line island", "net-label text must be horizontal"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderCheck_NetNames(t *testing.T) {
 	at := &checkPoint{X: 545, Y: 295}
 	rep := checkReport{

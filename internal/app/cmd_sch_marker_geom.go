@@ -664,6 +664,10 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.NonOrthogonalWires++
 		case "visible-text-overlap":
 			rep.Summary.VisibleTextOverlaps++
+		case "label-economy":
+			rep.Summary.LabelEconomy++
+		case "label-orientation":
+			rep.Summary.LabelOrientations++
 		case "missing-partition", "missing-titleblock":
 			// 交付件(区框/图签)共用一个聚合计数槽 —— 汇总行必须写成
 			// missing-deliverable 而不是 missing-partition:2026-08-17 真机上一条

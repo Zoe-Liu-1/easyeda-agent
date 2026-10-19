@@ -262,7 +262,11 @@ def visible_text_boxes():
                  or item.get('value') or item.get('key') or f"text{i+1}")
         out.append({'label': str(label), 'bbox': box,
                     'parentWireId': (item.get('parentWireId') or item.get('parent_wire')
-                                     or item.get('parentId'))})
+                                     or item.get('parentId')),
+                    'componentType': item.get('componentType'),
+                    'key': item.get('key'),
+                    'rotation': item.get('rotation'),
+                    'net': item.get('value') if item.get('key') == 'Name' else None})
     for p in parts:
         for i, item in enumerate(p.get('textBboxes') or p.get('text_bboxes') or []):
             box = item.get('bbox') if isinstance(item, dict) else item
@@ -273,7 +277,9 @@ def visible_text_boxes():
             except (TypeError, ValueError):
                 continue
             out.append({'label': f"{p.get('designator', 'part')}.text{i+1}",
-                        'bbox': box, 'parentWireId': None})
+                        'bbox': box, 'parentWireId': None,
+                        'componentType': 'part', 'key': None,
+                        'rotation': None, 'net': None})
     return out
 
 for t in visible_text_boxes():
@@ -293,6 +299,16 @@ for t in visible_text_boxes():
         if hit:
             break
 
+# ---- Check 10d: vertical/folded net labels ----
+for t in visible_text_boxes():
+    if t['componentType'] != 'wire' or t['key'] != 'Name':
+        continue
+    rot = t.get('rotation')
+    if isinstance(rot, (int, float)) and int(round(rot)) % 180 == 90:
+        problems['label_vertical'].append(
+            f"网络标签「{t['net'] or t['label']}」 @bbox({t['bbox'][0]:g},{t['bbox'][1]:g}) "
+            f"rotation={rot:g} 竖排/折叠（应水平显示）")
+
 # ---- net trace (union-find) for power/ground audit ----
 uf = {}
 def ufind(x):
@@ -306,6 +322,28 @@ for w in wires:
         if a != b: uunion(a, b)
 for pt in list(pin_pts) + list(flag_pts):
     ufind(pt)
+
+# ---- Check 10e: same line island carries duplicate same-net labels ----
+def wire_root(w):
+    for (a, b) in segs(w.get('line') or []):
+        if a != b:
+            return ufind(a)
+    return None
+
+wire_roots = {w['pid']: wire_root(w) for w in wires}
+labels_by_island = defaultdict(list)
+for t in visible_text_boxes():
+    if t['componentType'] != 'wire' or t['key'] != 'Name' or not t['parentWireId']:
+        continue
+    root = wire_roots.get(t['parentWireId'])
+    if root is not None:
+        labels_by_island[(t['net'] or t['label'], root)].append(t)
+for (net, root), group in labels_by_island.items():
+    if len(group) > 1:
+        problems['redundant_label'].append(
+            f"线岛 {root} 上网络 '{net}' 有 {len(group)} 个同名标签 — 只保留一个："
+            + ", ".join(f"@{t['bbox'][0]:g},{t['bbox'][1]:g}" for t in group))
+
 net_members = defaultdict(lambda: {'pins': set(), 'flags': set()})
 net_pts = defaultdict(set)   # root -> set of (x,y) pin/flag points on that net (for span/proximity)
 for pt in list(uf):
@@ -386,7 +424,7 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','marker_wire_overlap','text_wire_overlap','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_vertical','redundant_label','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
@@ -395,6 +433,8 @@ labels = {
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
   'marker_wire_overlap':'🟠 标识压在导线上(锚点近似)',
   'text_wire_overlap':'🟠 可见文字被导线穿过',
+  'label_vertical':'🟡 网络标签竖排/折叠',
+  'redundant_label':'🟡 同线岛重复网络标签',
   'orientation':'🟡 朝向不顺导线','power_ground_orientation':'🔴 电源/地标识朝向错误(应上/下)',
   'bbox_overlap':'🟠 元件 bbox 重叠',
   'dup_designator':'🟠 重复位号','netport_hop':'🟡 net-port 同页近距离',
