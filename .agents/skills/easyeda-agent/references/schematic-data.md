@@ -84,6 +84,12 @@ CLI 参数以 `easyeda sch <command> --help` 为准；电路选型依据具体�
 实测 Designator bbox 是闭合障碍：导线进入内部、沿边界重合或只触及角点都必须报错；
 不得沿用器件本体允许合法端点落边的开区间判据。
 
+所有可见文字（Designator、可见 Name/Value、网络标签文字、自由文字）与导线同属闭合碰撞
+对象：导线进入文字 bbox、沿边界重合或只触角点都报错。网络标签只排除它**自己挂载**的那根线；
+Designator、Value、自由文字没有挂载线，全部导线参与碰撞。
+`sch check` 的 `designator-wire-overlap` 是其中一种已落地的子集，不能据此认为其他可见文字
+已被覆盖。文字 bbox 缺失不能当空集合，也不能用估计值冒充现场实测。
+
 器件本体的 `tight-spacing` 使用源数据已经显式登记的功能 ownership：同一 zone、模块认领或
 持久功能组内的核心/专属外围允许小于通用间距，但真实面积重叠仍是错误；跨 ownership 的
 过近仍由 strict 门禁阻断。归属缺失时不按同网、画面距离或相似位号猜测豁免。
@@ -687,6 +693,7 @@ V4 完全未接线页可能无法导出网表，此时 `sch list` 的 `pinNetsAv
 | `modules[]` | `id/title/placements/wires/flags`，可附 `terminals/titleMetrics`；与 connectivity 的 Lib 成员逐项对应，每件只归属一个模块。 |
 | `placements[]` | `designator/value/x/y/rotation/mirror/bbox/pins`；bbox 与引脚位置来自官方实测，器件和引脚坐标落在 5 raw 网格。 |
 | `placements[].textBboxes` | 可选外置位号 bbox 数组，格式同 sheet；也用于 measurements。仅填入按原始属性类型筛出的 Designator，非位号属性不进入此数组。与当前实测姿态一致，随平移进入碰撞和框包络。普通 list 不自动提供，须另存类型、parent 与测量来源；不控制实际文字位置，Apply 后须回读验证。缺失不代表位号为空或已验证。 |
+| `netlabels[]` | 可选 `{net,x,y,rotation,visible,parentWireId,textBbox?}`；原生 net label 的网名、落点、方向和归属导线。缺失时不能判定标签竖排/重复，只能做导线几何检查；不能把缺失当空集合。 |
 | `pins[]` | 完整 `{number,name,net,x,y}`；官方量测提供时保留 `rotation`（世界坐标外向角：0 右、90 上、180 左、270 下），刚体旋转同步更新，不重复应用父器件旋转。NC 的 `net` 为空，与连接核心的 NC 状态一致。旧输入缺角度时仅允许唯一 bbox 侧推断，不得伪造为官方角度；候选不能删除或篡改已提供的角度。 |
 | `flags[].anchor` | 必须可归因为 `{type:"pin",componentId,pinNumber}` 或 `{type:"wire_tree",zoneId?,net,x,y}`。pin 锚定的 `pinX/pinY/direction` 必须等于目标引脚坐标与官方外向方向；wire_tree 接入点必须落在指定网的唯一真实线岛上。旧结果只在几何能唯一归因时迁移，歧义非零失败。 |
 
@@ -705,7 +712,7 @@ V4 完全未接线页可能无法导出网表，此时 `sch list` 的 `pinNetsAv
 范围外既有错误允许保留但必须逐条相同；任何新增/改变、目标错误残留、陈旧快照、部分删除、
 超时或不完整回读均失败。普通 `wire.create/connect_pin` 继续要求整页几何基线为零。
 | `wires[]` | `{net,points:[[x,y],...]}`，正交、非零、落网格。JSON 网名本身不能给实际线树命名，须连接对应引脚/标记。 |
-| `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；kind 为 `power/ground/net_port_in/net_port_out/net_port_bi`，方向 `up/down/left/right`，offset 为正的网格长度。转换生成真实引线。电源/地硬朝向下，反向脚显式豁免用可选 `orientationExempt:true`（附 `reason`），检查门跳过并在豁免清单单独列出。裸 `sch netflag --rotation R` 是原始路径，存储角为 `(360-R) mod 360`；`connect_pin` 已补偿。 |
+| `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；kind 为 `power/ground/net_port_in/net_port_out/net_port_bi`，方向 `up/down/left/right`，offset 为正的网格长度。转换生成真实引线。电源/地硬朝向（电源上、地下），反向脚显式豁免用可选 `orientationExempt:true`（附 `reason`），检查门跳过并在豁免清单单独列出。现场门禁同义：netflag 的 `otherProperty.orientationExempt=true` 持久豁免，或 `sch check --orientation-exempt/--orientation-exempt-file` 按 primitiveId 声明。裸 `sch netflag --rotation R` 是原始路径，存储角为 `(360-R) mod 360`；`connect_pin` 已补偿。 |
 | `terminals[]` | 可选 `{designator,pin,direction,kind?}`，默认 `net_port_bi`；引用本模块已测引脚，选择向外直出方向，不能与已有接线重复。 |
 | `titleMetrics` | 可选 `{title,fontSize,width,height}`，须与标题、字高相符的实测值；没有时采用保守预测，Apply 仍检查实际文字边界。 |
 

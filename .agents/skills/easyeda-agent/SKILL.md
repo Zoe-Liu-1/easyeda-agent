@@ -71,4 +71,6 @@ metadata:
 候选可标 `candidate-unverified` / `candidate-rejected`；未实现能力用 `planned` / `unsupported`。
 新增可复用样例记录来源、开始状态、参数/单位、命令、实际结果、修法和验证范围。
 历史发布验证不覆盖新任务。修改工具同步相应参考；修改 Skill 后运行
-`python3 scripts/pack-skill.py --check`，包结构检查不代表现场通过。
+`python3 scripts/pack-skill.py --check`。本机 Python < 3.9（例如 Windows 只装了 3.8）时，
+改用 `uv run --python 3.12 --no-project python scripts/pack-skill.py --check`。
+包结构检查不代表现场通过。

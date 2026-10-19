@@ -226,6 +226,21 @@ easyeda doc switch "<doc-name-or-uuid>" --project "<project>"
 libraryUuid 相同但器件 uuid 不同，平台对未知 uuid 不回执，表现成超时。处理办法见
 [part-selection.md 的「站点差异：deviceUuid 必须按当前版本重解析」](part-selection.md#站点差异deviceuuid-必须按当前版本重解析)。
 
+## 页面可见性、串行写入与重读预算
+
+- `health` 的目标页报告 `pageVisibility=hidden`（后台、被遮挡或标签未激活）时，不要继续跑
+  重读或批量写入。实测隐藏页上 `schematic.components.list --include-pins` 可能卡住连接器
+  队列，随后 `sch modify` 返回 `Cannot destructure property 'cmdKey' of 'i' as it is undefined`
+  （#256）；这并不代表改动一定没有落地。
+- 先把 EasyEDA 目标窗口恢复为可见前台（只做窗口聚焦/还原，不通过 GUI 编辑），再执行一次
+  轻量 `doc ready <uuid>` 或 `sch list`；确认 `pageVisibility=visible` 后，才继续重读/写入。
+- 同一窗口的写操作必须串行：不要并行发 `sch connect`、`sch modify`、`sch wire`。并行调用会
+  触发 `document.current failed: a write/document transition is being verified`。
+- 不要在一个循环里反复调用 `sch list --include-pins`；先读一次完整快照并缓存，再按
+  primitiveId 操作。重读超时先做 `doc ready` 或轻量 `sch list`，不要盲目重发写队列。
+- `cmdKey`/超时失败后，先用轻量 `sch list` 核对目标字段是否已落地；未落地才重试一次。
+  页面仍隐藏时停止重试，恢复前台后再继续。
+
 ## 上下文与缓存
 
 `windowId` 会随重连变化，不作为项目或文档的持久身份。目标唯一时用项目和文档 UUID 路由。
