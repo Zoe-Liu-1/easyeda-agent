@@ -74,16 +74,17 @@ func TestRenderCheck_Routing(t *testing.T) {
 func TestRenderCheck_LabelRules(t *testing.T) {
 	rep := checkReport{
 		Passed:  false,
-		Summary: checkSummary{LabelEconomy: 1, LabelOrientations: 1, Total: 2},
+		Summary: checkSummary{LabelEconomy: 1, LabelOrientations: 1, DirectConnectOpportunities: 1, Total: 3},
 		Findings: []checkFinding{
 			{Type: "label-economy", Level: "warn", Message: "duplicate same-net label"},
 			{Type: "label-orientation", Level: "warn", Message: "label is vertical"},
+			{Type: "direct-connect-opportunity", Level: "info", Message: "clear short L route"},
 		},
 	}
 	var buf bytes.Buffer
 	renderCheckReport(rep, &buf)
 	out := buf.String()
-	for _, want := range []string{"label-economy(s)", "label-orientation(s)", "one label per line island", "net-label text must be horizontal"} {
+	for _, want := range []string{"label-economy(s)", "label-orientation(s)", "direct-connect-opportunity(s)", "one label per line island", "net-label text must be horizontal", "prefer a real wire"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n--- output ---\n%s", want, out)
 		}

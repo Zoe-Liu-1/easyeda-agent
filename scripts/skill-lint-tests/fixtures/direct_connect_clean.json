@@ -1,0 +1,57 @@
+{
+  "_intent": "Two same-net labels on different islands with a clear short L path should be reported as a direct-connect opportunity.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 100,
+      "y": 100,
+      "pins": [
+        { "num": "1", "name": "P", "x": 100, "y": 100 }
+      ],
+      "bbox": [90, 90, 110, 110]
+    },
+    {
+      "pid": "u2",
+      "type": "part",
+      "designator": "U2",
+      "x": 200,
+      "y": 200,
+      "pins": [
+        { "num": "1", "name": "P", "x": 200, "y": 200 }
+      ],
+      "bbox": [190, 190, 210, 210]
+    }
+  ],
+  "flags": [
+    { "pid": "f1", "type": "netflag", "net": "SIG", "x": 100, "y": 130, "rotation": 0 },
+    { "pid": "f2", "type": "netport", "net": "SIG", "x": 200, "y": 170, "rotation": 270 }
+  ],
+  "wires": [
+    { "pid": "w1", "net": "SIG", "line": [100, 100, 100, 130] },
+    { "pid": "w2", "net": "SIG", "line": [200, 200, 200, 170] }
+  ],
+  "visible_text": [
+    {
+      "pid": "t1",
+      "kind": "attribute",
+      "componentType": "wire",
+      "parentWireId": "w1",
+      "key": "Name",
+      "value": "SIG",
+      "rotation": 0,
+      "bbox": [95, 115, 115, 123]
+    },
+    {
+      "pid": "t2",
+      "kind": "attribute",
+      "componentType": "wire",
+      "parentWireId": "w2",
+      "key": "Name",
+      "value": "SIG",
+      "rotation": 0,
+      "bbox": [195, 175, 215, 183]
+    }
+  ]
+}

@@ -53,3 +53,41 @@ func TestNetLabelEconomyFindingsDifferentNets(t *testing.T) {
 		t.Fatalf("different net names must not be duplicate labels: %+v", got)
 	}
 }
+
+func TestDirectConnectOpportunityFindings(t *testing.T) {
+	box := func(x0, y0, x1, y1 float64) *layoutBBox {
+		return &layoutBBox{MinX: x0, MinY: y0, MaxX: x1, MaxY: y1}
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 0, 0, 100}},
+		{ID: "w2", Points: []float64{200, 0, 200, 100}},
+	}
+	items := []visibleTextItem{
+		{ID: "t1", ComponentType: "wire", ParentID: "w1", Key: "Name", Value: "SIG", BBox: box(0, 40, 20, 48)},
+		{ID: "t2", ComponentType: "wire", ParentID: "w2", Key: "Name", Value: "SIG", BBox: box(200, 40, 220, 48)},
+	}
+	got := directConnectOpportunityFindings(items, nil, wires)
+	if len(got) != 1 || got[0].Type != "direct-connect-opportunity" || got[0].Level != "info" {
+		t.Fatalf("want one direct-connect opportunity, got %+v", got)
+	}
+}
+
+func TestDirectConnectOpportunityBlockedByPin(t *testing.T) {
+	box := func(x0, y0, x1, y1 float64) *layoutBBox {
+		return &layoutBBox{MinX: x0, MinY: y0, MaxX: x1, MaxY: y1}
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 0, 0, 100}},
+		{ID: "w2", Points: []float64{200, 0, 200, 100}},
+	}
+	items := []visibleTextItem{
+		{ID: "t1", ComponentType: "wire", ParentID: "w1", Key: "Name", Value: "SIG", BBox: box(0, 40, 20, 48)},
+		{ID: "t2", ComponentType: "wire", ParentID: "w2", Key: "Name", Value: "SIG", BBox: box(200, 40, 220, 48)},
+	}
+	comps := []layoutComp{
+		{ID: "jumper", ComponentType: "part", Pins: []layoutPin{{Number: "2", X: 100, Y: 44}}},
+	}
+	if got := directConnectOpportunityFindings(items, comps, wires); len(got) != 0 {
+		t.Fatalf("a pin between the labels must block the L route: %+v", got)
+	}
+}

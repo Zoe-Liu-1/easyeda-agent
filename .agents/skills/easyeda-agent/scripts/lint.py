@@ -223,6 +223,21 @@ def seg_intersects_box(a, b, box):
                 u2 = r
     return True
 
+def seg_intersects_seg(a, b, c, d):
+    def orient(p, q, r):
+        return (q[0]-p[0])*(r[1]-p[1]) - (q[1]-p[1])*(r[0]-p[0])
+    def on_seg(p, q, r):
+        return (min(p[0], r[0])-1e-9 <= q[0] <= max(p[0], r[0])+1e-9 and
+                min(p[1], r[1])-1e-9 <= q[1] <= max(p[1], r[1])+1e-9)
+    o1, o2, o3, o4 = orient(a,b,c), orient(a,b,d), orient(c,d,a), orient(c,d,b)
+    if ((o1 > 1e-9 and o2 < -1e-9) or (o1 < -1e-9 and o2 > 1e-9)) and \
+       ((o3 > 1e-9 and o4 < -1e-9) or (o3 < -1e-9 and o4 > 1e-9)):
+        return True
+    return ((abs(o1) <= 1e-9 and on_seg(a,c,b)) or
+            (abs(o2) <= 1e-9 and on_seg(a,d,b)) or
+            (abs(o3) <= 1e-9 and on_seg(c,a,d)) or
+            (abs(o4) <= 1e-9 and on_seg(c,b,d)))
+
 for f in flags:
     ax, ay = f['x'], f['y']
     for w in wires:
@@ -344,6 +359,77 @@ for (net, root), group in labels_by_island.items():
             f"线岛 {root} 上网络 '{net}' 有 {len(group)} 个同名标签 — 只保留一个："
             + ", ".join(f"@{t['bbox'][0]:g},{t['bbox'][1]:g}" for t in group))
 
+# ---- Check 10f: same-net labels on different islands with a clear short L path ----
+def is_power_name(n):
+    return any(p in (n or '').lower() for p in ('vcc','vdd','3v3','5v','+','vbat','vbus'))
+
+def is_gnd_name(n):
+    return any(g in (n or '').lower() for g in ('gnd','vss','agnd'))
+
+def path_clear(points, excluded_roots, excluded_labels, text_items):
+    for (a, b) in zip(points, points[1:]):
+        if a == b:
+            continue
+        for p in parts:
+            if p.get('bbox') and seg_intersects_box(a, b, p['bbox']):
+                return False
+        for t in text_items:
+            if t is excluded_labels[0] or t is excluded_labels[1]:
+                continue
+            if seg_intersects_box(a, b, t['bbox']):
+                return False
+        for f in flags:
+            if seg_intersects_box(a, b, [f['x']-0.5, f['y']-0.5, f['x']+0.5, f['y']+0.5]):
+                return False
+        for pin in pin_pts:
+            if seg_intersects_box(a, b, [pin[0]-0.5, pin[1]-0.5, pin[0]+0.5, pin[1]+0.5]):
+                return False
+        for w in wires:
+            if wire_roots.get(w['pid']) in excluded_roots:
+                continue
+            for (c, d) in segs(w.get('line') or []):
+                if c != d and seg_intersects_seg(a, b, c, d):
+                    return False
+    return True
+
+all_text = visible_text_boxes()
+label_items = []
+for t in all_text:
+    if t['componentType'] != 'wire' or t['key'] != 'Name' or not t['parentWireId']:
+        continue
+    root = wire_roots.get(t['parentWireId'])
+    if root is None or is_power_name(t['net']) or is_gnd_name(t['net']):
+        continue
+    label_items.append((t, root))
+
+seen_pairs = set()
+for i in range(len(label_items)):
+    ti, ri = label_items[i]
+    for j in range(i + 1, len(label_items)):
+        tj, rj = label_items[j]
+        if ri == rj or (ti['net'] or '') != (tj['net'] or ''):
+            continue
+        if (ti['net'] or '') == '':
+            continue
+        pair = (min(ti['label'], tj['label']), max(ti['label'], tj['label']))
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        a = ((ti['bbox'][0]+ti['bbox'][2])/2, (ti['bbox'][1]+ti['bbox'][3])/2)
+        b = ((tj['bbox'][0]+tj['bbox'][2])/2, (tj['bbox'][1]+tj['bbox'][3])/2)
+        if abs(a[0]-b[0]) + abs(a[1]-b[1]) > 250:
+            continue
+        paths = [
+            [a, (b[0], a[1]), b],
+            [a, (a[0], b[1]), b],
+        ]
+        for path in paths:
+            if path_clear(path, {ri, rj}, (ti, tj), all_text):
+                problems['direct_connect_opportunity'].append(
+                    f"网络 '{ti['net']}' 的两个标签 @({a[0]:g},{a[1]:g}) 与 @({b[0]:g},{b[1]:g}) "
+                    f"存在无遮挡短 L 路径（Manhattan={abs(a[0]-b[0])+abs(a[1]-b[1]):g}u）→ 优先直连，删除标签")
+                break
+
 net_members = defaultdict(lambda: {'pins': set(), 'flags': set()})
 net_pts = defaultdict(set)   # root -> set of (x,y) pin/flag points on that net (for span/proximity)
 for pt in list(uf):
@@ -424,7 +510,7 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_vertical','redundant_label','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
@@ -435,6 +521,7 @@ labels = {
   'text_wire_overlap':'🟠 可见文字被导线穿过',
   'label_vertical':'🟡 网络标签竖排/折叠',
   'redundant_label':'🟡 同线岛重复网络标签',
+  'direct_connect_opportunity':'🔵 可直连的标签对',
   'orientation':'🟡 朝向不顺导线','power_ground_orientation':'🔴 电源/地标识朝向错误(应上/下)',
   'bbox_overlap':'🟠 元件 bbox 重叠',
   'dup_designator':'🟠 重复位号','netport_hop':'🟡 net-port 同页近距离',

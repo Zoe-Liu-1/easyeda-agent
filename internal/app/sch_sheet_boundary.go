@@ -160,6 +160,7 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps
 	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, wires, eps)...)
 	out = append(out, netLabelOrientationFindings(parsed.Items)...)
 	out = append(out, netLabelEconomyFindings(parsed.Items, wires)...)
+	out = append(out, directConnectOpportunityFindings(parsed.Items, comps, wires)...)
 	if n := len(parsed.Unmeasured); n > 0 {
 		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "info",
 			Message: fmt.Sprintf("%d 个可见文字/属性宿主未给出 bbox，越界情况未核验", n)})
