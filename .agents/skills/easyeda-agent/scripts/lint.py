@@ -338,7 +338,8 @@ for t in visible_text_boxes():
     if t.get('visible') is False:
         problems['label_visibility'].append(f"名称「{t['net'] or t['label']}」可见性为 false — 必须显示")
     elif not (t['net'] or '').strip():
-        problems['label_visibility'].append("Name 属性已显示但内容为空 — 必须填写网络名")
+        if t['bbox'] and t['bbox'][2] - t['bbox'][0] > 0.5 and t['bbox'][3] - t['bbox'][1] > 0.5:
+            problems['label_visibility'].append("Name 属性已显示但内容为空 — 必须填写网络名")
 
 # ---- Check 10d2: vertical/folded signal and power/ground names ----
 for t in visible_text_boxes():

@@ -37,6 +37,9 @@ func netLabelVisibilityFindings(items []visibleTextItem) []checkFinding {
 			continue
 		}
 		if strings.TrimSpace(it.Value) == "" {
+			if it.BBox == nil || it.BBox.MaxX-it.BBox.MinX <= 0.5 || it.BBox.MaxY-it.BBox.MinY <= 0.5 {
+				continue
+			}
 			out = append(out, checkFinding{
 				Type: "label-visibility", Level: "warn",
 				PrimitiveId: it.ID, BBox: it.BBox,

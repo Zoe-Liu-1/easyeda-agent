@@ -33,7 +33,7 @@ func TestNetLabelVisibilityFindings(t *testing.T) {
 		{ID: "good", Kind: "attribute", ComponentType: "netflag", Key: "Name", Value: "GND", Visible: &visible},
 		{ID: "hidden", Kind: "attribute", ComponentType: "netflag", Key: "Name", Value: "GND", Visible: &hidden},
 		{ID: "missing", Kind: "marker", ComponentType: "netport", ParentID: "port-1", MissingName: true},
-		{ID: "empty", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "", Visible: &visible},
+		{ID: "empty", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "", Visible: &visible, BBox: &layoutBBox{MinX: 0, MinY: 0, MaxX: 20, MaxY: 8}},
 	}
 	got := netLabelVisibilityFindings(items)
 	if len(got) != 3 {
