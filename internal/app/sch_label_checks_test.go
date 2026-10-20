@@ -8,6 +8,8 @@ func TestNetLabelOrientationFindings(t *testing.T) {
 		{ID: "ok", ComponentType: "wire", Key: "Name", Value: "SIG", Rotation: rot(0)},
 		{ID: "bad", ComponentType: "wire", Key: "Name", Value: "SIG", Rotation: rot(90)},
 		{ID: "missing", ComponentType: "wire", Key: "Name", Value: "SIG"},
+		{ID: "gnd", ComponentType: "wire", Key: "Name", Value: "GND", Rotation: rot(90)},
+		{ID: "empty", ComponentType: "wire", Key: "Name", Value: "", Rotation: rot(90)},
 	}
 	got := netLabelOrientationFindings(items)
 	if len(got) != 2 {

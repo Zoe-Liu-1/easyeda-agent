@@ -14,7 +14,8 @@ func netLabelOrientationFindings(items []visibleTextItem) []checkFinding {
 	var out []checkFinding
 	missing := 0
 	for _, it := range items {
-		if it.ComponentType != "wire" || it.Key != "Name" {
+		if it.ComponentType != "wire" || it.Key != "Name" ||
+			strings.TrimSpace(it.Value) == "" || isRailLabelNet(it.Value) {
 			continue
 		}
 		if it.Rotation == nil {
