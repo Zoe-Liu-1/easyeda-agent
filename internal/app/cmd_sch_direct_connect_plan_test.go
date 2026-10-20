@@ -1,6 +1,7 @@
 package app
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -135,6 +136,29 @@ func TestPlanDirectConnectMarkerMove(t *testing.T) {
 	}
 	if len(mv.AttachedTextIDs) != 1 || mv.AttachedTextIDs[0] != "mt1" {
 		t.Fatalf("marker Name text must move with it: %+v", mv.AttachedTextIDs)
+	}
+}
+
+func TestPlanDirectConnectMarkerMoveUsesAsymmetricOffset(t *testing.T) {
+	items, comps, wires := dcMarkerFixture()
+	// A free text band blocks the straight-down move; only a shifted-down
+	// (non-axis, non-equal-diagonal) position clears it.
+	items = append(items, visibleTextItem{
+		ID: "obs", Kind: "text", Content: "note",
+		BBox: &layoutBBox{MinX: 40, MinY: 85, MaxX: 50, MaxY: 90},
+	})
+	items = append(items, visibleTextItem{
+		ID: "obs2", Kind: "text", Content: "note2",
+		BBox: &layoutBBox{MinX: 52, MinY: 85, MaxX: 58, MaxY: 93},
+	})
+	plans := planDirectConnectTextMoves(items, comps, wires, nil,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "marker-move-proposed" || plans[0].MarkerMove == nil {
+		t.Fatalf("want a marker move, got %+v", plans)
+	}
+	mv := plans[0].MarkerMove
+	if mv.DeltaX == 0 || mv.DeltaY == 0 || math.Abs(mv.DeltaX) == math.Abs(mv.DeltaY) {
+		t.Fatalf("the clearing position requires an asymmetric offset, got %+v", mv)
 	}
 }
 
@@ -328,6 +352,39 @@ func TestMarkerStubFirstSegmentFollowsHostDirection(t *testing.T) {
 	}
 	if firstSegmentMatchesDir(verticalFirst, "down") {
 		t.Fatal("an up-first route must not satisfy a down-facing host pin")
+	}
+}
+
+func TestDCDeltaCandidatesCoverAsymmetricGrid(t *testing.T) {
+	deltas := dcDeltaCandidates(40)
+	if len(deltas) != 17*17-1 {
+		t.Fatalf("want the full 5-unit grid, got %d candidates", len(deltas))
+	}
+	want := map[[2]float64]bool{{40, -15}: false, {15, 5}: false, {-20, 40}: false}
+	prev := -1
+	for _, d := range deltas {
+		if d[0] == 0 && d[1] == 0 {
+			t.Fatal("zero delta must not be a candidate")
+		}
+		if math.Abs(d[0]) > 40 || math.Abs(d[1]) > 40 {
+			t.Fatalf("delta outside maxMove: %+v", d)
+		}
+		if math.Mod(d[0], 5) != 0 || math.Mod(d[1], 5) != 0 {
+			t.Fatalf("delta is off the 5-unit grid: %+v", d)
+		}
+		cost := int(math.Abs(d[0]) + math.Abs(d[1]))
+		if cost < prev {
+			t.Fatalf("candidates are not cost-sorted at %+v", d)
+		}
+		prev = cost
+		if _, ok := want[d]; ok {
+			want[d] = true
+		}
+	}
+	for d, seen := range want {
+		if !seen {
+			t.Fatalf("asymmetric delta %+v missing", d)
+		}
 	}
 }
 

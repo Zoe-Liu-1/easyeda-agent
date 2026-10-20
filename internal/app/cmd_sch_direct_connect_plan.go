@@ -712,64 +712,58 @@ func chooseMarkerMove(paths [][][2]float64, blockers [][]dcBlocker, pairNet, aWi
 		}
 
 		found := false
-		for _, d := range []float64{5, 10, 15, 20, 25, 30, 35, 40} {
-			if d > maxMove {
-				break
-			}
-			for _, dir := range [][2]float64{{-1, 0}, {1, 0}, {0, 1}, {0, -1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}} {
-				delta := [2]float64{dir[0] * d, dir[1] * d}
-				newX, newY := c.X+delta[0], c.Y+delta[1]
-				for elbow := 0; elbow < 2; elbow++ {
-					segs := markerStubPath(stub.HostX, stub.HostY, newX, newY, elbow)
-					if segs == nil || markerStubLength(segs) > destaggerStubMaxLen {
-						continue
-					}
-					// The first stub segment must leave the host pin along the
-					// pin's outward direction (the original stub's direction).
-					// A perpendicular first step is what `connect_pin` rejects;
-					// a folded route must go out first, then bend.
-					if !firstSegmentMatchesDir(segs, stub.Dir) {
-						continue
-					}
-					if !markerMoveClear(c, delta, stub, segs, items, comps, wires, sheet, titleBlock) {
-						continue
-					}
-					proposal := &dcMarkerMove{
-						MarkerID: c.ID, ComponentType: c.ComponentType, Net: c.Net,
-						FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
-						ToAnchor:   &checkPoint{X: round2(newX), Y: round2(newY)},
-						DeltaX:     delta[0], DeltaY: delta[1],
-						StubWireID:  stub.WireID,
-						Host:        &checkPoint{X: round2(stub.HostX), Y: round2(stub.HostY)},
-						NewStubPath: segs,
-					}
-					if c.BBox != nil {
-						b := translateLayoutBBox(*c.BBox, delta)
-						proposal.NewMarkerBBox = &b
-					}
-					for _, it := range own {
-						proposal.AttachedTextIDs = append(proposal.AttachedTextIDs, it.ID)
-					}
-					simItems, simComps, simWires := simulateMarkerMove(c, *proposal, items, comps, wires)
-					clearedIdx := -1
-					for pi, path := range paths {
-						if simulatedPathClear(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
-							if !pathClearanceOK(path, map[string]bool{c.ID: true}, ownText, delta, comps, items) {
-								continue
-							}
-							clearedIdx = pi
-							break
-						}
-					}
-					if clearedIdx < 0 {
-						continue
-					}
-					cost := math.Abs(delta[0]) + math.Abs(delta[1])
-					if cost < bestCost {
-						best, bestCost, bestIdx = proposal, cost, clearedIdx
-					}
-					found = true
+		for _, delta := range dcDeltaCandidates(maxMove) {
+			newX, newY := c.X+delta[0], c.Y+delta[1]
+			for elbow := 0; elbow < 2; elbow++ {
+				segs := markerStubPath(stub.HostX, stub.HostY, newX, newY, elbow)
+				if segs == nil || markerStubLength(segs) > destaggerStubMaxLen {
+					continue
 				}
+				// The first stub segment must leave the host pin along the
+				// pin's outward direction (the original stub's direction).
+				// A perpendicular first step is what `connect_pin` rejects;
+				// a folded route must go out first, then bend.
+				if !firstSegmentMatchesDir(segs, stub.Dir) {
+					continue
+				}
+				if !markerMoveClear(c, delta, stub, segs, items, comps, wires, sheet, titleBlock) {
+					continue
+				}
+				proposal := &dcMarkerMove{
+					MarkerID: c.ID, ComponentType: c.ComponentType, Net: c.Net,
+					FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
+					ToAnchor:   &checkPoint{X: round2(newX), Y: round2(newY)},
+					DeltaX:     delta[0], DeltaY: delta[1],
+					StubWireID:  stub.WireID,
+					Host:        &checkPoint{X: round2(stub.HostX), Y: round2(stub.HostY)},
+					NewStubPath: segs,
+				}
+				if c.BBox != nil {
+					b := translateLayoutBBox(*c.BBox, delta)
+					proposal.NewMarkerBBox = &b
+				}
+				for _, it := range own {
+					proposal.AttachedTextIDs = append(proposal.AttachedTextIDs, it.ID)
+				}
+				simItems, simComps, simWires := simulateMarkerMove(c, *proposal, items, comps, wires)
+				clearedIdx := -1
+				for pi, path := range paths {
+					if simulatedPathClear(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
+						if !pathClearanceOK(path, map[string]bool{c.ID: true}, ownText, delta, comps, items) {
+							continue
+						}
+						clearedIdx = pi
+						break
+					}
+				}
+				if clearedIdx < 0 {
+					continue
+				}
+				cost := math.Abs(delta[0]) + math.Abs(delta[1])
+				if cost < bestCost {
+					best, bestCost, bestIdx = proposal, cost, clearedIdx
+				}
+				found = true
 			}
 		}
 		if !found {
@@ -913,52 +907,46 @@ func choosePartMove(paths [][][2]float64, blockers [][]dcBlocker, aWireID, bWire
 		}
 
 		found := false
-		for _, d := range []float64{5, 10, 15, 20, 25, 30, 35, 40} {
-			if d > maxMove {
-				break
+		for _, delta := range dcDeltaCandidates(maxMove) {
+			if !partMoveClear(c, delta, movedComp, movedWire, movedTextIDs, items, comps, wires, sheet, titleBlock) {
+				continue
 			}
-			for _, dir := range [][2]float64{{-1, 0}, {1, 0}, {0, 1}, {0, -1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}} {
-				delta := [2]float64{dir[0] * d, dir[1] * d}
-				if !partMoveClear(c, delta, movedComp, movedWire, movedTextIDs, items, comps, wires, sheet, titleBlock) {
-					continue
-				}
-				mv := &dcPartMove{
-					PartID: c.ID, Designator: label,
-					FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
-					ToAnchor:   &checkPoint{X: round2(c.X + delta[0]), Y: round2(c.Y + delta[1])},
-					DeltaX:     delta[0], DeltaY: delta[1],
-				}
-				for _, wid := range exp.WireIDs {
-					mv.WireIDs = append(mv.WireIDs, wid)
-				}
-				for _, fid := range exp.FlagIDs {
-					mv.FlagIDs = append(mv.FlagIDs, fid)
-				}
-				mv.TextIDs = append(mv.TextIDs, movedTextIDs...)
-				if c.BBox != nil {
-					b := translateLayoutBBox(*c.BBox, delta)
-					mv.NewBBox = &b
-				}
-				simItems, simComps, simWires := simulatePartMove(*mv, items, comps, wires)
-				clearedIdx := -1
-				for pi, path := range paths {
-					if simulatedPathClear(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
-						if !pathClearanceOK(path, movedComp, movedText, delta, comps, items) {
-							continue
-						}
-						clearedIdx = pi
-						break
+			mv := &dcPartMove{
+				PartID: c.ID, Designator: label,
+				FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
+				ToAnchor:   &checkPoint{X: round2(c.X + delta[0]), Y: round2(c.Y + delta[1])},
+				DeltaX:     delta[0], DeltaY: delta[1],
+			}
+			for _, wid := range exp.WireIDs {
+				mv.WireIDs = append(mv.WireIDs, wid)
+			}
+			for _, fid := range exp.FlagIDs {
+				mv.FlagIDs = append(mv.FlagIDs, fid)
+			}
+			mv.TextIDs = append(mv.TextIDs, movedTextIDs...)
+			if c.BBox != nil {
+				b := translateLayoutBBox(*c.BBox, delta)
+				mv.NewBBox = &b
+			}
+			simItems, simComps, simWires := simulatePartMove(*mv, items, comps, wires)
+			clearedIdx := -1
+			for pi, path := range paths {
+				if simulatedPathClear(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
+					if !pathClearanceOK(path, movedComp, movedText, delta, comps, items) {
+						continue
 					}
+					clearedIdx = pi
+					break
 				}
-				if clearedIdx < 0 {
-					continue
-				}
-				cost := math.Abs(delta[0]) + math.Abs(delta[1])
-				if cost < bestCost {
-					best, bestCost, bestIdx = mv, cost, clearedIdx
-				}
-				found = true
 			}
+			if clearedIdx < 0 {
+				continue
+			}
+			cost := math.Abs(delta[0]) + math.Abs(delta[1])
+			if cost < bestCost {
+				best, bestCost, bestIdx = mv, cost, clearedIdx
+			}
+			found = true
 		}
 		if !found {
 			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
@@ -1085,6 +1073,41 @@ func markerStubLength(segs [][2]float64) float64 {
 	return total
 }
 
+// dcDeltaCandidates enumerates the full 5-unit grid inside ±maxMove on each
+// axis. The old eight equal-magnitude directions could never express a small
+// asymmetric nudge such as (+40,-15), which is exactly what a marker or part
+// often needs to slip past a neighbouring body/text band.
+func dcDeltaCandidates(maxMove float64) [][2]float64 {
+	const step = 5.0
+	n := int(math.Floor(maxMove / step))
+	out := make([][2]float64, 0, (2*n+1)*(2*n+1)-1)
+	for i := -n; i <= n; i++ {
+		for j := -n; j <= n; j++ {
+			if i == 0 && j == 0 {
+				continue
+			}
+			out = append(out, [2]float64{float64(i) * step, float64(j) * step})
+		}
+	}
+	sort.Slice(out, func(a, b int) bool {
+		ca := math.Abs(out[a][0]) + math.Abs(out[a][1])
+		cb := math.Abs(out[b][0]) + math.Abs(out[b][1])
+		if ca != cb {
+			return ca < cb
+		}
+		axisA := out[a][0] == 0 || out[a][1] == 0
+		axisB := out[b][0] == 0 || out[b][1] == 0
+		if axisA != axisB {
+			return axisA
+		}
+		if out[a][0] != out[b][0] {
+			return out[a][0] < out[b][0]
+		}
+		return out[a][1] < out[b][1]
+	})
+	return out
+}
+
 func firstSegmentMatchesDir(path [][2]float64, dir string) bool {
 	if len(path) < 2 {
 		return false
@@ -1121,6 +1144,13 @@ func boxInside2(b, area layoutBBox) bool {
 func positiveOverlap(a, b layoutBBox) bool {
 	ix, iy, hit := overlapExtent(a, b)
 	return hit && math.Min(ix, iy) > 1.0
+}
+
+// anyOverlap is for boxes that were already inflated by the desired clearance:
+// any positive intersection means the real gap is smaller than that clearance.
+func anyOverlap(a, b layoutBBox) bool {
+	ix, iy, hit := overlapExtent(a, b)
+	return hit && ix > 0 && iy > 0
 }
 
 func pointInBox2(x, y float64, b layoutBBox, eps float64) bool {
@@ -1179,7 +1209,7 @@ func markerMoveClear(c layoutComp, delta [2]float64, stub *destaggerStub, segs [
 		if o.ID == c.ID || o.BBox == nil || o.ComponentType == "sheet" {
 			continue
 		}
-		if positiveOverlap(newBoxGrown, *o.BBox) {
+		if anyOverlap(newBoxGrown, *o.BBox) {
 			return false
 		}
 	}
@@ -1189,7 +1219,7 @@ func markerMoveClear(c layoutComp, delta [2]float64, stub *destaggerStub, segs [
 		if it.ParentID == c.ID || it.BBox == nil {
 			continue
 		}
-		if positiveOverlap(newBoxGrown, *it.BBox) {
+		if anyOverlap(newBoxGrown, *it.BBox) {
 			return false
 		}
 	}
@@ -1224,7 +1254,7 @@ func markerMoveClear(c layoutComp, delta [2]float64, stub *destaggerStub, segs [
 			if o.ID == c.ID || o.BBox == nil || o.ComponentType == "sheet" {
 				continue
 			}
-			if positiveOverlap(bGrown, *o.BBox) {
+			if anyOverlap(bGrown, *o.BBox) {
 				return false
 			}
 		}
@@ -1232,7 +1262,7 @@ func markerMoveClear(c layoutComp, delta [2]float64, stub *destaggerStub, segs [
 			if other.ID == it.ID || other.ParentID == c.ID || other.BBox == nil {
 				continue
 			}
-			if positiveOverlap(bGrown, *other.BBox) {
+			if anyOverlap(bGrown, *other.BBox) {
 				return false
 			}
 		}
@@ -1273,12 +1303,18 @@ func markerMoveClear(c layoutComp, delta [2]float64, stub *destaggerStub, segs [
 			if o.BBox == nil || o.ComponentType == "sheet" {
 				continue
 			}
-			box := *o.BBox
 			if o.ID == c.ID {
-				box = newBox
+				// The stub is part of this marker: its anchor sits just below
+				// the body. Judge self-contact at zero clearance, never with the
+				// external 2-unit gap that would reject every folded route on a
+				// compact power flag.
+				if schSegmentCrossesBox(trimmed[0], trimmed[1], trimmed[2], trimmed[3], newBox) {
+					return false
+				}
+				continue
 			}
 			if schSegmentCrossesBox(trimmed[0], trimmed[1], trimmed[2], trimmed[3],
-				inflateLayoutBBox(box, clearance)) {
+				inflateLayoutBBox(*o.BBox, clearance)) {
 				return false
 			}
 		}
@@ -1404,7 +1440,7 @@ func partMoveClear(c layoutComp, delta [2]float64, movedComp, movedWire map[stri
 			if movedComp[u.ID] || u.BBox == nil || u.ComponentType == "sheet" {
 				continue
 			}
-			if positiveOverlap(nbG, *u.BBox) {
+			if anyOverlap(nbG, *u.BBox) {
 				return false
 			}
 			for _, pin := range u.Pins {
@@ -1428,7 +1464,7 @@ func partMoveClear(c layoutComp, delta [2]float64, movedComp, movedWire map[stri
 			if movedText[it.ID] || it.BBox == nil {
 				continue
 			}
-			if positiveOverlap(nbG, *it.BBox) {
+			if anyOverlap(nbG, *it.BBox) {
 				return false
 			}
 		}
@@ -1466,7 +1502,7 @@ func partMoveClear(c layoutComp, delta [2]float64, movedComp, movedWire map[stri
 			if movedComp[u.ID] || u.BBox == nil || u.ComponentType == "sheet" {
 				continue
 			}
-			if positiveOverlap(nbG, *u.BBox) {
+			if anyOverlap(nbG, *u.BBox) {
 				return false
 			}
 			for _, pin := range u.Pins {
@@ -1479,7 +1515,7 @@ func partMoveClear(c layoutComp, delta [2]float64, movedComp, movedWire map[stri
 			if other.ID == it.ID || movedText[other.ID] || other.BBox == nil {
 				continue
 			}
-			if positiveOverlap(nbG, *other.BBox) {
+			if anyOverlap(nbG, *other.BBox) {
 				return false
 			}
 		}

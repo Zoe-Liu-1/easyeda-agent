@@ -87,6 +87,10 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
    器件/文字/引脚/导线/图签/图纸边界检查。附件组超过 16 根导线或整体跨度超过 400
    画布单位时视为“非局部调整”，跳过而不是拖着一整条母线做 5 单位的微调。
 
+两层移动候选都枚举 `±--max-move` 内的**完整 5 网格**（含 `(+40,-15)` 这类非对称
+位移），不是只试 8 个等幅方向。实际排布里“先横后竖”与“先竖后横”的避让位置往往
+只差一个非对称偏移；候选栅格过稀会把本来一条 L 就能解决的情况误判成无解。
+
 共享/分支线树、多段折线桩、宿主端不在 pin 上、以及 `netlabel`/`short_symbol` 一律跳过，
 并在 JSON 的 `markerSkips` / `partSkips` 里给出原因。命令只输出候选，不调用 modify、
 wire、connect 或 save；真正落图仍需人工确认后另行执行。
