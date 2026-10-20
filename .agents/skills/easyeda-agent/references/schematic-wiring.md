@@ -72,9 +72,23 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 `sch bridge-check` + `sch read` 逐脚对账。
 
 **直连机会规划先只读。** `sch direct-connect-plan` 会列出同网不同线岛的近距离标签对、
-当前 L 路径的阻挡对象，并尝试用 5 网格的小位移移动阻挡的 part Designator/Value 文字。
-它只输出 `move-proposed` / `unresolved`，不调用 modify、wire、connect 或 save；导线、
-器件本体或 netflag/netport 阻挡不会被第一层文字规划器自动移动。
+当前 L 路径的阻挡对象，并按两层给出 5 网格的小位移候选：
+
+1. `move-proposed`：只移动阻挡的 part Designator/Value 文字；
+2. `marker-move-proposed`：只处理 `netflag`/`netport` + **单段直线短桩**。标识本体与
+   它的 Name 文字刚性平移，rotation 不变（电源/地 body 朝向因此不变），短桩从**不动的
+   宿主 pin** 重新走成一条正交 L。候选必须同时满足：不压器件/标识/引脚/其他文字、
+   不穿图签/越出图纸、新桩线不碰任何其他导线（相触即并网），并且确实清空至少一条
+   直连 L 路径。
+
+共享/分支线树、多段折线桩、宿主端不在 pin 上、以及 `netlabel`/`short_symbol` 一律跳过，
+并在 JSON 的 `markerSkips` 里给出原因。命令只输出候选，不调用 modify、wire、connect
+或 save；真正落图仍需人工确认后另行执行。
+
+**路径端点取线岛上的真实连接点，不取标签文字中心。** 标签文字 bbox 的中心通常落在导线
+旁边甚至空白处；规划器按“该标签所属线岛上离文字最近的点”起算 L 路径，否则会算出起点
+悬空的假机会。候选评判还要求标识本体/文字与其它文字、器件、导线留出至少 2 个画布单位
+的可见间隙（导线与导线相触仍按并网硬拒）。
 
 **批次内互斥 (issue #138):** 同一批(--spec / 多 --pin)里**已规划的短桩会当作
 既存导线注册回 scene**,后续连接对它做同样的异网硬拒——同器件相邻异网引脚

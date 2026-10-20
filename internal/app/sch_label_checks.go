@@ -192,6 +192,53 @@ func wireTreeFinder(wires []schGroupWire) (func(int) int, map[string]int) {
 	return find, wireIndex
 }
 
+// labelAttachmentPoint returns the point on the label's own wire tree closest
+// to its measured text. A visible label's bbox center is where the glyphs are
+// drawn, not where the label attaches to the wire; routing from the center can
+// invent an L path that starts in empty space. Geometry checks and planners
+// must both use this attachment point.
+func labelAttachmentPoint(it visibleTextItem, wires []schGroupWire,
+	wireIndex map[string]int, find func(int) int) (float64, float64, bool) {
+	if it.BBox == nil || it.ParentID == "" {
+		return 0, 0, false
+	}
+	idx, ok := wireIndex[it.ParentID]
+	if !ok {
+		return 0, 0, false
+	}
+	root := find(idx)
+	px := (it.BBox.MinX + it.BBox.MaxX) / 2
+	py := (it.BBox.MinY + it.BBox.MaxY) / 2
+	best := math.Inf(1)
+	var bx, by float64
+	found := false
+	for _, w := range wires {
+		wi, ok := wireIndex[w.ID]
+		if !ok || find(wi) != root {
+			continue
+		}
+		for _, s := range labelWireSegments(w) {
+			x, y, d := closestPointOnSegment(px, py, s[0], s[1], s[2], s[3])
+			if d < best {
+				best, bx, by, found = d, x, y, true
+			}
+		}
+	}
+	return bx, by, found
+}
+
+func closestPointOnSegment(px, py, x0, y0, x1, y1 float64) (float64, float64, float64) {
+	dx, dy := x1-x0, y1-y0
+	l2 := dx*dx + dy*dy
+	t := 0.0
+	if l2 > 0 {
+		t = ((px-x0)*dx + (py-y0)*dy) / l2
+		t = math.Max(0, math.Min(1, t))
+	}
+	x, y := x0+t*dx, y0+t*dy
+	return x, y, math.Hypot(px-x, py-y)
+}
+
 // directConnectOpportunityFindings is deliberately conservative: it only
 // reports a clear two-segment L route between two same-net labels on different
 // wire islands. A multi-bend route, a blocked L, or missing geometry stays
@@ -202,9 +249,9 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 	}
 	find, wireIndex := wireTreeFinder(wires)
 	type label struct {
-		it   visibleTextItem
-		root int
-		x, y float64
+		it     visibleTextItem
+		root   int
+		ax, ay float64 // attachment point on the wire tree (route endpoint)
 	}
 	var labels []label
 	for _, it := range items {
@@ -217,8 +264,11 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 		if !ok {
 			continue
 		}
-		labels = append(labels, label{it, find(idx),
-			(it.BBox.MinX + it.BBox.MaxX) / 2, (it.BBox.MinY + it.BBox.MaxY) / 2})
+		ax, ay, ok := labelAttachmentPoint(it, wires, wireIndex, find)
+		if !ok {
+			continue
+		}
+		labels = append(labels, label{it: it, root: find(idx), ax: ax, ay: ay})
 	}
 
 	var obstacles []*layoutBBox
@@ -237,6 +287,9 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 		}
 		return px >= math.Min(ax, bx)-0.5 && px <= math.Max(ax, bx)+0.5 &&
 			py >= math.Min(ay, by)-0.5 && py <= math.Max(ay, by)+0.5
+	}
+	samePoint := func(px, py, qx, qy float64) bool {
+		return math.Abs(px-qx) <= 0.5 && math.Abs(py-qy) <= 0.5
 	}
 	segmentsIntersect := func(a, b, c, d [2]float64) bool {
 		orient := func(p, q, r [2]float64) float64 {
@@ -283,6 +336,10 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 			}
 			for _, c := range comps {
 				for _, pin := range c.Pins {
+					if samePoint(pin.X, pin.Y, points[0][0], points[0][1]) ||
+						samePoint(pin.X, pin.Y, points[len(points)-1][0], points[len(points)-1][1]) {
+						continue
+					}
 					if pointOnSegment(pin.X, pin.Y, p[0], p[1], q[0], q[1]) {
 						return false
 					}
@@ -310,22 +367,22 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 			if a.root == b.root || a.it.Value != b.it.Value {
 				continue
 			}
-			dist := math.Abs(a.x-b.x) + math.Abs(a.y-b.y)
+			dist := math.Abs(a.ax-b.ax) + math.Abs(a.ay-b.ay)
 			if dist > 250 {
 				continue
 			}
 			candidates := [][][2]float64{
-				{{a.x, a.y}, {b.x, a.y}, {b.x, b.y}},
-				{{a.x, a.y}, {a.x, b.y}, {b.x, b.y}},
+				{{a.ax, a.ay}, {b.ax, a.ay}, {b.ax, b.ay}},
+				{{a.ax, a.ay}, {a.ax, b.ay}, {b.ax, b.ay}},
 			}
 			for _, path := range candidates {
 				if clear(path, a, b) {
 					out = append(out, checkFinding{
 						Type: "direct-connect-opportunity", Level: "info",
 						MarkerNet: a.it.Value, PrimitiveIds: []string{a.it.ID, b.it.ID},
-						At: &checkPoint{X: round2(a.x), Y: round2(a.y)},
+						At: &checkPoint{X: round2(a.ax), Y: round2(a.ay)},
 						Message: fmt.Sprintf("网络 '%s' 的两个标签 @(%.0f,%.0f) 与 @(%.0f,%.0f) 存在无遮挡短 L 路径（Manhattan=%.0f）— 优先直连并删除标签",
-							a.it.Value, a.x, a.y, b.x, b.y, dist),
+							a.it.Value, a.ax, a.ay, b.ax, b.ay, dist),
 					})
 					break
 				}
