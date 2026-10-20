@@ -131,6 +131,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |
 | `label-economy` | 同一线岛重复同名标签。覆盖信号标签和电源/地导线 Name；netflag/netport 的同岛重复由 `redundant-net-marker` 负责。电源/轨名仍不参与“信号直连机会”的数量统计。 |
 | `direct-connect-opportunity` | 存在不交叉的正交短路径却用标签。当前实现只对**短 L 路径**给 INFO（器件/文字/导线/引脚阻挡即不报），多折点路径暂不提示；这是保守机会提示，不是硬门禁。 |
+| `power-cluster-candidate` | 消费电源脚与就近本地被动件（R/C/L/D）分属多个线岛、且每个线岛各有同名电源符号。先物理接入消费脚，再合并成一个符号；当前按 250 单位就近归簇，需用 zones/功能块确认。GND、跨功能区、10 器件以上通道不自动合并。 |
 | `designator-wire-overlap` | 导线进入可见文字 bbox。应扩展到 Value、网络名和自由文字；网络标签只排除自身挂载线，Designator/Value/自由文字的全部导线都参与碰撞。 |
 | `visible-text-overlap` | 可见文字压器件/标识/其他文字，或压在导线上；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
 | `out-of-sheet` | 包含可见属性文字；只包器件 body 不算入框或出图通过。 |

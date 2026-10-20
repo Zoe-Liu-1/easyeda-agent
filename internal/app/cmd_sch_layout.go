@@ -35,6 +35,11 @@ type layoutPin struct {
 	Number string
 	X      float64
 	Y      float64
+	// Net is the authoritative netlist name for this pin when the connector
+	// reported one. It is empty when the netlist was unavailable or the pin is
+	// genuinely unnamed; callers that need that distinction also check
+	// NetlistAvailable on the owning component.
+	Net string
 }
 
 // layoutComp is the minimal per-component shape layout-lint reasons about.
@@ -55,7 +60,7 @@ type layoutComp struct {
 	// Rotation is the stored primitive rotation when the connector reported one
 	// (markers carry it; the reversed-net-flag rule reads it against the
 	// orientation truth table). Nil when absent/non-numeric.
-	Rotation       *float64
+	Rotation *float64
 	// OrientationExempt marks a netflag whose absolute power/ground body
 	// orientation is intentionally left non-canonical because the pin it serves
 	// is a reverse pin (outward direction is 180° from the required direction).
@@ -63,10 +68,10 @@ type layoutComp struct {
 	// of the source-data `orientationExempt: true` exemption). The check gate
 	// skips these flags but still lists them separately — never silently passes.
 	OrientationExempt bool
-	BBox           *layoutBBox
-	Pins           []layoutPin
-	PinsAvailable  bool // true when the connector confirmed the pins read succeeded
-	PinsProofKnown bool // true only for the explicit pinsAvailable connector contract
+	BBox              *layoutBBox
+	Pins              []layoutPin
+	PinsAvailable     bool // true when the connector confirmed the pins read succeeded
+	PinsProofKnown    bool // true only for the explicit pinsAvailable connector contract
 	// NetlistAvailable is the connector's explicit answer to "was the netlist that
 	// every pin's `net` comes from actually fetched and parsed?".
 	//
@@ -212,10 +217,10 @@ type layoutReport struct {
 	// (or did not report netlistAvailable at all). Kept separate from UnprovenPins
 	// on purpose: that one blames a legacy connector contract, this one blames a
 	// failed netlist read, and conflating them sends the reader to the wrong fix.
-	NetsUnproven    []string        `json:"netsUnproven,omitempty"`
-	InvalidGeometry []string        `json:"invalidGeometry,omitempty"`
-	PinEps           float64         `json:"pinEps"`
-	Summary          string          `json:"summary"`
+	NetsUnproven    []string `json:"netsUnproven,omitempty"`
+	InvalidGeometry []string `json:"invalidGeometry,omitempty"`
+	PinEps          float64  `json:"pinEps"`
+	Summary         string   `json:"summary"`
 }
 
 // analyzeLayout is the pure core: given components and thresholds in native
@@ -864,6 +869,7 @@ func parseLayoutComps(result map[string]any) ([]layoutComp, error) {
 					Number: asString(pm["pinNumber"]),
 					X:      px,
 					Y:      py,
+					Net:    asString(pm["net"]),
 				})
 			}
 			if !pinsValid {

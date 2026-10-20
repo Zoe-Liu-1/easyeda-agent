@@ -97,7 +97,7 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 4 个器件的块（例如 10 器件的 LDO 通道）会明确报 `functional-block-too-large`，留给
 整通道重排或重走网络，不做单标签级的整页拖动。
 
-**电源/地局部簇（拟增规则；当前只有只读审计原型）。** 一个局部簇由**消费电源脚**
+**电源/地局部簇（`sch check` 已实现非 GND 电源簇候选；GND 仍为建议）。** 一个局部簇由**消费电源脚**
 （IC 的 VDD/VCC/VIN/VBUS/BIAS/IN/OUT 等）和就近的本地去耦/上拉被动件组成。同一局部
 簇内应尽量：
 
@@ -108,8 +108,9 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 
 判定顺序必须是：先按功能区和引脚网归簇，再看线树 root，最后才用距离。同一 root 上多个
 同名符号是重复候选；消费脚和本地被动件分属不同 root 且相距很近，是“应物理互联”的
-候选；跨功能区或 10 器件以上通道不做自动合并。`sch check` / `direct-connect-plan`
-目前尚未实现这条规则，只有离线只读原型能列出候选，不能把它当成已落地的自动修复。
+候选；跨功能区或 10 器件以上通道不做自动合并。`sch check` 已实现
+`power-cluster-candidate`（当前按 250 单位就近归簇，非 GND；GND 只作人工建议），
+`direct-connect-plan` 尚未提供自动“移符号+补短线”的落图计划，命中项仍需人工确认。
 
 两层移动候选都枚举 `±--max-move` 内的**完整 5 网格**（含 `(+40,-15)` 这类非对称
 位移），不是只试 8 个等幅方向。实际排布里“先横后竖”与“先竖后横”的避让位置往往

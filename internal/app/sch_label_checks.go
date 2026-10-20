@@ -407,5 +407,5 @@ func isRailLabelNet(net string) bool {
 		return true
 	}
 	return strings.HasPrefix(n, "vout") || strings.HasPrefix(n, "vload") ||
-		strings.HasPrefix(n, "dc")
+		strings.HasPrefix(n, "vbias") || strings.HasPrefix(n, "dc")
 }

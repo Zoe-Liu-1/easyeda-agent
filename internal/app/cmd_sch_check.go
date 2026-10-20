@@ -121,6 +121,9 @@ type checkSummary struct {
 	LabelEconomy               int `json:"labelEconomy"`
 	LabelOrientations          int `json:"labelOrientations"`
 	DirectConnectOpportunities int `json:"directConnectOpportunities"`
+	// Local power-cluster rule: consumer pin + nearby passive(s) on separate
+	// wire roots, each carrying its own same-name power symbol.
+	PowerClusterCandidates int `json:"powerClusterCandidates"`
 	// Layout-organization rule (铁律 #15): a multi-module page with zero functional
 	// zone frames. Mechanical backstop so "分区分区" is enforced by
 	// the check, not by remembering the rule (which is unreliable — it was skipped
@@ -309,8 +312,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d power-cluster(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.PowerClusterCandidates, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -394,6 +397,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.DirectConnectOpportunities > 0 {
 		fmt.Fprintln(w, "→ direct-connect-opportunity: labels on different islands have a clear short L route; prefer a real wire and remove the labels")
+	}
+	if s.PowerClusterCandidates > 0 {
+		fmt.Fprintln(w, "→ power-cluster-candidate: 消费电源脚与本地被动件分属多个线岛、各有同名电源符号 — 先物理接入消费脚，再合并为一个符号；不要直接删符号")
 	}
 	if s.NetMarkerMismatches > 0 || s.MultiNetWires > 0 {
 		fmt.Fprintln(w, "→ net names: fix mismatched flags/ports/labels before treating schematic DRC as clean")
