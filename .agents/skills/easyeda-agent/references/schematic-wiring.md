@@ -110,7 +110,10 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 同名符号是重复候选；消费脚和本地被动件分属不同 root 且相距很近，是“应物理互联”的
 候选；跨功能区或 10 器件以上通道不做自动合并。`sch check` 已实现
 `power-cluster-candidate`（当前按 250 单位就近归簇，非 GND；GND 只作人工建议），
-`direct-connect-plan` 尚未提供自动“移符号+补短线”的落图计划，命中项仍需人工确认。
+`sch power-cluster-plan` 提供只读接线计划：`ready` 输出每个被动件到消费脚的短线、
+保留/删除符号和“先接后验证再删”的顺序；`partial` 只接已经 clear 的被动件并删除其
+对应符号，被挡的 passive 保留符号；`blocked` 不生成删除步骤，只列阻挡对象。路径仍须
+由 Apply 阶段回读验证，planner 本身不落图。
 有意保留的独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'`
 登记为 INFO 例外；同一消费脚的本地被动件仍应先物理接入，不能借豁免逃避局部直连。
 

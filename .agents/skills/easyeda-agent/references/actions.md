@@ -19,6 +19,7 @@
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
 | 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读。按风险从小到大给候选：①移 part Designator/Value 文字；②netflag/netport + 单段短桩带桩线做正交 L 迁移；③单器件连同相连线树/标识/标签刚体平移；④2–4 器件共享树功能块整体平移。共享/分支线树、疑似半移动、引脚直连、netlabel、多段桩、超大功能块一律跳过并给出原因，不落图 |
+| 电源局部簇规划 | `sch power-cluster-plan --doc <page> [--json\|--out] [--exempt '<NET>\|<DESIGNATOR>']`；只读。输出消费脚、每个被动件的短线路径、保留/删除符号和“先接后删验证”顺序；ready 全可接，partial 只接 clear 的被动件并删其符号，blocked 不给删除建议并列出阻挡对象 |
 | 执行计划 | `sch apply <playbook.json>` |
 
 生成器的输入、支持范围与位号/身份规则集中在 [schematic-data.md](schematic-data.md)。

@@ -313,6 +313,10 @@ ERROR，保留器件/引脚/线段证据。允许先向外再折线；不二次�
 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 显式标为 INFO 例外，
 不能静默忽略；`summary.powerClusterCandidates` 与 `summary.powerClusterExempted`
 分别记录候选和例外。
+`sch power-cluster-plan` 对候选生成只读连接计划：`ready` 给出每个被动件到消费脚的
+正交短线、保留/删除标志和“先接、回读、再删”的顺序；`partial` 只对已 clear 的被动件
+生成接线和删除步骤，被挡 passive 保留符号；`blocked` 不生成删除步骤并列出阻挡对象。
+planner 不调用 modify/wire/connect/prim-delete/save，应用前仍需确认 zones/消费归属。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 
