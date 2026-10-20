@@ -95,6 +95,8 @@ type visibleTextItem struct {
 	Key           string      `json:"key"`
 	Value         string      `json:"value"`
 	Rotation      *float64    `json:"rotation"`
+	Visible       *bool       `json:"visible"`
+	MissingName   bool        `json:"missingName"`
 	BBox          *layoutBBox `json:"bbox"`
 }
 
@@ -158,6 +160,7 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps
 	}
 	out := visibleTextBoundaryFindings(parsed.Items, sheet, eps)
 	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, wires, eps)...)
+	out = append(out, netLabelVisibilityFindings(parsed.Items)...)
 	out = append(out, netLabelOrientationFindings(parsed.Items)...)
 	out = append(out, netLabelEconomyFindings(parsed.Items, wires)...)
 	out = append(out, directConnectOpportunityFindings(parsed.Items, comps, wires)...)

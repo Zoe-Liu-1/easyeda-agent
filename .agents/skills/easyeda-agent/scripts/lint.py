@@ -258,12 +258,21 @@ def visible_text_boxes():
     out = []
     raw = data.get('visible_text') or data.get('text_bboxes') or data.get('textBboxes') or []
     for i, item in enumerate(raw):
+        visible = item.get('visible', True) if isinstance(item, dict) else True
+        missing = item.get('missingName', False) if isinstance(item, dict) else False
         box = None
         if isinstance(item, dict):
             box = item.get('bbox')
             if box is None:
                 box = [item.get('minX'), item.get('minY'), item.get('maxX'), item.get('maxY')]
         if not box or len(box) != 4 or any(v is None for v in box):
+            if visible is False or missing:
+                out.append({'label': str(item.get('value') or item.get('net') or item.get('pid') or f"text{i+1}"),
+                            'bbox': None,
+                            'parentWireId': item.get('parentWireId') or item.get('parent_wire') or item.get('parentId'),
+                            'componentType': item.get('componentType'), 'key': item.get('key'),
+                            'rotation': item.get('rotation'), 'visible': visible,
+                            'missingName': missing, 'net': item.get('value')})
             continue
         try:
             box = [float(v) for v in box]
@@ -281,6 +290,8 @@ def visible_text_boxes():
                     'componentType': item.get('componentType'),
                     'key': item.get('key'),
                     'rotation': item.get('rotation'),
+                    'visible': visible,
+                    'missingName': missing,
                     'net': item.get('value') if item.get('key') == 'Name' else None})
     for p in parts:
         for i, item in enumerate(p.get('textBboxes') or p.get('text_bboxes') or []):
@@ -294,10 +305,13 @@ def visible_text_boxes():
             out.append({'label': f"{p.get('designator', 'part')}.text{i+1}",
                         'bbox': box, 'parentWireId': None,
                         'componentType': 'part', 'key': None,
-                        'rotation': None, 'net': None})
+                        'rotation': None, 'visible': True,
+                        'missingName': False, 'net': None})
     return out
 
 for t in visible_text_boxes():
+    if not t['bbox'] or t.get('visible') is False:
+        continue
     for w in wires:
         if t['parentWireId'] == w.get('pid'):
             continue
@@ -314,14 +328,28 @@ for t in visible_text_boxes():
         if hit:
             break
 
-# ---- Check 10d: vertical/folded net labels ----
+# ---- Check 10d: name visibility (signal labels and power/ground symbols) ----
 for t in visible_text_boxes():
-    if t['componentType'] != 'wire' or t['key'] != 'Name':
+    if t.get('missingName'):
+        problems['label_visibility'].append(f"符号 {t['label']} 没有 Name 属性 — 名称不可见")
+        continue
+    if t.get('key') != 'Name':
+        continue
+    if t.get('visible') is False:
+        problems['label_visibility'].append(f"名称「{t['net'] or t['label']}」可见性为 false — 必须显示")
+    elif not (t['net'] or '').strip():
+        problems['label_visibility'].append("Name 属性已显示但内容为空 — 必须填写网络名")
+
+# ---- Check 10d2: vertical/folded signal and power/ground names ----
+for t in visible_text_boxes():
+    if t['componentType'] not in ('wire', 'netflag', 'netport', 'netlabel') or t['key'] != 'Name':
+        continue
+    if not t['bbox'] or t.get('visible') is False or not (t['net'] or '').strip():
         continue
     rot = t.get('rotation')
     if isinstance(rot, (int, float)) and int(round(rot)) % 180 == 90:
         problems['label_vertical'].append(
-            f"网络标签「{t['net'] or t['label']}」 @bbox({t['bbox'][0]:g},{t['bbox'][1]:g}) "
+            f"名称「{t['net'] or t['label']}」 @bbox({t['bbox'][0]:g},{t['bbox'][1]:g}) "
             f"rotation={rot:g} 竖排/折叠（应水平显示）")
 
 # ---- net trace (union-find) for power/ground audit ----
@@ -349,6 +377,8 @@ wire_roots = {w['pid']: wire_root(w) for w in wires}
 labels_by_island = defaultdict(list)
 for t in visible_text_boxes():
     if t['componentType'] != 'wire' or t['key'] != 'Name' or not t['parentWireId']:
+        continue
+    if not t['bbox'] or t.get('visible') is False:
         continue
     root = wire_roots.get(t['parentWireId'])
     if root is not None:
@@ -510,7 +540,7 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_visibility','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
@@ -519,6 +549,7 @@ labels = {
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
   'marker_wire_overlap':'🟠 标识压在导线上(锚点近似)',
   'text_wire_overlap':'🟠 可见文字被导线穿过',
+  'label_visibility':'🟠 名称隐藏/为空',
   'label_vertical':'🟡 网络标签竖排/折叠',
   'redundant_label':'🟡 同线岛重复网络标签',
   'direct_connect_opportunity':'🔵 可直连的标签对',

@@ -1337,6 +1337,18 @@ test('schematic.visible_text.bboxes exposes rotation, parentId and parentType fo
 		getState_Designator: () => 'R1',
 	};
 	const wire = { getState_PrimitiveId: () => 'wire-1' };
+	const hiddenFlag = {
+		getState_PrimitiveId: () => 'flag-1',
+		getState_ComponentType: () => 'netflag',
+		getState_Net: () => 'GND',
+		getState_Designator: () => null,
+	};
+	const noNamePort = {
+		getState_PrimitiveId: () => 'port-1',
+		getState_ComponentType: () => 'netport',
+		getState_Net: () => 'SIG2',
+		getState_Designator: () => null,
+	};
 	const attr = (id: string, key: string, value: string, rotation: number) => ({
 		getState_PrimitiveId: () => id,
 		getState_ValueVisible: () => true,
@@ -1348,14 +1360,16 @@ test('schematic.visible_text.bboxes exposes rotation, parentId and parentType fo
 	(globalThis as any).eda = {
 		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page-1' }) },
 		sch_PrimitiveText: { getAll: async () => [] },
-		sch_PrimitiveComponent: { getAll: async () => [part] },
+		sch_PrimitiveComponent: { getAll: async () => [part, hiddenFlag, noNamePort] },
 		sch_PrimitiveWire: { getAll: async () => [wire] },
 		sch_PrimitiveAttribute: {
 			getAll: async (parentId: string) => parentId === 'part-1'
 				? [attr('attr-part-value', 'Value', '10k', 0)]
 				: parentId === 'wire-1'
 					? [attr('attr-wire-name', 'Name', 'SIG', 0)]
-					: [],
+					: parentId === 'flag-1'
+						? [{ ...attr('attr-flag-name', 'Name', 'GND', 90), getState_ValueVisible: () => false, getState_KeyVisible: () => false }]
+						: [],
 		},
 		sch_Primitive: { getPrimitivesBBox: async ([id]: string[]) => boxes[id] ?? null },
 	};
@@ -1363,8 +1377,12 @@ test('schematic.visible_text.bboxes exposes rotation, parentId and parentType fo
 		const res: any = await runAction('schematic.visible_text.bboxes', {});
 		const value = res.result.items.find((x: any) => x.id === 'attr-part-value');
 		const label = res.result.items.find((x: any) => x.id === 'attr-wire-name');
+		const hidden = res.result.items.find((x: any) => x.id === 'attr-flag-name');
+		const missing = res.result.items.find((x: any) => x.parentId === 'port-1');
 		assert.deepEqual([value.parentId, value.parentType, value.rotation], ['part-1', 'part', 0]);
 		assert.deepEqual([label.parentId, label.parentType, label.rotation], ['wire-1', 'wire', 0]);
+		assert.deepEqual([hidden.visible, hidden.bbox, hidden.rotation], [false, undefined, 90]);
+		assert.deepEqual([missing.kind, missing.missingName], ['marker', true]);
 	}
 	finally {
 		delete (globalThis as any).eda;

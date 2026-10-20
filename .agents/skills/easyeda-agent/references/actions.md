@@ -126,11 +126,12 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 |---|---|
 | `diagonal-wire` / `non-orthogonal-wire` | 斜线或非正交段。写入前几何守卫应拒绝；`sch check` 汇总层也应作为独立 finding 暴露，不能只在写回执里出现。 |
 | `wire-crossing` | `ERROR` 表示交叉点有引脚/标记或网络证据不完整；`INFO` 表示无接点交叉，电气安全但仍是可读性问题，不能直接当 Pass。只有记录坐标和原因的 deliberate exception 才能 `Waived`。 |
-| `label-economy` | 同一线岛重复标签，或本可直连却用标签。电源、地、器件名称不计入。判定必须带障碍感知，不能只看两端跨度。 |
-| `label-orientation` | 可见网络标签竖排/折叠。只对 net label 生效；netflag/netport 仍按电源/端口朝向规则检查。 |
+| `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏名称必须补显示；没有 Name 属性直接报错。 |
+| `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |
+| `label-economy` | 同一线岛重复同名标签。覆盖信号标签和电源/地导线 Name；netflag/netport 的同岛重复由 `redundant-net-marker` 负责。电源/轨名仍不参与“信号直连机会”的数量统计。 |
 | `direct-connect-opportunity` | 存在不交叉的正交短路径却用标签。当前实现只对**短 L 路径**给 INFO（器件/文字/导线/引脚阻挡即不报），多折点路径暂不提示；这是保守机会提示，不是硬门禁。 |
 | `designator-wire-overlap` | 导线进入可见文字 bbox。应扩展到 Value、网络名和自由文字；网络标签只排除自身挂载线，Designator/Value/自由文字的全部导线都参与碰撞。 |
-| `visible-text-overlap` | 可见文字压器件/标识/其他文字，或压在导线上；net label 只排除自身挂载线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
+| `visible-text-overlap` | 可见文字压器件/标识/其他文字，或压在导线上；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
 | `out-of-sheet` | 包含可见属性文字；只包器件 body 不算入框或出图通过。 |
 
 这些 finding 都不能用“电气已经连通”代替；`bridge-check` 只证明线树无桥接/孤儿，

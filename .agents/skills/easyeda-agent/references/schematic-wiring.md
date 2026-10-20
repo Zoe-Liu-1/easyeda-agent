@@ -58,6 +58,11 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 网名；否则 `--net` 会把网名画在导线上，与 netflag 名称重复并增加压字。信号网的
 `net_label` 仍按上面的 `sch connect --kind net_label` 创建。
 
+**电源/地/端口符号的 Name 文字按命名标签检查。** 名称必须可见、水平、不压导线/引脚/
+器件/其他文字，同一线岛同名只保留一个。netflag/netport 的 Name 不享受“自身桩线豁免”，
+即使压在自己的短桩上也报错；符号 body 的上/下朝向仍由 `power-ground-orientation`
+独立检查。
+
 **三脚选择器例外。** 三脚跳线/选择器的中间脚夹在两个相邻脚之间，直连通常必须跨过输出
 母线或相邻脚；允许中间脚保留 1 个同名标签，外侧两脚仍直连。不要把这个例外扩大为
 “所有密集脚都用标签”。

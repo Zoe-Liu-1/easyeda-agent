@@ -7654,20 +7654,32 @@ const schematicVisibleTextBBoxes: Handler = async () => {
 			const id = t.getState_PrimitiveId();
 			const bbox = await measure(id);
 			(bbox ? items : unmeasured).push({ id, kind: 'text', content: t.getState_Content(),
-				parentType: 'text', rotation: t.getState_Rotation(), ...(bbox ? { bbox } : {}) });
+				parentType: 'text', rotation: t.getState_Rotation(), visible: true, ...(bbox ? { bbox } : {}) });
 		}
 		const comps = await eda.sch_PrimitiveComponent.getAll(undefined, false);
 		for (const c of Array.isArray(comps) ? comps : []) {
 			const parentId = c.getState_PrimitiveId();
+			const componentType = String(c.getState_ComponentType());
+			const marker = ['netflag', 'netport', 'netlabel'].includes(componentType);
+			let sawName = false;
 			const attrs = await eda.sch_PrimitiveAttribute.getAll(parentId);
 			for (const a of Array.isArray(attrs) ? attrs : []) {
-				if (a.getState_ValueVisible() !== true && a.getState_KeyVisible() !== true) continue;
+				const key = a.getState_Key();
+				const visible = a.getState_ValueVisible() === true || a.getState_KeyVisible() === true;
+				if (key === 'Name') sawName = true;
+				if (!visible && !(marker && key === 'Name')) continue;
 				const id = a.getState_PrimitiveId();
-				const bbox = await measure(id);
-				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId,
-					componentType: String(c.getState_ComponentType()), parentType: String(c.getState_ComponentType()),
-					designator: c.getState_Designator?.() ?? null, key: a.getState_Key(), value: a.getState_Value(),
-					rotation: Number(a.getState_Rotation?.() ?? 0), ...(bbox ? { bbox } : {}) });
+				const bbox = visible ? await measure(id) : null;
+				const row = { id, kind: 'attribute', parentId,
+					componentType, parentType: componentType,
+					designator: c.getState_Designator?.() ?? null, key, value: a.getState_Value(),
+					rotation: Number(a.getState_Rotation?.() ?? 0), visible, ...(bbox ? { bbox } : {}) };
+				if (visible) (bbox ? items : unmeasured).push(row);
+				else items.push(row);
+			}
+			if (marker && !sawName) {
+				items.push({ id: parentId, kind: 'marker', parentId, componentType, parentType: componentType,
+					net: c.getState_Net?.() ?? null, visible: false, missingName: true });
 			}
 		}
 		// net label = 导线上的 Name 属性（线上网名），不是元件；sch_PrimitiveComponent
@@ -7682,7 +7694,7 @@ const schematicVisibleTextBBoxes: Handler = async () => {
 				const bbox = await measure(id);
 				(bbox ? items : unmeasured).push({ id, kind: 'attribute', parentId, componentType: 'wire', parentType: 'wire',
 					designator: null, key: a.getState_Key(), value: a.getState_Value(),
-					rotation: Number(a.getState_Rotation?.() ?? 0), ...(bbox ? { bbox } : {}) });
+					rotation: Number(a.getState_Rotation?.() ?? 0), visible: true, ...(bbox ? { bbox } : {}) });
 			}
 		}
 		const after = await eda.dmt_SelectControl.getCurrentDocumentInfo();

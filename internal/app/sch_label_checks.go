@@ -7,6 +7,46 @@ import (
 	"strings"
 )
 
+// netLabelVisibilityFindings audits the Name text of every named marker and
+// wire label. Hidden names and markers with no Name attribute are failures:
+// the schematic cannot communicate the net by name in the printed drawing.
+func netLabelVisibilityFindings(items []visibleTextItem) []checkFinding {
+	var out []checkFinding
+	for _, it := range items {
+		if it.Kind == "marker" && it.MissingName {
+			net := strings.TrimSpace(it.Value)
+			if net == "" {
+				net = it.ParentID
+			}
+			out = append(out, checkFinding{
+				Type: "label-visibility", Level: "warn",
+				PrimitiveId: it.ID, MarkerNet: net,
+				Message: fmt.Sprintf("电源/地/端口符号 %s 没有 Name 属性 — 名称不可见，必须补名称", net),
+			})
+			continue
+		}
+		if it.Kind != "attribute" || it.Key != "Name" {
+			continue
+		}
+		if it.Visible != nil && !*it.Visible {
+			out = append(out, checkFinding{
+				Type: "label-visibility", Level: "warn",
+				PrimitiveId: it.ID, MarkerNet: it.Value, BBox: it.BBox,
+				Message: fmt.Sprintf("名称「%s」的可见性为 false — 电源/地/信号名称必须显示", it.Value),
+			})
+			continue
+		}
+		if strings.TrimSpace(it.Value) == "" {
+			out = append(out, checkFinding{
+				Type: "label-visibility", Level: "warn",
+				PrimitiveId: it.ID, BBox: it.BBox,
+				Message: "Name 属性已显示但内容为空 — 必须填写网络名",
+			})
+		}
+	}
+	return out
+}
+
 // netLabelOrientationFindings reports visible wire Name labels that are folded
 // vertically. A missing rotation is not assumed horizontal: it is surfaced once
 // as unverified so an older connector cannot silently pass the rule.
@@ -14,8 +54,14 @@ func netLabelOrientationFindings(items []visibleTextItem) []checkFinding {
 	var out []checkFinding
 	missing := 0
 	for _, it := range items {
-		if it.ComponentType != "wire" || it.Key != "Name" ||
-			strings.TrimSpace(it.Value) == "" || isRailLabelNet(it.Value) {
+		if it.Kind != "attribute" || it.Key != "Name" ||
+			strings.TrimSpace(it.Value) == "" ||
+			(it.Visible != nil && !*it.Visible) {
+			continue
+		}
+		switch it.ComponentType {
+		case "wire", "netflag", "netport", "netlabel":
+		default:
 			continue
 		}
 		if it.Rotation == nil {
@@ -61,9 +107,6 @@ func netLabelEconomyFindings(items []visibleTextItem, wires []schGroupWire) []ch
 	groups := map[groupKey][]visibleTextItem{}
 	for _, it := range items {
 		if it.ComponentType != "wire" || it.Key != "Name" || it.ParentID == "" {
-			continue
-		}
-		if isRailLabelNet(it.Value) {
 			continue
 		}
 		idx, ok := wireIndex[it.ParentID]

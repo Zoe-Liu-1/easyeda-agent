@@ -117,6 +117,7 @@ type checkSummary struct {
 	// a different owner's part body / marker / text.
 	VisibleTextOverlaps int `json:"visibleTextOverlaps"`
 	// Visible wire-name label economy/orientation (Go-side, net-label data).
+	LabelVisibility            int `json:"labelVisibility"`
 	LabelEconomy               int `json:"labelEconomy"`
 	LabelOrientations          int `json:"labelOrientations"`
 	DirectConnectOpportunities int `json:"directConnectOpportunities"`
@@ -308,8 +309,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -384,6 +385,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.LabelEconomy > 0 {
 		fmt.Fprintln(w, "→ label-economy: one label per line island; delete duplicate same-net labels (suggestDeleteIds)")
+	}
+	if s.LabelVisibility > 0 {
+		fmt.Fprintln(w, "→ label-visibility: every netflag/netport/netlabel and wire label must have a visible, non-empty Name")
 	}
 	if s.LabelOrientations > 0 {
 		fmt.Fprintln(w, "→ label-orientation: net-label text must be horizontal; rotate the label or fix its parent wire")

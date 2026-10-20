@@ -87,6 +87,7 @@ CLI 参数以 `easyeda sch <command> --help` 为准；电路选型依据具体�
 所有可见文字（Designator、可见 Name/Value、网络标签文字、自由文字）与导线同属闭合碰撞
 对象：导线进入文字 bbox、沿边界重合或只触角点都报错。网络标签只排除它**自己挂载**的那根线；
 Designator、Value、自由文字没有挂载线，全部导线参与碰撞。
+电源/地/端口符号的 Name 文字没有“own wire”豁免：即使压在自己的桩线上也必须报错。
 `sch check` 的 `designator-wire-overlap` 是其中一种已落地的子集，不能据此认为其他可见文字
 已被覆盖。文字 bbox 缺失不能当空集合，也不能用估计值冒充现场实测。
 

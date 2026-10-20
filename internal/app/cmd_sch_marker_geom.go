@@ -666,6 +666,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.VisibleTextOverlaps++
 		case "label-economy":
 			rep.Summary.LabelEconomy++
+		case "label-visibility":
+			rep.Summary.LabelVisibility++
 		case "label-orientation":
 			rep.Summary.LabelOrientations++
 		case "direct-connect-opportunity":

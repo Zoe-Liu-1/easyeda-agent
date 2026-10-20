@@ -5,21 +5,51 @@ import "testing"
 func TestNetLabelOrientationFindings(t *testing.T) {
 	rot := func(v float64) *float64 { return &v }
 	items := []visibleTextItem{
-		{ID: "ok", ComponentType: "wire", Key: "Name", Value: "SIG", Rotation: rot(0)},
-		{ID: "bad", ComponentType: "wire", Key: "Name", Value: "SIG", Rotation: rot(90)},
-		{ID: "missing", ComponentType: "wire", Key: "Name", Value: "SIG"},
-		{ID: "gnd", ComponentType: "wire", Key: "Name", Value: "GND", Rotation: rot(90)},
-		{ID: "empty", ComponentType: "wire", Key: "Name", Value: "", Rotation: rot(90)},
+		{ID: "ok", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "SIG", Rotation: rot(0)},
+		{ID: "bad", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "SIG", Rotation: rot(90)},
+		{ID: "missing", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "SIG"},
+		{ID: "gnd", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "GND", Rotation: rot(90)},
+		{ID: "empty", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "", Rotation: rot(90)},
 	}
 	got := netLabelOrientationFindings(items)
-	if len(got) != 2 {
-		t.Fatalf("want label-orientation + unverified, got %d: %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("want two label-orientation + unverified, got %d: %+v", len(got), got)
 	}
 	if got[0].Type != "label-orientation" || got[0].PrimitiveId != "bad" {
 		t.Fatalf("wrong orientation finding: %+v", got[0])
 	}
-	if got[1].Type != "label-orientation-unverified" || got[1].Level != "info" {
-		t.Fatalf("wrong unverified finding: %+v", got[1])
+	if got[1].Type != "label-orientation" || got[1].PrimitiveId != "gnd" {
+		t.Fatalf("power/ground name must be checked too: %+v", got[1])
+	}
+	if got[2].Type != "label-orientation-unverified" || got[2].Level != "info" {
+		t.Fatalf("wrong unverified finding: %+v", got[2])
+	}
+}
+
+func TestNetLabelVisibilityFindings(t *testing.T) {
+	visible := true
+	hidden := false
+	items := []visibleTextItem{
+		{ID: "good", Kind: "attribute", ComponentType: "netflag", Key: "Name", Value: "GND", Visible: &visible},
+		{ID: "hidden", Kind: "attribute", ComponentType: "netflag", Key: "Name", Value: "GND", Visible: &hidden},
+		{ID: "missing", Kind: "marker", ComponentType: "netport", ParentID: "port-1", MissingName: true},
+		{ID: "empty", Kind: "attribute", ComponentType: "wire", Key: "Name", Value: "", Visible: &visible},
+	}
+	got := netLabelVisibilityFindings(items)
+	if len(got) != 3 {
+		t.Fatalf("want hidden/missing/empty findings, got %d: %+v", len(got), got)
+	}
+	ids := map[string]bool{}
+	for _, f := range got {
+		if f.Type != "label-visibility" || f.Level != "warn" {
+			t.Fatalf("bad visibility finding: %+v", f)
+		}
+		ids[f.PrimitiveId] = true
+	}
+	for _, want := range []string{"hidden", "missing", "empty"} {
+		if !ids[want] {
+			t.Fatalf("missing finding for %s: %+v", want, got)
+		}
 	}
 }
 
