@@ -473,8 +473,11 @@ func TestPlanDirectConnectPartMoveRejectsSharedTree(t *testing.T) {
 	})
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
 		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
-	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].PartMove != nil {
-		t.Fatalf("a shared wire tree must stay unresolved, got %+v", plans)
+	if len(plans) != 1 || plans[0].PartMove != nil {
+		t.Fatalf("a shared wire tree must refuse the single-part move, got %+v", plans)
+	}
+	if plans[0].Status != "unresolved" && plans[0].Status != "group-move-proposed" {
+		t.Fatalf("a shared tree must fall through to a group move or unresolved, got %+v", plans)
 	}
 	if len(plans[0].PartSkips) == 0 || !strings.Contains(plans[0].PartSkips[0].Reason, "shared-wire-tree") {
 		t.Fatalf("skip reason must name the shared tree: %+v", plans[0].PartSkips)
@@ -490,8 +493,11 @@ func TestPlanDirectConnectPartMoveRejectsPinContact(t *testing.T) {
 	})
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
 		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
-	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].PartMove != nil {
-		t.Fatalf("a pin-to-pin contact must stay unresolved, got %+v", plans)
+	if len(plans) != 1 || plans[0].PartMove != nil {
+		t.Fatalf("a pin-to-pin contact must refuse the single-part move, got %+v", plans)
+	}
+	if plans[0].Status != "unresolved" && plans[0].Status != "group-move-proposed" {
+		t.Fatalf("a pin contact must fall through to a group move or unresolved, got %+v", plans)
 	}
 	if len(plans[0].PartSkips) == 0 || !strings.Contains(plans[0].PartSkips[0].Reason, "pin-to-pin") {
 		t.Fatalf("skip reason must name the pin contact: %+v", plans[0].PartSkips)
@@ -542,6 +548,46 @@ func TestPlanDirectConnectPartMoveFromWireBlocker(t *testing.T) {
 	mv := plans[0].PartMove
 	if mv.PartID != "p1" || mv.DeltaX == 0 || len(mv.WireIDs) != 1 || mv.WireIDs[0] != "w3" {
 		t.Fatalf("wrong owner-part move: %+v", mv)
+	}
+}
+
+func TestPlanDirectConnectGroupMoveForSharedTree(t *testing.T) {
+	items := []visibleTextItem{
+		{
+			ID: "t1", Kind: "attribute", ComponentType: "wire", ParentID: "w1",
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: 0, MinY: 45, MaxX: 10, MaxY: 55},
+		},
+		{
+			ID: "t2", Kind: "attribute", ComponentType: "wire", ParentID: "w2",
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: 40, MinY: 45, MaxX: 50, MaxY: 55},
+		},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 40, 0, 60}},
+		{ID: "w2", Points: []float64{40, 40, 40, 60}},
+		{ID: "w3", Points: []float64{20, 30, 20, 60}},
+	}
+	comps := []layoutComp{
+		{
+			ID: "p1", ComponentType: "part", Designator: "R1", X: 20, Y: 70,
+			BBox: &layoutBBox{MinX: 15, MinY: 65, MaxX: 25, MaxY: 75},
+			Pins: []layoutPin{{Number: "1", X: 20, Y: 60}, {Number: "2", X: 20, Y: 80}},
+		},
+		{
+			ID: "p2", ComponentType: "part", Designator: "R2", X: 20, Y: 10,
+			BBox: &layoutBBox{MinX: 15, MinY: 0, MaxX: 25, MaxY: 10},
+			Pins: []layoutPin{{Number: "1", X: 20, Y: 30}, {Number: "2", X: 20, Y: 20}},
+		},
+	}
+	plans := planDirectConnectTextMoves(items, comps, wires, nil,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "group-move-proposed" || plans[0].GroupMove == nil {
+		t.Fatalf("want a 2-part group move, got %+v", plans)
+	}
+	mv := plans[0].GroupMove
+	if len(mv.PartIDs) != 2 || mv.PartIDs[0] != "p1" || mv.PartIDs[1] != "p2" ||
+		mv.DeltaX == 0 || len(mv.WireIDs) != 1 || mv.WireIDs[0] != "w3" {
+		t.Fatalf("wrong group move: %+v", mv)
 	}
 }
 
