@@ -110,6 +110,9 @@ compose/Apply。报告为预算耗尽或限定范围无路径只表示有界失�
 明确 `attachTo` 与自身 `pinNumber` 的非地同网引脚对，在撤线重算后仍须有真实物理路径；
 局部电源允许分岛命名不取消这项附属连接。求解器只补该指定引脚对，用同一布线内核和
 共享额度，不把其他同名电源岛强制并入，也不改源网策略。
+`sch check` 的 `power-cluster-candidate` 是就近归簇的候选提示；有意保留的独立去耦排/
+电源域用 `--power-cluster-exempt '<NET>|<DESIGNATOR>'` 显式登记，求解器不得因为它
+自动把多个同名电源岛合并。
 若实测符号的短直连挡住 Name/Value 或命名出口，可在该 attachment/peripheral 中声明
 `minimumAttachmentDistance:40`（raw；5..400，5 raw 网格）。必须保留自身 `pinNumber`
 及 `attachTo:{componentId,pinNumber}`；约束是宿主引脚向外轴上的最小引脚间距，不是

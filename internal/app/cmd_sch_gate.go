@@ -239,7 +239,7 @@ func gateCheckStage(cfg *appConfig, window string, allPages, strict bool, overla
 		st.Summary = "sch check 返回了无法解析的结构"
 		return st
 	}
-	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, &rep, stderr, geom, nil)
+	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, &rep, stderr, geom, nil, nil)
 	st.Detail = rep
 	st.Errors, st.Warnings, st.BlockingReasons = gradeGateCheckFindings(rep, strict)
 	st.Summary = fmt.Sprintf("%d finding(s): %d error/fatal, %d warn/info", rep.Summary.Total, st.Errors, st.Warnings)

@@ -111,6 +111,8 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 候选；跨功能区或 10 器件以上通道不做自动合并。`sch check` 已实现
 `power-cluster-candidate`（当前按 250 单位就近归簇，非 GND；GND 只作人工建议），
 `direct-connect-plan` 尚未提供自动“移符号+补短线”的落图计划，命中项仍需人工确认。
+有意保留的独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'`
+登记为 INFO 例外；同一消费脚的本地被动件仍应先物理接入，不能借豁免逃避局部直连。
 
 两层移动候选都枚举 `±--max-move` 内的**完整 5 网格**（含 `(+40,-15)` 这类非对称
 位移），不是只试 8 个等幅方向。实际排布里“先横后竖”与“先竖后横”的避让位置往往

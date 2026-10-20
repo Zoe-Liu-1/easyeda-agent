@@ -1685,7 +1685,7 @@ still surfacing warnings for review.`,
 		var allPages, strict, asJSON, stay bool
 		var page string
 		var overlapEps float64
-		var orientationExempt, orientationExemptFile string
+		var orientationExempt, orientationExemptFile, powerClusterExempt string
 		c := &cobra.Command{
 			Use:   "check",
 			Short: "Reconstructed per-item design check the SDK DRC can't itemize",
@@ -1713,7 +1713,8 @@ prior versions emitted a bare {passed,summary,findings}).`,
   easyeda sch check --json
   easyeda sch check --strict      # non-zero exit if any findings
   easyeda sch check --orientation-exempt id1,id2
-  easyeda sch check --orientation-exempt-file exempt.json`,
+  easyeda sch check --orientation-exempt-file exempt.json
+  easyeda sch check --power-cluster-exempt '+3V3|U1'`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" && allPages {
 					return fmt.Errorf("--page and --all-pages are mutually exclusive")
@@ -1732,7 +1733,8 @@ prior versions emitted a bare {passed,summary,findings}).`,
 				if err != nil {
 					return err
 				}
-				return runSchCheck(cfg, window, allPages, strict, asJSON, overlapEps, exempt, stdout, stderr)
+				powerExempt := parsePowerClusterExemptSet(powerClusterExempt)
+				return runSchCheck(cfg, window, allPages, strict, asJSON, overlapEps, exempt, powerExempt, stdout, stderr)
 			},
 		}
 		c.Flags().BoolVar(&allPages, "all-pages", false, "check components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
@@ -1743,6 +1745,7 @@ prior versions emitted a bare {passed,summary,findings}).`,
 		c.Flags().Float64Var(&overlapEps, "overlap-eps", schMarkerOverlapEps, "min positive-area extent (mm, smaller axis) for the marker-overlap/titleblock-overlap rules — below it, edge grazing and parallel-port float noise are ignored (issue #148)")
 		c.Flags().StringVar(&orientationExempt, "orientation-exempt", "", "comma-separated netflag primitiveIds exempted from the power/ground orientation rule (reverse pins; findings still listed as INFO)")
 		c.Flags().StringVar(&orientationExemptFile, "orientation-exempt-file", "", "JSON file (array of primitiveId strings or {primitiveId,reason} objects) exempted from the power/ground orientation rule")
+		c.Flags().StringVar(&powerClusterExempt, "power-cluster-exempt", "", "comma-separated DESIGNATOR or NET|DESIGNATOR power clusters intentionally split; findings are listed as INFO, not silently dropped")
 		sch.AddCommand(c)
 	}
 

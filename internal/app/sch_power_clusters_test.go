@@ -19,7 +19,7 @@ func TestPowerClusterCandidate(t *testing.T) {
 		{ID: "w1", Points: []float64{0, -10, 0, 10}},
 		{ID: "w2", Points: []float64{100, -10, 100, 10}},
 	}
-	got := powerClusterFindings(comps, wires)
+	got := powerClusterFindings(comps, wires, nil)
 	if len(got) != 1 || got[0].Type != "power-cluster-candidate" ||
 		got[0].Level != "warn" || got[0].Designator != "U1" ||
 		got[0].MarkerNet != "+3V3" || len(got[0].SuggestDeleteIds) != 1 {
@@ -44,7 +44,7 @@ func TestPowerClusterAlreadyWired(t *testing.T) {
 		{ID: "w2", Points: []float64{100, -10, 100, 10}},
 		{ID: "w3", Points: []float64{0, 0, 100, 0}},
 	}
-	if got := powerClusterFindings(comps, wires); len(got) != 0 {
+	if got := powerClusterFindings(comps, wires, nil); len(got) != 0 {
 		t.Fatalf("a physically wired cluster must not be flagged: %+v", got)
 	}
 }
@@ -75,7 +75,26 @@ func TestPowerClusterRemoteAndGroundIgnored(t *testing.T) {
 		{ID: "w2", Points: []float64{300, -10, 300, 10}},
 		{ID: "w3", Points: []float64{0, -110, 0, -90}},
 	}
-	if got := powerClusterFindings(comps, wires); len(got) != 0 {
+	if got := powerClusterFindings(comps, wires, nil); len(got) != 0 {
 		t.Fatalf("remote passive and local ground must not produce a warn candidate: %+v", got)
+	}
+}
+
+func TestPowerClusterExempt(t *testing.T) {
+	comps := []layoutComp{
+		{ID: "u1", Designator: "U1", ComponentType: "part",
+			Pins: []layoutPin{{Number: "1", X: 0, Y: 0, Net: "+3V3"}}},
+		{ID: "c1", Designator: "C1", ComponentType: "part",
+			Pins: []layoutPin{{Number: "1", X: 100, Y: 0, Net: "+3V3"}}},
+		{ID: "f1", ComponentType: "netflag", Net: "+3V3", X: 0, Y: 10, AnchorAvailable: true},
+		{ID: "f2", ComponentType: "netflag", Net: "+3V3", X: 100, Y: 10, AnchorAvailable: true},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, -10, 0, 10}},
+		{ID: "w2", Points: []float64{100, -10, 100, 10}},
+	}
+	got := powerClusterFindings(comps, wires, map[string]bool{"+3V3|U1": true})
+	if len(got) != 1 || got[0].Type != "power-cluster-exempt" || got[0].Level != "info" {
+		t.Fatalf("want an explicit INFO exemption, got %+v", got)
 	}
 }

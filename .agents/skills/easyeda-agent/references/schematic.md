@@ -306,6 +306,13 @@ ERROR，保留器件/引脚/线段证据。允许先向外再折线；不二次�
 标记文字带目前仍为估算；自由说明文字压导线尚未覆盖，必须列为未验证并补数据检查，
 不能以官方导图代替机器检查。以下新增检查的现场通过须以安装版本和真实运行报告为证，
 源码或离线回放通过不代表已部署。
+`sch check` 的 `power-cluster-candidate` 把消费电源脚（U/J/Q 的电源脚）与 250 单位内的
+本地 R/C/L/D 归为候选：若它们分属不同线树 root 且各带同名电源符号，先物理接入消费脚，
+再合并为一个符号；已物理直连的簇不报，GND 暂作人工建议。该判据在未认领 zones 时是
+就近启发式，必须确认消费归属。独立的去耦排/电源域可用
+`sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 显式标为 INFO 例外，
+不能静默忽略；`summary.powerClusterCandidates` 与 `summary.powerClusterExempted`
+分别记录候选和例外。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 

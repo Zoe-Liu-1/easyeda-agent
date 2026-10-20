@@ -124,6 +124,7 @@ type checkSummary struct {
 	// Local power-cluster rule: consumer pin + nearby passive(s) on separate
 	// wire roots, each carrying its own same-name power symbol.
 	PowerClusterCandidates int `json:"powerClusterCandidates"`
+	PowerClusterExempted   int `json:"powerClusterExempted"`
 	// Layout-organization rule (铁律 #15): a multi-module page with zero functional
 	// zone frames. Mechanical backstop so "分区分区" is enforced by
 	// the check, not by remembering the rule (which is unreliable — it was skipped
@@ -161,7 +162,8 @@ type checkReport struct {
 // runSchCheck runs the reconstructed design check, renders it, and (only with
 // strict) returns a non-zero exit when there are findings. By default it is
 // informational — floating IO pins are normal on an MCU board until NC-marked.
-func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, overlapEps float64, orientationExempt map[string]bool, stdout, stderr io.Writer) error {
+func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, overlapEps float64,
+	orientationExempt, powerClusterExempt map[string]bool, stdout, stderr io.Writer) error {
 	payload := map[string]any{}
 	if allPages {
 		payload["allPages"] = true
@@ -187,7 +189,7 @@ func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, o
 	// components.list `sch layout-lint` uses, and fold the findings into the report
 	// so `sch check` is the single delivery gate. Best-effort: a components.list
 	// failure leaves the electrical findings intact.
-	mergeMarkerGeomFindings(cfg, window, allPages, overlapEps, &rep, stderr, orientationExempt)
+	mergeMarkerGeomFindings(cfg, window, allPages, overlapEps, &rep, stderr, orientationExempt, powerClusterExempt)
 
 	if asJSON {
 		// Wrap the reconstructed report in the same {id,type,version,ok,result}
@@ -266,6 +268,20 @@ func parseOrientationExemptSet(inline, file string) (map[string]bool, error) {
 	return set, nil
 }
 
+// parsePowerClusterExemptSet accepts comma-separated DESIGNATOR or
+// NET|DESIGNATOR keys. Exemptions are reported as INFO findings so an
+// intentional decoupling tile / separate power domain is never silent.
+func parsePowerClusterExemptSet(inline string) map[string]bool {
+	set := map[string]bool{}
+	for _, item := range strings.Split(inline, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			set[item] = true
+		}
+	}
+	return set
+}
+
 // checkLevelBlocks is the ONE severity ruler for whether a check finding blocks
 // (issue #172): fatal/error always block; warn (and any unknown level — fail
 // closed) blocks only under strict; info NEVER blocks — it exists precisely for
@@ -312,8 +328,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d power-cluster(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.PowerClusterCandidates, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)

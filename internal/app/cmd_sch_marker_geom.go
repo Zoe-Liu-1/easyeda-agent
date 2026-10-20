@@ -581,12 +581,14 @@ func markerLabel(c layoutComp) string {
 // geometric rules into an existing electrical check report, updating its summary
 // counts and passed/total. Best-effort: a components.list failure is logged to
 // stderr and leaves the report untouched.
-func mergeMarkerGeomFindings(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer, exempt map[string]bool) {
-	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, rep, stderr, nil, exempt)
+func mergeMarkerGeomFindings(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer,
+	exempt, powerClusterExempt map[string]bool) {
+	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, rep, stderr, nil, exempt, powerClusterExempt)
 }
 
 // mergeMarkerGeomFindingsWith 是带**预读快照**的版本(geom=nil 时行为不变)。
-func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer, geom *schGeomSnapshot, exempt map[string]bool) {
+func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer,
+	geom *schGeomSnapshot, exempt, powerClusterExempt map[string]bool) {
 	// Pin nets are required by the local power-cluster rule. The extra field is
 	// read-only and does not affect the existing marker/geometry checks.
 	payload := map[string]any{"includeBBox": true, "includePins": true, "includePinNets": true}
@@ -625,7 +627,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			geo = append(geo, reversedNetFlagFindings(comps, wires)...)
 			geo = append(geo, markerWireOverlapFindings(comps, wires, overlapEps)...)
 			geo = append(geo, schWireGeometryFindings(geometryResult.Result, wires)...)
-			geo = append(geo, powerClusterFindings(comps, wires)...)
+			geo = append(geo, powerClusterFindings(comps, wires, powerClusterExempt)...)
 			geo = append(geo, sheetBoundaryFindings(comps, wires, sheetBBoxOf(comps), titleBlock, tbSource, overlapEps)...)
 		}
 		geo = append(geo, visibleTextFindings(cfg, window, sheetBBoxOf(comps), comps, visualWires, overlapEps, stderr)...)
@@ -677,6 +679,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.DirectConnectOpportunities++
 		case "power-cluster-candidate":
 			rep.Summary.PowerClusterCandidates++
+		case "power-cluster-exempt":
+			rep.Summary.PowerClusterExempted++
 		case "missing-partition", "missing-titleblock":
 			// 交付件(区框/图签)共用一个聚合计数槽 —— 汇总行必须写成
 			// missing-deliverable 而不是 missing-partition:2026-08-17 真机上一条

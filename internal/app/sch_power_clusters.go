@@ -155,7 +155,7 @@ type powerClusterGroup struct {
 // powerClusterFindings flags local power clusters where a consumer pin and
 // nearby local passives sit on different wire roots, each naming the rail with
 // its own flag. Same-root duplicates remain the job of redundant-net-marker.
-func powerClusterFindings(comps []layoutComp, wires []schGroupWire) []checkFinding {
+func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[string]bool) []checkFinding {
 	if len(wires) == 0 {
 		return nil
 	}
@@ -257,6 +257,19 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire) []checkFindi
 		if len(clusterFlags) < 2 {
 			continue
 		}
+		if at == nil {
+			at = &checkPoint{X: round2(g.consumer.X), Y: round2(g.consumer.Y)}
+		}
+		if exempt[g.rail+"|"+g.consumer.Designator] || exempt[g.consumer.Designator] {
+			out = append(out, checkFinding{
+				Type: "power-cluster-exempt", Level: "info",
+				Designator: g.consumer.Designator, MarkerNet: g.rail,
+				Pins: pins, At: at,
+				Message: fmt.Sprintf("电源局部簇 %s(%s) 按 --power-cluster-exempt 豁免 — 这是显式例外，不静默丢弃",
+					g.consumer.Designator, g.rail),
+			})
+			continue
+		}
 		sort.Slice(clusterFlags, func(i, j int) bool { return clusterFlags[i].ID < clusterFlags[j].ID })
 		keep := clusterFlags[0]
 		for _, f := range clusterFlags {
@@ -281,9 +294,6 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire) []checkFindi
 		}
 		msg := fmt.Sprintf("电源局部簇：%s(%s) 与本地被动件 %s 分属 %d 个线岛，且各有同名电源符号 — 先物理接入消费脚，再合并为一个符号（建议保留 %s，删除 %s）",
 			pins[0], g.rail, strings.Join(parts, "/"), len(roots), keep.ID, strings.Join(deleteIDs, ","))
-		if at == nil {
-			at = &checkPoint{X: round2(g.consumer.X), Y: round2(g.consumer.Y)}
-		}
 		out = append(out, checkFinding{
 			Type: "power-cluster-candidate", Level: "warn",
 			Designator: g.consumer.Designator, MarkerNet: g.rail,
