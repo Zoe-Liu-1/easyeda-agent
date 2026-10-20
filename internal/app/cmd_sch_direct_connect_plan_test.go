@@ -327,8 +327,11 @@ func TestPlanDirectConnectMarkerMoveFromWireBlocker(t *testing.T) {
 	// The only clear route would start the stub horizontally at the host pin,
 	// perpendicular to its outward (up) direction. That is illegal, so the
 	// planner must nominate the marker from the wire blocker and then refuse it.
-	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].MarkerMove != nil {
+	if len(plans) != 1 || plans[0].MarkerMove != nil {
 		t.Fatalf("a perpendicular first stub segment must be refused: %+v", plans)
+	}
+	if plans[0].Status != "unresolved" && plans[0].Status != "part-move-proposed" {
+		t.Fatalf("the marker refusal must fall through to unresolved or a part move: %+v", plans)
 	}
 	found := false
 	for _, s := range plans[0].MarkerSkips {
@@ -507,6 +510,38 @@ func TestPartMoveClearRejectsUnmovedPartOnMovedTree(t *testing.T) {
 	if partMoveClear(c, [2]float64{0, 35}, movedComp, movedWire, []string{"pv", "fv"},
 		items, comps, wires, &layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil) {
 		t.Fatal("a moved wire tree landing on an unmoved part must be rejected")
+	}
+}
+
+func TestPlanDirectConnectPartMoveFromWireBlocker(t *testing.T) {
+	items := []visibleTextItem{
+		{
+			ID: "t1", Kind: "attribute", ComponentType: "wire", ParentID: "w1",
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: 0, MinY: 65, MaxX: 10, MaxY: 75},
+		},
+		{
+			ID: "t2", Kind: "attribute", ComponentType: "wire", ParentID: "w2",
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: 40, MinY: 65, MaxX: 50, MaxY: 75},
+		},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 60, 0, 80}},
+		{ID: "w2", Points: []float64{40, 60, 40, 80}},
+		{ID: "w3", Points: []float64{20, 60, 20, 90}},
+	}
+	comps := []layoutComp{{
+		ID: "p1", ComponentType: "part", Designator: "R1", X: 20, Y: 50,
+		BBox: &layoutBBox{MinX: 15, MinY: 45, MaxX: 25, MaxY: 55},
+		Pins: []layoutPin{{Number: "1", X: 20, Y: 60}, {Number: "2", X: 20, Y: 80}},
+	}}
+	plans := planDirectConnectTextMoves(items, comps, wires, nil,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "part-move-proposed" || plans[0].PartMove == nil {
+		t.Fatalf("a wire-only blocker must nominate its owner part: %+v", plans)
+	}
+	mv := plans[0].PartMove
+	if mv.PartID != "p1" || mv.DeltaX == 0 || len(mv.WireIDs) != 1 || mv.WireIDs[0] != "w3" {
+		t.Fatalf("wrong owner-part move: %+v", mv)
 	}
 }
 

@@ -784,15 +784,55 @@ func choosePartMove(paths [][][2]float64, blockers [][]dcBlocker, aWireID, bWire
 	for _, c := range comps {
 		byID[c.ID] = c
 	}
+	// A wire can block the route while its owner's body sits off the path.
+	// Map each wire to every part pin it touches so the part move layer still
+	// gets a chance to carry that wire out of the way.
+	wireOwners := map[string][]string{}
+	for _, c := range comps {
+		if c.ComponentType != "" && c.ComponentType != schLayoutPartType {
+			continue
+		}
+		for _, p := range c.Pins {
+			for _, w := range wires {
+				if !wireTouchesPoint(w, p.X, p.Y) {
+					continue
+				}
+				found := false
+				for _, id := range wireOwners[w.ID] {
+					if id == c.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					wireOwners[w.ID] = append(wireOwners[w.ID], c.ID)
+				}
+			}
+		}
+	}
 	var candidateIDs []string
 	seen := map[string]bool{}
 	for _, bs := range blockers {
 		for _, b := range bs {
-			if b.Kind != "part" || b.ID == "" || seen[b.ID] {
+			if b.ID == "" {
 				continue
 			}
-			seen[b.ID] = true
-			candidateIDs = append(candidateIDs, b.ID)
+			var ids []string
+			switch b.Kind {
+			case "part":
+				ids = []string{b.ID}
+			case "wire":
+				ids = wireOwners[b.ID]
+			default:
+				continue
+			}
+			for _, id := range ids {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				candidateIDs = append(candidateIDs, id)
+			}
 		}
 	}
 	if len(candidateIDs) == 0 {
@@ -967,6 +1007,15 @@ func pinTouchesOtherPart(c layoutComp, comps []layoutComp) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+func wireTouchesPoint(w schGroupWire, x, y float64) bool {
+	for _, s := range labelWireSegments(w) {
+		if pointOnSegment(x, y, s[0], s[1], s[2], s[3], schGroupEps) {
+			return true
 		}
 	}
 	return false
