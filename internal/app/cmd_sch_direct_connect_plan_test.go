@@ -308,3 +308,125 @@ func TestPlanDirectConnectMarkerMoveFromWireBlocker(t *testing.T) {
 		t.Fatalf("wrong stub-owner proposal: %+v", plans[0].MarkerMove)
 	}
 }
+
+func dcPartMoveFixture() ([]visibleTextItem, []layoutComp, []schGroupWire) {
+	label := func(id, parent string, x0, x1 float64) visibleTextItem {
+		return visibleTextItem{
+			ID: id, Kind: "attribute", ComponentType: "wire", ParentID: parent,
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: x0, MinY: 65, MaxX: x1, MaxY: 75},
+		}
+	}
+	items := []visibleTextItem{
+		label("t1", "w1", 0, 10),
+		label("t2", "w2", 40, 50),
+		{
+			ID: "pv", Kind: "attribute", ComponentType: "part", ParentID: "p1",
+			Key: "Value", Value: "10k", BBox: &layoutBBox{MinX: 15, MinY: 80, MaxX: 25, MaxY: 88},
+		},
+		{
+			ID: "fv", Kind: "attribute", ComponentType: "netflag", ParentID: "f1",
+			Key: "Name", Value: "+5V", BBox: &layoutBBox{MinX: 14, MinY: 48, MaxX: 26, MaxY: 56},
+		},
+	}
+	comps := []layoutComp{
+		{
+			ID: "p1", ComponentType: "part", Designator: "R9", X: 20, Y: 50,
+			BBox: &layoutBBox{MinX: 15, MinY: 66, MaxX: 25, MaxY: 74},
+			Pins: []layoutPin{{Number: "1", X: 20, Y: 60}, {Number: "2", X: 20, Y: 80}},
+		},
+		{
+			ID: "f1", ComponentType: "netflag", Net: "+5V", X: 20, Y: 40, AnchorAvailable: true,
+			BBox: &layoutBBox{MinX: 15, MinY: 42, MaxX: 25, MaxY: 48},
+			Pins: []layoutPin{{Number: "1", X: 20, Y: 40}},
+		},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 60, 0, 70}},
+		{ID: "w2", Points: []float64{40, 60, 40, 70}},
+		{ID: "w3", Points: []float64{20, 60, 20, 40}},
+		{ID: "w4", Points: []float64{20, 80, 20, 100}},
+	}
+	return items, comps, wires
+}
+
+func TestPlanDirectConnectPartMove(t *testing.T) {
+	items, comps, wires := dcPartMoveFixture()
+	plans := planDirectConnectTextMoves(items, comps, wires, nil,
+		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "part-move-proposed" || plans[0].PartMove == nil {
+		t.Fatalf("want one rigid part move, got %+v", plans)
+	}
+	mv := plans[0].PartMove
+	if mv.PartID != "p1" || (mv.DeltaX == 0 && mv.DeltaY == 0) {
+		t.Fatalf("wrong part move: %+v", mv)
+	}
+	if len(mv.WireIDs) != 2 || len(mv.FlagIDs) != 1 {
+		t.Fatalf("part must carry both stubs and the flag: %+v", mv)
+	}
+	for _, id := range []string{"p1", "f1", "pv", "fv"} {
+		found := id == mv.PartID
+		for _, f := range mv.FlagIDs {
+			if f == id {
+				found = true
+			}
+		}
+		for _, t := range mv.TextIDs {
+			if t == id {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s must move with the rigid set: %+v", id, mv)
+		}
+	}
+}
+
+func TestPlanDirectConnectPartMoveRejectsSharedTree(t *testing.T) {
+	items, comps, wires := dcPartMoveFixture()
+	wires = append(wires, schGroupWire{ID: "w5", Points: []float64{20, 60, 100, 60}})
+	comps = append(comps, layoutComp{
+		ID: "p2", ComponentType: "part", Designator: "U9", X: 100, Y: 50,
+		BBox: &layoutBBox{MinX: 98, MinY: 40, MaxX: 102, MaxY: 70},
+		Pins: []layoutPin{{Number: "1", X: 100, Y: 60}},
+	})
+	plans := planDirectConnectTextMoves(items, comps, wires, nil,
+		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].PartMove != nil {
+		t.Fatalf("a shared wire tree must stay unresolved, got %+v", plans)
+	}
+	if len(plans[0].PartSkips) == 0 || !strings.Contains(plans[0].PartSkips[0].Reason, "shared-wire-tree") {
+		t.Fatalf("skip reason must name the shared tree: %+v", plans[0].PartSkips)
+	}
+}
+
+func TestPlanDirectConnectPartMoveRejectsPinContact(t *testing.T) {
+	items, comps, wires := dcPartMoveFixture()
+	comps = append(comps, layoutComp{
+		ID: "p2", ComponentType: "part", Designator: "U9", X: 30, Y: 60,
+		BBox: &layoutBBox{MinX: 25, MinY: 55, MaxX: 35, MaxY: 65},
+		Pins: []layoutPin{{Number: "1", X: 20, Y: 60}},
+	})
+	plans := planDirectConnectTextMoves(items, comps, wires, nil,
+		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].PartMove != nil {
+		t.Fatalf("a pin-to-pin contact must stay unresolved, got %+v", plans)
+	}
+	if len(plans[0].PartSkips) == 0 || !strings.Contains(plans[0].PartSkips[0].Reason, "pin-to-pin") {
+		t.Fatalf("skip reason must name the pin contact: %+v", plans[0].PartSkips)
+	}
+}
+
+func TestPartMoveClearRejectsUnmovedPartOnMovedTree(t *testing.T) {
+	items, comps, wires := dcPartMoveFixture()
+	c := comps[0]
+	comps = append(comps, layoutComp{
+		ID: "p2", ComponentType: "part", Designator: "U9",
+		BBox: &layoutBBox{MinX: 15, MinY: 105, MaxX: 25, MaxY: 115},
+	})
+	movedComp := map[string]bool{"p1": true, "f1": true}
+	movedWire := map[string]bool{"w3": true, "w4": true}
+	if partMoveClear(c, [2]float64{0, 35}, movedComp, movedWire, []string{"pv", "fv"},
+		items, comps, wires, &layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil) {
+		t.Fatal("a moved wire tree landing on an unmoved part must be rejected")
+	}
+}

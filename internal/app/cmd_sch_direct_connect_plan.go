@@ -51,6 +51,29 @@ type dcMarkerSkip struct {
 	Reason   string `json:"reason"`
 }
 
+// dcPartMove is the third, most invasive read-only proposal: translate one part
+// together with every wire tree and marker that is rigidly attached to it.
+// Shared trees (wired to a non-member pin), pin-to-pin contacts and incomplete
+// expansions are refused, so the move cannot tear a far connection.
+type dcPartMove struct {
+	PartID     string      `json:"partId"`
+	Designator string      `json:"designator"`
+	FromAnchor *checkPoint `json:"fromAnchor"`
+	ToAnchor   *checkPoint `json:"toAnchor"`
+	DeltaX     float64     `json:"deltaX"`
+	DeltaY     float64     `json:"deltaY"`
+	WireIDs    []string    `json:"wireIds,omitempty"`
+	FlagIDs    []string    `json:"flagIds,omitempty"`
+	TextIDs    []string    `json:"textIds,omitempty"`
+	NewBBox    *layoutBBox `json:"newBBox,omitempty"`
+}
+
+type dcPartSkip struct {
+	PartID     string `json:"partId"`
+	Designator string `json:"designator"`
+	Reason     string `json:"reason"`
+}
+
 type dcPairPlan struct {
 	Net         string         `json:"net"`
 	LabelA      string         `json:"labelA"`
@@ -64,6 +87,8 @@ type dcPairPlan struct {
 	Move        *dcTextMove    `json:"move,omitempty"`
 	MarkerMove  *dcMarkerMove  `json:"markerMove,omitempty"`
 	MarkerSkips []dcMarkerSkip `json:"markerSkips,omitempty"`
+	PartMove    *dcPartMove    `json:"partMove,omitempty"`
+	PartSkips   []dcPartSkip   `json:"partSkips,omitempty"`
 	Note        string         `json:"note,omitempty"`
 }
 
@@ -89,13 +114,16 @@ func newSchDirectConnectPlanCmd(cfg *appConfig, window *string, stdout, stderr i
 	var maxDistance, maxMove float64
 	cmd := &cobra.Command{
 		Use:   "direct-connect-plan",
-		Short: "Propose small text/attribute moves that enable direct label connections (read-only)",
+		Short: "Propose small text, marker or rigid part-group moves that enable direct label connections (read-only)",
 		Long: `Read the active page's labels, wires, parts, visible text and native attribute anchors.
 For same-net labels on different wire islands, find blocked orthogonal L paths and
-try two read-only resolutions on a small 5-unit grid:
+try three read-only resolutions on a small 5-unit grid:
   1. move a blocking part Designator/Value attribute;
   2. translate a blocking netflag/netport together with its single-segment stub,
      re-routing only that stub on an orthogonal L while the far endpoint stays put.
+  3. translate a blocking part with the wire trees, markers and labels that are
+     rigidly attached to its pins. Shared trees, incomplete expansions and
+     pin-to-pin contacts are refused.
 The command only reports proposals; it never calls modify, wire, connect or save.
 Power/ground/rail labels are excluded from direct-connect candidates.`,
 		Args: cobra.NoArgs,
@@ -141,7 +169,7 @@ Power/ground/rail labels are excluded from direct-connect candidates.`,
 			pairs := planDirectConnectTextMoves(items.Items, comps, wires, anchors, sheet, titleBlock, maxDistance, maxMove)
 			report := dcPlanReport{SchemaVersion: 1, DocumentID: doc, MaxDistance: maxDistance, MaxMove: maxMove, Pairs: pairs}
 			for _, p := range pairs {
-				if p.Move != nil || p.MarkerMove != nil {
+				if p.Move != nil || p.MarkerMove != nil || p.PartMove != nil {
 					report.ProposalCount++
 				}
 			}
@@ -277,8 +305,18 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 					pair.PathPoints = paths[markerIdx]
 					pair.MarkerMove = markerMove
 				} else {
-					pair.Status = "unresolved"
-					pair.Note = "no single part-attribute move or netflag/netport stub move on a 5-unit grid clears an L path"
+					partMove, partIdx, partSkips := choosePartMove(paths, blockers, a.it.ParentID, b.it.ParentID,
+						a.it.ID, b.it.ID, items, comps, wires, sheet, titleBlock, maxMove)
+					pair.PartSkips = partSkips
+					if partMove != nil {
+						pair.Status = "part-move-proposed"
+						pair.Path = dcPathName(paths[partIdx])
+						pair.PathPoints = paths[partIdx]
+						pair.PartMove = partMove
+					} else {
+						pair.Status = "unresolved"
+						pair.Note = "no single part-attribute move, netflag/netport stub move, or rigid part-group move on a 5-unit grid clears an L path"
+					}
 				}
 			}
 			out = append(out, pair)
@@ -623,6 +661,10 @@ func chooseMarkerMove(paths [][][2]float64, blockers [][]dcBlocker, pairNet, aWi
 			skips = append(skips, dcMarkerSkip{MarkerID: c.ID, Net: c.Net, Reason: "no-visible-name"})
 			continue
 		}
+		ownText := map[string]bool{}
+		for _, it := range own {
+			ownText[it.ID] = true
+		}
 		stub, reason := stubOfMarker(c, wires)
 		if stub == nil {
 			skips = append(skips, dcMarkerSkip{MarkerID: c.ID, Net: c.Net, Reason: "not-a-single-segment-stub:" + reason})
@@ -672,7 +714,10 @@ func chooseMarkerMove(paths [][][2]float64, blockers [][]dcBlocker, pairNet, aWi
 					simItems, simComps, simWires := simulateMarkerMove(c, *proposal, items, comps, wires)
 					clearedIdx := -1
 					for pi, path := range paths {
-						if markerMoveClearsPath(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
+						if simulatedPathClear(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
+							if !pathClearanceOK(path, map[string]bool{c.ID: true}, ownText, delta, comps, items) {
+								continue
+							}
 							clearedIdx = pi
 							break
 						}
@@ -693,6 +738,238 @@ func chooseMarkerMove(paths [][][2]float64, blockers [][]dcBlocker, pairNet, aWi
 		}
 	}
 	return best, bestIdx, skips
+}
+
+// choosePartMove is the third layer. It reuses expandGroupAttachments — the
+// same rigid-body expansion that sch group-move uses — so a part is moved only
+// with wire trees that genuinely terminate at its pins. A shared tree, a
+// suspected half-move, or a pin-to-pin contact refuses the candidate outright.
+func choosePartMove(paths [][][2]float64, blockers [][]dcBlocker, aWireID, bWireID, aID, bID string,
+	items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox, maxMove float64) (*dcPartMove, int, []dcPartSkip) {
+	byID := make(map[string]layoutComp, len(comps))
+	for _, c := range comps {
+		byID[c.ID] = c
+	}
+	var candidateIDs []string
+	seen := map[string]bool{}
+	for _, bs := range blockers {
+		for _, b := range bs {
+			if b.Kind != "part" || b.ID == "" || seen[b.ID] {
+				continue
+			}
+			seen[b.ID] = true
+			candidateIDs = append(candidateIDs, b.ID)
+		}
+	}
+	if len(candidateIDs) == 0 {
+		return nil, -1, nil
+	}
+	var flags []schGroupFlag
+	for _, c := range comps {
+		if isSchMarker(c.ComponentType) && c.AnchorAvailable {
+			flags = append(flags, schGroupFlag{ID: c.ID, X: c.X, Y: c.Y})
+		}
+	}
+
+	var skips []dcPartSkip
+	var best *dcPartMove
+	bestCost := math.Inf(1)
+	bestIdx := -1
+	for _, id := range candidateIDs {
+		c, ok := byID[id]
+		if !ok || (c.ComponentType != "" && c.ComponentType != schLayoutPartType) {
+			continue
+		}
+		label := c.Designator
+		if label == "" {
+			label = c.ID
+		}
+		if c.BBox == nil || len(c.Pins) == 0 {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label, Reason: "no-bbox-or-pins"})
+			continue
+		}
+		if pinTouchesOtherPart(c, comps) {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
+				Reason: "pin-to-pin-contact"})
+			continue
+		}
+		var memberPins [][2]float64
+		for _, p := range c.Pins {
+			memberPins = append(memberPins, [2]float64{p.X, p.Y})
+		}
+		var otherPins [][2]float64
+		for _, o := range comps {
+			if o.ID == c.ID || (o.ComponentType != "" && o.ComponentType != schLayoutPartType) {
+				continue
+			}
+			for _, p := range o.Pins {
+				otherPins = append(otherPins, [2]float64{p.X, p.Y})
+			}
+		}
+		exp := expandGroupAttachments(groupExpandInput{
+			MemberPins: memberPins, OtherPins: otherPins, Wires: wires, Flags: flags,
+		})
+		if len(exp.Suspects) > 0 {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
+				Reason: "incomplete-attachment-expansion"})
+			continue
+		}
+		if exp.SharedTrees > 0 {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
+				Reason: "shared-wire-tree"})
+			continue
+		}
+		if len(exp.WireIDs) > 16 || partGroupExtent(c, exp.WireIDs, wires) > 400 {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
+				Reason: "attachment-group-too-large"})
+			continue
+		}
+		movedComp := map[string]bool{c.ID: true}
+		for _, fid := range exp.FlagIDs {
+			movedComp[fid] = true
+		}
+		movedWire := map[string]bool{}
+		for _, wid := range exp.WireIDs {
+			movedWire[wid] = true
+		}
+		badFlag := ""
+		for _, fid := range exp.FlagIDs {
+			f, ok := byID[fid]
+			if !ok {
+				continue
+			}
+			for _, w := range wires {
+				if movedWire[w.ID] {
+					continue
+				}
+				for _, s := range labelWireSegments(w) {
+					if pointOnSegment2(f.X, f.Y, [2]float64{s[0], s[1]}, [2]float64{s[2], s[3]}) {
+						badFlag = fid
+						break
+					}
+				}
+				if badFlag != "" {
+					break
+				}
+			}
+			if badFlag != "" {
+				break
+			}
+		}
+		if badFlag != "" {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
+				Reason: "flag-stub-not-in-group:" + badFlag})
+			continue
+		}
+		var movedTextIDs []string
+		for _, it := range items {
+			if it.ParentID != "" && (it.ParentID == c.ID || movedComp[it.ParentID] || movedWire[it.ParentID]) {
+				movedTextIDs = append(movedTextIDs, it.ID)
+			}
+		}
+		movedText := map[string]bool{}
+		for _, id := range movedTextIDs {
+			movedText[id] = true
+		}
+
+		found := false
+		for _, d := range []float64{5, 10, 15, 20, 25, 30, 35, 40} {
+			if d > maxMove {
+				break
+			}
+			for _, dir := range [][2]float64{{-1, 0}, {1, 0}, {0, 1}, {0, -1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}} {
+				delta := [2]float64{dir[0] * d, dir[1] * d}
+				if !partMoveClear(c, delta, movedComp, movedWire, movedTextIDs, items, comps, wires, sheet, titleBlock) {
+					continue
+				}
+				mv := &dcPartMove{
+					PartID: c.ID, Designator: label,
+					FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
+					ToAnchor:   &checkPoint{X: round2(c.X + delta[0]), Y: round2(c.Y + delta[1])},
+					DeltaX:     delta[0], DeltaY: delta[1],
+				}
+				for _, wid := range exp.WireIDs {
+					mv.WireIDs = append(mv.WireIDs, wid)
+				}
+				for _, fid := range exp.FlagIDs {
+					mv.FlagIDs = append(mv.FlagIDs, fid)
+				}
+				mv.TextIDs = append(mv.TextIDs, movedTextIDs...)
+				if c.BBox != nil {
+					b := translateLayoutBBox(*c.BBox, delta)
+					mv.NewBBox = &b
+				}
+				simItems, simComps, simWires := simulatePartMove(*mv, items, comps, wires)
+				clearedIdx := -1
+				for pi, path := range paths {
+					if simulatedPathClear(path, aWireID, bWireID, aID, bID, simItems, simComps, simWires) {
+						if !pathClearanceOK(path, movedComp, movedText, delta, comps, items) {
+							continue
+						}
+						clearedIdx = pi
+						break
+					}
+				}
+				if clearedIdx < 0 {
+					continue
+				}
+				cost := math.Abs(delta[0]) + math.Abs(delta[1])
+				if cost < bestCost {
+					best, bestCost, bestIdx = mv, cost, clearedIdx
+				}
+				found = true
+			}
+		}
+		if !found {
+			skips = append(skips, dcPartSkip{PartID: c.ID, Designator: label,
+				Reason: "no-clear-part-move"})
+		}
+	}
+	return best, bestIdx, skips
+}
+
+func pinTouchesOtherPart(c layoutComp, comps []layoutComp) bool {
+	for _, o := range comps {
+		if o.ID == c.ID || (o.ComponentType != "" && o.ComponentType != schLayoutPartType) {
+			continue
+		}
+		for _, p := range c.Pins {
+			for _, q := range o.Pins {
+				if pointsClose(p.X, p.Y, q.X, q.Y, 0.5) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// partGroupExtent bounds how much circuitry one small nudge may drag along.
+// A part wired into a page-wide bus is technically a rigid group, but moving
+// that whole bus for a 5-unit readability tweak is not a local adjustment.
+func partGroupExtent(c layoutComp, wireIDs []string, wires []schGroupWire) float64 {
+	if c.BBox == nil {
+		return math.Inf(1)
+	}
+	minX, minY := c.BBox.MinX, c.BBox.MinY
+	maxX, maxY := c.BBox.MaxX, c.BBox.MaxY
+	want := map[string]bool{}
+	for _, id := range wireIDs {
+		want[id] = true
+	}
+	for _, w := range wires {
+		if !want[w.ID] {
+			continue
+		}
+		for i := 0; i+1 < len(w.Points); i += 2 {
+			minX = math.Min(minX, w.Points[i])
+			maxX = math.Max(maxX, w.Points[i])
+			minY = math.Min(minY, w.Points[i+1])
+			maxY = math.Max(maxY, w.Points[i+1])
+		}
+	}
+	return math.Max(maxX-minX, maxY-minY)
 }
 
 func markerOwnedTextItems(items []visibleTextItem, markerID string) []visibleTextItem {
@@ -1036,7 +1313,246 @@ func simulateMarkerMove(c layoutComp, mv dcMarkerMove, items []visibleTextItem,
 	return simItems, simComps, simWires
 }
 
-func markerMoveClearsPath(path [][2]float64, aWireID, bWireID, aID, bID string, items []visibleTextItem,
+// partMoveClear validates a rigid part-group translation. The moved set is the
+// part, its attached flags, those flags' labels, the attached wire trees and
+// the net labels on those wires. Everything outside that set is an obstacle.
+func partMoveClear(c layoutComp, delta [2]float64, movedComp, movedWire map[string]bool,
+	movedTextIDs []string, items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox) bool {
+	if c.BBox == nil || sheet == nil {
+		return false
+	}
+	const clearance = 2.0
+	usable := schUsableArea(*sheet)
+	movedText := map[string]bool{}
+	for _, id := range movedTextIDs {
+		movedText[id] = true
+	}
+	dx, dy := delta[0], delta[1]
+
+	for _, o := range comps {
+		if !movedComp[o.ID] || o.BBox == nil {
+			continue
+		}
+		nb := translateLayoutBBox(*o.BBox, delta)
+		if !boxInside2(nb, usable) {
+			return false
+		}
+		if titleBlock != nil && positiveOverlap(nb, *titleBlock) {
+			return false
+		}
+		nbG := inflateLayoutBBox(nb, clearance)
+		for _, u := range comps {
+			if movedComp[u.ID] || u.BBox == nil || u.ComponentType == "sheet" {
+				continue
+			}
+			if positiveOverlap(nbG, *u.BBox) {
+				return false
+			}
+			for _, pin := range u.Pins {
+				if pointInBox2(pin.X, pin.Y, nb, clearance) {
+					return false
+				}
+			}
+			for _, mp := range o.Pins {
+				px, py := mp.X+dx, mp.Y+dy
+				if pointInBox2(px, py, *u.BBox, 0.5) {
+					return false
+				}
+				for _, up := range u.Pins {
+					if math.Abs(px-up.X) <= 0.5 && math.Abs(py-up.Y) <= 0.5 {
+						return false
+					}
+				}
+			}
+		}
+		for _, it := range items {
+			if movedText[it.ID] || it.BBox == nil {
+				continue
+			}
+			if positiveOverlap(nbG, *it.BBox) {
+				return false
+			}
+		}
+		for _, w := range wires {
+			if movedWire[w.ID] {
+				continue
+			}
+			for _, s := range labelWireSegments(w) {
+				if schSegmentCrossesBox(s[0], s[1], s[2], s[3], nbG) {
+					return false
+				}
+				for _, mp := range o.Pins {
+					if pointNearSegment2(mp.X+dx, mp.Y+dy,
+						[2]float64{s[0], s[1]}, [2]float64{s[2], s[3]}, 0.5) {
+						return false
+					}
+				}
+			}
+		}
+	}
+
+	for _, it := range items {
+		if !movedText[it.ID] || it.BBox == nil {
+			continue
+		}
+		nb := translateLayoutBBox(*it.BBox, delta)
+		if !boxInside2(nb, usable) {
+			return false
+		}
+		if titleBlock != nil && positiveOverlap(nb, *titleBlock) {
+			return false
+		}
+		nbG := inflateLayoutBBox(nb, clearance)
+		for _, u := range comps {
+			if movedComp[u.ID] || u.BBox == nil || u.ComponentType == "sheet" {
+				continue
+			}
+			if positiveOverlap(nbG, *u.BBox) {
+				return false
+			}
+			for _, pin := range u.Pins {
+				if pointInBox2(pin.X, pin.Y, nb, clearance) {
+					return false
+				}
+			}
+		}
+		for _, other := range items {
+			if other.ID == it.ID || movedText[other.ID] || other.BBox == nil {
+				continue
+			}
+			if positiveOverlap(nbG, *other.BBox) {
+				return false
+			}
+		}
+		for _, w := range wires {
+			if movedWire[w.ID] {
+				continue
+			}
+			for _, s := range labelWireSegments(w) {
+				if schSegmentCrossesBox(s[0], s[1], s[2], s[3], nbG) {
+					return false
+				}
+			}
+		}
+	}
+
+	for _, w := range wires {
+		if !movedWire[w.ID] {
+			continue
+		}
+		for _, s := range labelWireSegments(w) {
+			seg := [4]float64{s[0] + dx, s[1] + dy, s[2] + dx, s[3] + dy}
+			if !pointInBox2(seg[0], seg[1], usable, 0) || !pointInBox2(seg[2], seg[3], usable, 0) {
+				return false
+			}
+			if titleBlock != nil && schSegmentCrossesBox(seg[0], seg[1], seg[2], seg[3], *titleBlock) {
+				return false
+			}
+			for _, u := range comps {
+				if movedComp[u.ID] || u.BBox == nil || u.ComponentType == "sheet" {
+					continue
+				}
+				if schSegmentCrossesBox(seg[0], seg[1], seg[2], seg[3],
+					inflateLayoutBBox(*u.BBox, clearance)) {
+					return false
+				}
+				for _, pin := range u.Pins {
+					if pointNearSegment2(pin.X, pin.Y, [2]float64{seg[0], seg[1]},
+						[2]float64{seg[2], seg[3]}, 0.5) {
+						return false
+					}
+				}
+			}
+			for _, it := range items {
+				if movedText[it.ID] || it.BBox == nil {
+					continue
+				}
+				if schSegmentCrossesBox(seg[0], seg[1], seg[2], seg[3],
+					inflateLayoutBBox(*it.BBox, clearance)) {
+					return false
+				}
+			}
+			for _, o := range wires {
+				if movedWire[o.ID] {
+					continue
+				}
+				for _, os := range labelWireSegments(o) {
+					if segmentsCross2([2]float64{seg[0], seg[1]}, [2]float64{seg[2], seg[3]},
+						[2]float64{os[0], os[1]}, [2]float64{os[2], os[3]}) {
+						return false
+					}
+				}
+			}
+		}
+	}
+	return true
+}
+
+func simulatePartMove(mv dcPartMove, items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire) ([]visibleTextItem, []layoutComp, []schGroupWire) {
+	delta := [2]float64{mv.DeltaX, mv.DeltaY}
+	movedComp := map[string]bool{mv.PartID: true}
+	for _, id := range mv.FlagIDs {
+		movedComp[id] = true
+	}
+	movedWire := map[string]bool{}
+	for _, id := range mv.WireIDs {
+		movedWire[id] = true
+	}
+	simItems := make([]visibleTextItem, len(items))
+	for i, it := range items {
+		simItems[i] = it
+		if it.BBox != nil && (movedComp[it.ParentID] || movedWire[it.ParentID]) {
+			b := translateLayoutBBox(*it.BBox, delta)
+			simItems[i].BBox = &b
+		}
+	}
+	simComps := make([]layoutComp, len(comps))
+	for i, o := range comps {
+		simComps[i] = o
+		if !movedComp[o.ID] {
+			continue
+		}
+		if o.BBox != nil {
+			b := translateLayoutBBox(*o.BBox, delta)
+			simComps[i].BBox = &b
+		}
+		simComps[i].X += delta[0]
+		simComps[i].Y += delta[1]
+		pins := make([]layoutPin, len(o.Pins))
+		copy(pins, o.Pins)
+		for k := range pins {
+			pins[k].X += delta[0]
+			pins[k].Y += delta[1]
+		}
+		simComps[i].Pins = pins
+	}
+	simWires := make([]schGroupWire, len(wires))
+	for i, w := range wires {
+		simWires[i] = w
+		if !movedWire[w.ID] {
+			continue
+		}
+		pts := make([]float64, len(w.Points))
+		for k := 0; k+1 < len(w.Points); k += 2 {
+			pts[k] = w.Points[k] + delta[0]
+			pts[k+1] = w.Points[k+1] + delta[1]
+		}
+		segs := make([][4]float64, len(w.ObservedSegments))
+		copy(segs, w.ObservedSegments)
+		for k := range segs {
+			segs[k][0] += delta[0]
+			segs[k][1] += delta[1]
+			segs[k][2] += delta[0]
+			segs[k][3] += delta[1]
+		}
+		simWires[i] = schGroupWire{ID: w.ID, Points: pts, ObservedSegments: segs}
+	}
+	return simItems, simComps, simWires
+}
+
+func simulatedPathClear(path [][2]float64, aWireID, bWireID, aID, bID string, items []visibleTextItem,
 	comps []layoutComp, wires []schGroupWire) bool {
 	find, wireIndex := wireTreeFinder(wires)
 	ia, okA := wireIndex[aWireID]
@@ -1045,6 +1561,39 @@ func markerMoveClearsPath(path [][2]float64, aWireID, bWireID, aID, bID string, 
 		return false
 	}
 	return len(directPathBlockers(path, find(ia), find(ib), aID, bID, items, comps, wires, find, wireIndex)) == 0
+}
+
+// pathClearanceOK rejects a proposal whose new wire would run within 2 units of
+// the moved part/marker or its labels. Zero-tolerance blocking prevents overlaps;
+// this keeps the result readable instead of a wire grazing a body edge.
+func pathClearanceOK(path [][2]float64, movedComp, movedText map[string]bool, delta [2]float64,
+	comps []layoutComp, items []visibleTextItem) bool {
+	const clearance = 2.0
+	for i := 0; i+1 < len(path); i++ {
+		p, q := path[i], path[i+1]
+		if p == q {
+			continue
+		}
+		for _, c := range comps {
+			if !movedComp[c.ID] || c.BBox == nil {
+				continue
+			}
+			b := translateLayoutBBox(*c.BBox, delta)
+			if schSegmentCrossesBox(p[0], p[1], q[0], q[1], inflateLayoutBBox(b, clearance)) {
+				return false
+			}
+		}
+		for _, it := range items {
+			if !movedText[it.ID] || it.BBox == nil {
+				continue
+			}
+			b := translateLayoutBBox(*it.BBox, delta)
+			if schSegmentCrossesBox(p[0], p[1], q[0], q[1], inflateLayoutBBox(b, clearance)) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func boxesOverlap2(a, b layoutBBox) bool {
@@ -1126,6 +1675,11 @@ func renderDirectConnectPlan(rep dcPlanReport, w io.Writer) {
 			fmt.Fprintf(w, "         move %s %s by (%+.0f,%+.0f); re-route stub %s from host (%.0f,%.0f)\n",
 				p.MarkerMove.ComponentType, p.MarkerMove.MarkerID, p.MarkerMove.DeltaX, p.MarkerMove.DeltaY,
 				p.MarkerMove.StubWireID, p.MarkerMove.Host.X, p.MarkerMove.Host.Y)
+		case "part-move-proposed":
+			fmt.Fprintf(w, "  [part] %s %s ↔ %s distance=%.0f path=%s\n", p.Net, p.LabelA, p.LabelB, p.Distance, p.Path)
+			fmt.Fprintf(w, "         move part %s %s by (%+.0f,%+.0f) with %d wire(s), %d flag(s)\n",
+				p.PartMove.Designator, p.PartMove.PartID, p.PartMove.DeltaX, p.PartMove.DeltaY,
+				len(p.PartMove.WireIDs), len(p.PartMove.FlagIDs))
 		default:
 			fmt.Fprintf(w, "  [blocked] %s %s ↔ %s distance=%.0f\n", p.Net, p.LabelA, p.LabelB, p.Distance)
 			if len(p.BlockersA) > 0 {
@@ -1139,6 +1693,9 @@ func renderDirectConnectPlan(rep dcPlanReport, w io.Writer) {
 			}
 			for _, s := range p.MarkerSkips {
 				fmt.Fprintf(w, "         marker %s (%s): %s\n", s.MarkerID, s.Net, s.Reason)
+			}
+			for _, s := range p.PartSkips {
+				fmt.Fprintf(w, "         part %s (%s): %s\n", s.Designator, s.PartID, s.Reason)
 			}
 		}
 	}

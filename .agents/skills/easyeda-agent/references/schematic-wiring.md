@@ -72,18 +72,23 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 `sch bridge-check` + `sch read` 逐脚对账。
 
 **直连机会规划先只读。** `sch direct-connect-plan` 会列出同网不同线岛的近距离标签对、
-当前 L 路径的阻挡对象，并按两层给出 5 网格的小位移候选：
+当前 L 路径的阻挡对象，并按风险从小到大给出 5 网格的小位移候选：
 
 1. `move-proposed`：只移动阻挡的 part Designator/Value 文字；
 2. `marker-move-proposed`：只处理 `netflag`/`netport` + **单段直线短桩**。标识本体与
    它的 Name 文字刚性平移，rotation 不变（电源/地 body 朝向因此不变），短桩从**不动的
    宿主 pin** 重新走成一条正交 L。候选必须同时满足：不压器件/标识/引脚/其他文字、
    不穿图签/越出图纸、新桩线不碰任何其他导线（相触即并网），并且确实清空至少一条
-   直连 L 路径。
+   直连 L 路径；
+3. `part-move-proposed`：把阻挡的器件连同**真正终止于它引脚上的线树、标识和网络标签**
+   作刚体平移。复用 `sch group-move` 的附件展开判据：共享线树（线树还终止在非成员
+   引脚上）、疑似半移动残留、引脚与引脚直接相触一律拒绝；整棵被移动的线树同样要过
+   器件/文字/引脚/导线/图签/图纸边界检查。附件组超过 16 根导线或整体跨度超过 400
+   画布单位时视为“非局部调整”，跳过而不是拖着一整条母线做 5 单位的微调。
 
 共享/分支线树、多段折线桩、宿主端不在 pin 上、以及 `netlabel`/`short_symbol` 一律跳过，
-并在 JSON 的 `markerSkips` 里给出原因。命令只输出候选，不调用 modify、wire、connect
-或 save；真正落图仍需人工确认后另行执行。
+并在 JSON 的 `markerSkips` / `partSkips` 里给出原因。命令只输出候选，不调用 modify、
+wire、connect 或 save；真正落图仍需人工确认后另行执行。
 
 **路径端点取线岛上的真实连接点，不取标签文字中心。** 标签文字 bbox 的中心通常落在导线
 旁边甚至空白处；规划器按“该标签所属线岛上离文字最近的点”起算 L 路径，否则会算出起点

@@ -18,7 +18,7 @@
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
-| 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读。第一层移动阻挡的 part Designator/Value 文字；第二层只处理 netflag/netport + 单段短桩，带桩线做正交 L 迁移。共享/分支线树、netlabel、多段桩一律跳过，不落图 |
+| 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读。按风险从小到大给三层候选：①移 part Designator/Value 文字；②netflag/netport + 单段短桩带桩线做正交 L 迁移；③把 part 连同真正相连的线树/标识/标签作刚体平移。共享/分支线树、疑似半移动、引脚直连、netlabel、多段桩一律跳过，不落图 |
 | 执行计划 | `sch apply <playbook.json>` |
 
 生成器的输入、支持范围与位号/身份规则集中在 [schematic-data.md](schematic-data.md)。
