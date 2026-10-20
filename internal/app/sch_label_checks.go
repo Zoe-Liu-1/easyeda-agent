@@ -243,7 +243,8 @@ func closestPointOnSegment(px, py, x0, y0, x1, y1 float64) (float64, float64, fl
 // reports a clear two-segment L route between two same-net labels on different
 // wire islands. A multi-bend route, a blocked L, or missing geometry stays
 // silent (false negatives are safer than suggesting a wire through obstacles).
-func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire) []checkFinding {
+func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox) []checkFinding {
 	if len(wires) == 0 {
 		return nil
 	}
@@ -375,6 +376,7 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 				{{a.ax, a.ay}, {b.ax, a.ay}, {b.ax, b.ay}},
 				{{a.ax, a.ay}, {a.ax, b.ay}, {b.ax, b.ay}},
 			}
+			candidates = filterDCPaths(candidates, sheet, titleBlock)
 			for _, path := range candidates {
 				if clear(path, a, b) {
 					out = append(out, checkFinding{

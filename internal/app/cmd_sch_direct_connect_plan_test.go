@@ -26,7 +26,7 @@ func TestPlanDirectConnectTextMoves(t *testing.T) {
 	}
 	items := []visibleTextItem{dcLabel("t1", "w1", 0, 20), dcLabel("t2", "w2", 200, 220), dcBlockingText("v1", 90, 110)}
 	plans := planDirectConnectTextMoves(items, nil, wires,
-		map[string]checkPoint{"v1": {X: 100, Y: 44}}, &layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		map[string]checkPoint{"v1": {X: 100, Y: 44}}, &layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "move-proposed" || plans[0].Move == nil {
 		t.Fatalf("want one text-move proposal, got %+v", plans)
 	}
@@ -46,7 +46,7 @@ func TestPlanDirectConnectTextMovesBlockedByWire(t *testing.T) {
 	}
 	items := []visibleTextItem{dcLabel("t1", "w1", 0, 20), dcLabel("t2", "w2", 200, 220), dcBlockingText("v1", 90, 110)}
 	plans := planDirectConnectTextMoves(items, nil, wires,
-		map[string]checkPoint{"v1": {X: 100, Y: 44}}, &layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		map[string]checkPoint{"v1": {X: 100, Y: 44}}, &layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].Move != nil {
 		t.Fatalf("wire blocker must remain unresolved, got %+v", plans)
 	}
@@ -59,7 +59,7 @@ func TestPlanDirectConnectAlreadyClear(t *testing.T) {
 	}
 	items := []visibleTextItem{dcLabel("t1", "w1", 0, 20), dcLabel("t2", "w2", 200, 220)}
 	plans := planDirectConnectTextMoves(items, nil, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "already-clear" || plans[0].Move != nil {
 		t.Fatalf("want already-clear, got %+v", plans)
 	}
@@ -73,7 +73,7 @@ func TestPlanDirectConnectTextMovesBlockedByPin(t *testing.T) {
 	items := []visibleTextItem{dcLabel("t1", "w1", 0, 20), dcLabel("t2", "w2", 200, 220), dcBlockingText("v1", 90, 110)}
 	comps := []layoutComp{{ID: "j1", ComponentType: "part", Pins: []layoutPin{{Number: "2", X: 100, Y: 44}}}}
 	plans := planDirectConnectTextMoves(items, comps, wires,
-		map[string]checkPoint{"v1": {X: 100, Y: 44}}, &layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		map[string]checkPoint{"v1": {X: 100, Y: 44}}, &layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].Move != nil {
 		t.Fatalf("pin blocker must remain unresolved, got %+v", plans)
 	}
@@ -119,7 +119,7 @@ func dcMarkerFixture() ([]visibleTextItem, []layoutComp, []schGroupWire) {
 func TestPlanDirectConnectMarkerMove(t *testing.T) {
 	items, comps, wires := dcMarkerFixture()
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "marker-move-proposed" || plans[0].MarkerMove == nil {
 		t.Fatalf("want one marker-move proposal, got %+v", plans)
 	}
@@ -142,7 +142,7 @@ func TestPlanDirectConnectMarkerMoveRejectsSharedTree(t *testing.T) {
 	items, comps, wires := dcMarkerFixture()
 	wires = append(wires, schGroupWire{ID: "w4", Points: []float64{50, 70, 20, 70}})
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].MarkerMove != nil {
 		t.Fatalf("a branched stub tree must stay unresolved, got %+v", plans)
 	}
@@ -166,7 +166,7 @@ func TestMarkerMoveClearRejectsPartOnNewStub(t *testing.T) {
 	delta := [2]float64{-20, -10}
 	segs := markerStubPath(stub.HostX, stub.HostY, c.X+delta[0], c.Y+delta[1], 0)
 	if markerMoveClear(c, delta, stub, segs, items, comps, wires,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil) {
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil) {
 		t.Fatal("a part sitting on the new elbow must reject the move")
 	}
 }
@@ -185,7 +185,7 @@ func TestMarkerMoveClearRejectsMovedTextOverlap(t *testing.T) {
 	delta := [2]float64{0, -10}
 	segs := markerStubPath(stub.HostX, stub.HostY, c.X+delta[0], c.Y+delta[1], 0)
 	if markerMoveClear(c, delta, stub, segs, items, comps, wires,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil) {
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil) {
 		t.Fatal("moving the Name band onto another text must be rejected")
 	}
 }
@@ -200,7 +200,7 @@ func TestMarkerMoveClearRejectsTitleBlock(t *testing.T) {
 	delta := [2]float64{0, -10}
 	segs := markerStubPath(stub.HostX, stub.HostY, c.X+delta[0], c.Y+delta[1], 0)
 	if markerMoveClear(c, delta, stub, segs, items, comps, wires,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200},
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200},
 		&layoutBBox{MinX: 40, MinY: 80, MaxX: 60, MaxY: 90}) {
 		t.Fatal("a marker body inside the title-block keep-out must be rejected")
 	}
@@ -220,7 +220,7 @@ func TestMarkerMoveClearRejectsBodyOverLabel(t *testing.T) {
 	delta := [2]float64{0, -10}
 	segs := markerStubPath(stub.HostX, stub.HostY, c.X+delta[0], c.Y+delta[1], 0)
 	if markerMoveClear(c, delta, stub, segs, items, comps, wires,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil) {
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil) {
 		t.Fatal("a marker body moved onto a wire label must be rejected")
 	}
 }
@@ -229,7 +229,7 @@ func TestPlanDirectConnectMarkerMoveIgnoresNetLabel(t *testing.T) {
 	items, comps, wires := dcMarkerFixture()
 	comps[0].ComponentType = "netlabel"
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 300, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].MarkerMove != nil {
 		t.Fatalf("netlabel must not enter the marker-move layer, got %+v", plans)
 	}
@@ -299,13 +299,35 @@ func TestPlanDirectConnectMarkerMoveFromWireBlocker(t *testing.T) {
 		},
 	}
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
-	if len(plans) != 1 || plans[0].Status != "marker-move-proposed" || plans[0].MarkerMove == nil {
-		t.Fatalf("a stub-only blocker must nominate its marker: %+v", plans)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
+	// The only clear route would start the stub horizontally at the host pin,
+	// perpendicular to its outward (up) direction. That is illegal, so the
+	// planner must nominate the marker from the wire blocker and then refuse it.
+	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].MarkerMove != nil {
+		t.Fatalf("a perpendicular first stub segment must be refused: %+v", plans)
 	}
-	if plans[0].MarkerMove.MarkerID != "m1" || plans[0].MarkerMove.StubWireID != "w3" ||
-		plans[0].MarkerMove.DeltaX <= 0 {
-		t.Fatalf("wrong stub-owner proposal: %+v", plans[0].MarkerMove)
+	found := false
+	for _, s := range plans[0].MarkerSkips {
+		if s.MarkerID == "m1" && strings.Contains(s.Reason, "no-clear-stub-move") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the wire blocker must nominate m1 and report the refusal: %+v", plans[0].MarkerSkips)
+	}
+}
+
+func TestMarkerStubFirstSegmentFollowsHostDirection(t *testing.T) {
+	horizontalFirst := markerStubPath(10, 60, 50, 80, 0)
+	if firstSegmentMatchesDir(horizontalFirst, "up") {
+		t.Fatal("a horizontal first segment must not satisfy an up-facing host pin")
+	}
+	verticalFirst := markerStubPath(10, 60, 50, 80, 1)
+	if !firstSegmentMatchesDir(verticalFirst, "up") {
+		t.Fatal("an up-first folded route must satisfy an up-facing host pin")
+	}
+	if firstSegmentMatchesDir(verticalFirst, "down") {
+		t.Fatal("an up-first route must not satisfy a down-facing host pin")
 	}
 }
 
@@ -352,7 +374,7 @@ func dcPartMoveFixture() ([]visibleTextItem, []layoutComp, []schGroupWire) {
 func TestPlanDirectConnectPartMove(t *testing.T) {
 	items, comps, wires := dcPartMoveFixture()
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "part-move-proposed" || plans[0].PartMove == nil {
 		t.Fatalf("want one rigid part move, got %+v", plans)
 	}
@@ -390,7 +412,7 @@ func TestPlanDirectConnectPartMoveRejectsSharedTree(t *testing.T) {
 		Pins: []layoutPin{{Number: "1", X: 100, Y: 60}},
 	})
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].PartMove != nil {
 		t.Fatalf("a shared wire tree must stay unresolved, got %+v", plans)
 	}
@@ -407,7 +429,7 @@ func TestPlanDirectConnectPartMoveRejectsPinContact(t *testing.T) {
 		Pins: []layoutPin{{Number: "1", X: 20, Y: 60}},
 	})
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
-		&layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil, 250, 40)
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil, 250, 40)
 	if len(plans) != 1 || plans[0].Status != "unresolved" || plans[0].PartMove != nil {
 		t.Fatalf("a pin-to-pin contact must stay unresolved, got %+v", plans)
 	}
@@ -426,7 +448,31 @@ func TestPartMoveClearRejectsUnmovedPartOnMovedTree(t *testing.T) {
 	movedComp := map[string]bool{"p1": true, "f1": true}
 	movedWire := map[string]bool{"w3": true, "w4": true}
 	if partMoveClear(c, [2]float64{0, 35}, movedComp, movedWire, []string{"pv", "fv"},
-		items, comps, wires, &layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 200}, nil) {
+		items, comps, wires, &layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil) {
 		t.Fatal("a moved wire tree landing on an unmoved part must be rejected")
+	}
+}
+
+func TestPlanDirectConnectRejectsPathThroughTitleBlock(t *testing.T) {
+	items := []visibleTextItem{
+		{
+			ID: "t1", Kind: "attribute", ComponentType: "wire", ParentID: "w1",
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: 0, MinY: 95, MaxX: 10, MaxY: 105},
+		},
+		{
+			ID: "t2", Kind: "attribute", ComponentType: "wire", ParentID: "w2",
+			Key: "Name", Value: "SIG", BBox: &layoutBBox{MinX: 110, MinY: 95, MaxX: 120, MaxY: 105},
+		},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 95, 0, 105}},
+		{ID: "w2", Points: []float64{110, 95, 110, 105}},
+	}
+	plans := planDirectConnectTextMoves(items, nil, wires, nil,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200},
+		&layoutBBox{MinX: 40, MinY: 95, MaxX: 60, MaxY: 105}, 250, 40)
+	if len(plans) != 1 || plans[0].Status != "unresolved" ||
+		!strings.Contains(plans[0].Note, "title-block") {
+		t.Fatalf("a route through the title block must be refused: %+v", plans)
 	}
 }

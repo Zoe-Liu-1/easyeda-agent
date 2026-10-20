@@ -98,7 +98,7 @@ func TestDirectConnectOpportunityFindings(t *testing.T) {
 		{ID: "t1", ComponentType: "wire", ParentID: "w1", Key: "Name", Value: "SIG", BBox: box(0, 40, 20, 48)},
 		{ID: "t2", ComponentType: "wire", ParentID: "w2", Key: "Name", Value: "SIG", BBox: box(200, 40, 220, 48)},
 	}
-	got := directConnectOpportunityFindings(items, nil, wires)
+	got := directConnectOpportunityFindings(items, nil, wires, nil, nil)
 	if len(got) != 1 || got[0].Type != "direct-connect-opportunity" || got[0].Level != "info" {
 		t.Fatalf("want one direct-connect opportunity, got %+v", got)
 	}
@@ -119,7 +119,7 @@ func TestDirectConnectOpportunityBlockedByPin(t *testing.T) {
 	comps := []layoutComp{
 		{ID: "jumper", ComponentType: "part", Pins: []layoutPin{{Number: "2", X: 100, Y: 44}}},
 	}
-	if got := directConnectOpportunityFindings(items, comps, wires); len(got) != 0 {
+	if got := directConnectOpportunityFindings(items, comps, wires, nil, nil); len(got) != 0 {
 		t.Fatalf("a pin between the labels must block the L route: %+v", got)
 	}
 }

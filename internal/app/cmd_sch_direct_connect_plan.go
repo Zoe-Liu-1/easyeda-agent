@@ -258,7 +258,11 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 				{{a.ax, a.ay}, {b.ax, a.ay}, {b.ax, b.ay}},
 				{{a.ax, a.ay}, {a.ax, b.ay}, {b.ax, b.ay}},
 			})
+			paths = filterDCPaths(paths, sheet, titleBlock)
 			if len(paths) == 0 {
+				pair.Status = "unresolved"
+				pair.Note = "both L paths leave the usable sheet or cross the title-block keep-out"
+				out = append(out, pair)
 				continue
 			}
 			blockers := make([][]dcBlocker, len(paths))
@@ -371,6 +375,34 @@ func dedupeDCPaths(paths [][][2]float64) [][][2]float64 {
 		}
 		seen[key] = true
 		out = append(out, p)
+	}
+	return out
+}
+
+// filterDCPaths drops routes that leave the usable sheet or cross the title
+// block. A direct wire must obey the same boundary rules as any other wire.
+func filterDCPaths(paths [][][2]float64, sheet, titleBlock *layoutBBox) [][][2]float64 {
+	if sheet == nil {
+		return paths
+	}
+	usable := schUsableArea(*sheet)
+	var out [][][2]float64
+	for _, p := range paths {
+		ok := true
+		for i := 0; i+1 < len(p); i++ {
+			if !pointInBox2(p[i][0], p[i][1], usable, 0.5) ||
+				!pointInBox2(p[i+1][0], p[i+1][1], usable, 0.5) {
+				ok = false
+				break
+			}
+			if titleBlock != nil && schSegmentCrossesBox(p[i][0], p[i][1], p[i+1][0], p[i+1][1], *titleBlock) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, p)
+		}
 	}
 	return out
 }
@@ -690,6 +722,13 @@ func chooseMarkerMove(paths [][][2]float64, blockers [][]dcBlocker, pairNet, aWi
 				for elbow := 0; elbow < 2; elbow++ {
 					segs := markerStubPath(stub.HostX, stub.HostY, newX, newY, elbow)
 					if segs == nil || markerStubLength(segs) > destaggerStubMaxLen {
+						continue
+					}
+					// The first stub segment must leave the host pin along the
+					// pin's outward direction (the original stub's direction).
+					// A perpendicular first step is what `connect_pin` rejects;
+					// a folded route must go out first, then bend.
+					if !firstSegmentMatchesDir(segs, stub.Dir) {
 						continue
 					}
 					if !markerMoveClear(c, delta, stub, segs, items, comps, wires, sheet, titleBlock) {
@@ -1044,6 +1083,25 @@ func markerStubLength(segs [][2]float64) float64 {
 		total += math.Abs(segs[i+1][0]-segs[i][0]) + math.Abs(segs[i+1][1]-segs[i][1])
 	}
 	return total
+}
+
+func firstSegmentMatchesDir(path [][2]float64, dir string) bool {
+	if len(path) < 2 {
+		return false
+	}
+	dx := path[1][0] - path[0][0]
+	dy := path[1][1] - path[0][1]
+	switch dir {
+	case "up":
+		return math.Abs(dx) < 0.5 && dy > 0.5
+	case "down":
+		return math.Abs(dx) < 0.5 && dy < -0.5
+	case "left":
+		return math.Abs(dy) < 0.5 && dx < -0.5
+	case "right":
+		return math.Abs(dy) < 0.5 && dx > 0.5
+	}
+	return true
 }
 
 func translateLayoutBBox(b layoutBBox, d [2]float64) layoutBBox {
