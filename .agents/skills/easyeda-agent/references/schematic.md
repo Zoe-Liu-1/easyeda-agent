@@ -317,6 +317,9 @@ ERROR，保留器件/引脚/线段证据。允许先向外再折线；不二次�
 正交短线、保留/删除标志和“先接、回读、再删”的顺序；`partial` 只对已 clear 的被动件
 生成接线和删除步骤，被挡 passive 保留符号；`blocked` 不生成删除步骤并列出阻挡对象。
 planner 不调用 modify/wire/connect/prim-delete/save，应用前仍需确认 zones/消费归属。
+`--playbook <file>` 生成带 `requireFullExecution:true` 的 Apply 队列：源引脚核验 →
+wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → 复验 → save；
+任何接线或图检失败都不会进入删除步骤。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 

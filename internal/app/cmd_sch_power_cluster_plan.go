@@ -45,7 +45,7 @@ type powerClusterConnection struct {
 
 func newSchPowerClusterPlanCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var jsonOut bool
-	var out, exemptInline string
+	var out, exemptInline, playbookOut string
 	cmd := &cobra.Command{
 		Use:   "power-cluster-plan",
 		Short: "Plan local power-cluster wiring and flag deletion (read-only)",
@@ -95,6 +95,25 @@ The command is read-only: it never calls modify, wire, connect, prim-delete or s
 			titleBlock, _ := titleBlockKeepoutWithSource(sheet)
 			exempt := parsePowerClusterExemptSet(exemptInline)
 			plans := planPowerClusters(comps, wires, items.Items, sheet, titleBlock, exempt)
+			if playbookOut != "" {
+				project := ""
+				if geom.Context != nil {
+					project = geom.Context.ProjectUUID
+				}
+				pb, perr := powerClusterPlaybook(plans, comps, project, doc)
+				if perr != nil {
+					return perr
+				}
+				b, mErr := json.MarshalIndent(pb, "", "  ")
+				if mErr != nil {
+					return mErr
+				}
+				b = append(b, '\n')
+				if werr := os.WriteFile(playbookOut, b, 0644); werr != nil {
+					return fmt.Errorf("write power-cluster playbook: %w", werr)
+				}
+				fmt.Fprintf(stderr, "power-cluster playbook written to %s (apply with easyeda sch apply %s --yes)\n", playbookOut, playbookOut)
+			}
 			report := powerClusterPlanReport{SchemaVersion: 1, DocumentID: doc, Plans: plans}
 			for _, p := range plans {
 				switch p.Status {
@@ -127,6 +146,7 @@ The command is read-only: it never calls modify, wire, connect, prim-delete or s
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON")
 	cmd.Flags().StringVar(&out, "out", "", "write structured JSON to file")
 	cmd.Flags().StringVar(&exemptInline, "exempt", "", "comma-separated DESIGNATOR or NET|DESIGNATOR clusters treated as intentional and not planned")
+	cmd.Flags().StringVar(&playbookOut, "playbook", "", "write a guarded sch apply playbook for ready/partial plans (read-only generation; does not execute)")
 	return cmd
 }
 
@@ -268,6 +288,132 @@ func planPowerClusters(comps []layoutComp, wires []schGroupWire, items []visible
 		return plans[i].Consumer < plans[j].Consumer
 	})
 	return plans
+}
+
+// powerClusterPlaybook compiles the clear/partial portion of a power-cluster
+// plan into the existing guarded Apply runner. It never deletes a flag before
+// the new wires have passed check + bridge-check.
+func powerClusterPlaybook(plans []powerClusterPlan, comps []layoutComp, project, doc string) (*playbook, error) {
+	var wireSteps []playbookStep
+	deleteIDs := map[string]bool{}
+	clearCount := 0
+	for _, p := range plans {
+		for _, c := range p.Connections {
+			if c.Status == "clear" {
+				clearCount++
+				wireSteps = append(wireSteps, playbookStep{
+					ID:      fmt.Sprintf("wire-%03d-%s", clearCount, strings.ReplaceAll(c.Passive, ".", "_")),
+					Name:    fmt.Sprintf("%s local power connection to %s", p.Net, p.Consumer),
+					Action:  "schematic.wire.create",
+					Payload: map[string]any{"points": c.Path},
+					Capture: map[string]string{fmt.Sprintf("WIRE_%03d", clearCount): "$.primitiveId"},
+				})
+			}
+		}
+		for _, id := range p.DeleteFlags {
+			deleteIDs[id] = true
+		}
+	}
+	if clearCount == 0 && len(deleteIDs) == 0 {
+		return nil, fmt.Errorf("no clear power-cluster wire or already-connected passive flag to apply")
+	}
+	expect := powerClusterExpectation(plans, comps)
+	timeout, retry := 90, 0
+	cont := false
+	pb := &playbook{
+		Version: 1, RequireFullExecution: true,
+		Meta:     playbookMeta{Name: "power-cluster consolidation", Project: project, Doc: doc},
+		Defaults: stepPolicy{TimeoutSec: &timeout, Retry: &retry, ContinueOnError: &cont},
+	}
+	pb.Steps = append(pb.Steps, playbookStep{
+		ID: "verify-source-power-pins", Name: "verify consumer/passive pins before wiring",
+		Action:          "schematic.components.list",
+		Payload:         map[string]any{"includeBBox": true, "includePins": true, "includePinNets": true},
+		ExpectSchematic: expect,
+	})
+	pb.Steps = append(pb.Steps, wireSteps...)
+	checkAssert := map[string]string{
+		"$.summary.danglingWires":       "==0",
+		"$.summary.multiNetWires":       "==0",
+		"$.summary.netMarkerMismatches": "==0",
+		"$.summary.wireOverPins":        "==0",
+		"$.summary.nonOrthogonalWires":  "==0",
+		"$.summary.zeroLengthWires":     "==0",
+	}
+	pb.Steps = append(pb.Steps,
+		playbookStep{ID: "verify-wiring-check", Run: "sch check", Flags: map[string]any{"json": true}, Assert: checkAssert},
+		playbookStep{ID: "verify-wiring-bridge", Run: "sch bridge-check", Flags: map[string]any{"json": true},
+			Assert: map[string]string{"$.summary.bridges": "==0", "$.summary.orphans": "==0"}},
+	)
+	if len(deleteIDs) > 0 {
+		ids := make([]string, 0, len(deleteIDs))
+		for id := range deleteIDs {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		confirm := true
+		pb.Steps = append(pb.Steps, playbookStep{
+			ID: "delete-connected-passive-flags", Name: "delete only flags on verified connected passive roots",
+			Action:  "schematic.primitives.delete",
+			Payload: map[string]any{"primitiveIds": ids},
+			Confirm: &confirm,
+			Assert:  map[string]string{"$.total": fmt.Sprintf("==%d", len(ids))},
+		})
+	}
+	pb.Steps = append(pb.Steps,
+		playbookStep{ID: "verify-cleanup-check", Run: "sch check", Flags: map[string]any{"json": true}, Assert: checkAssert},
+		playbookStep{ID: "verify-cleanup-bridge", Run: "sch bridge-check", Flags: map[string]any{"json": true},
+			Assert: map[string]string{"$.summary.bridges": "==0", "$.summary.orphans": "==0"}},
+		playbookStep{ID: "save-verified-power-clusters", Action: "schematic.save",
+			Assert: map[string]string{"$.saved": "true"}, Checkpoint: true},
+	)
+	if errs := preflight(pb, nil); len(errs) > 0 {
+		return nil, fmt.Errorf("power-cluster playbook failed preflight: %v", errs)
+	}
+	return pb, nil
+}
+
+func powerClusterExpectation(plans []powerClusterPlan, comps []layoutComp) *schematicStateExpectation {
+	names := map[string]bool{}
+	for _, p := range plans {
+		if p.Consumer != "" {
+			names[p.Consumer] = true
+		}
+		for _, c := range p.Connections {
+			if dot := strings.LastIndex(c.Passive, "."); dot > 0 {
+				names[c.Passive[:dot]] = true
+			}
+		}
+	}
+	byName := map[string]layoutComp{}
+	for _, c := range comps {
+		if c.Designator != "" {
+			byName[c.Designator] = c
+		}
+	}
+	expect := &schematicStateExpectation{Parts: map[string]schematicPartExpectation{}}
+	for name := range names {
+		c, ok := byName[name]
+		if !ok {
+			continue
+		}
+		x, y := c.X, c.Y
+		part := schematicPartExpectation{PrimitiveID: c.ID, X: &x, Y: &y, Pins: map[string]schematicPinExpectation{}}
+		if c.Rotation != nil {
+			part.Rotation = c.Rotation
+		}
+		for _, pin := range c.Pins {
+			px, py := pin.X, pin.Y
+			ep := schematicPinExpectation{X: &px, Y: &py}
+			if pin.Net != "" {
+				net := pin.Net
+				ep.Net = &net
+			}
+			part.Pins[pin.Number] = ep
+		}
+		expect.Parts[name] = part
+	}
+	return expect
 }
 
 type powerPinRef struct {

@@ -114,6 +114,10 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 保留/删除符号和“先接后验证再删”的顺序；`partial` 只接已经 clear 的被动件并删除其
 对应符号，被挡的 passive 保留符号；`blocked` 不生成删除步骤，只列阻挡对象。路径仍须
 由 Apply 阶段回读验证，planner 本身不落图。
+加 `--playbook <file>` 会生成受保护 `sch apply` 队列：先验证目标引脚，再
+`schematic.wire.create`，随后跑 `sch check` + `sch bridge-check`，通过后才
+`schematic.primitives.delete` 被动侧符号，再复验并保存。`requireFullExecution:true`
+禁止跳过前置门禁或断点续跑。
 有意保留的独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'`
 登记为 INFO 例外；同一消费脚的本地被动件仍应先物理接入，不能借豁免逃避局部直连。
 

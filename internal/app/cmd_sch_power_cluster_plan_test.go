@@ -97,3 +97,36 @@ func TestPlanPowerClusterPartial(t *testing.T) {
 		}
 	}
 }
+
+func TestPowerClusterPlaybookOrder(t *testing.T) {
+	comps, wires := powerPlanFixture()
+	plans := planPowerClusters(comps, wires, nil,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 50}, nil, nil)
+	pb, err := powerClusterPlaybook(plans, comps, "project", "doc")
+	if err != nil {
+		t.Fatalf("compile playbook: %v", err)
+	}
+	if !pb.RequireFullExecution || len(pb.Steps) < 5 {
+		t.Fatalf("want a full guarded playbook, got %+v", pb)
+	}
+	var wireIdx, checkIdx, deleteIdx, saveIdx = -1, -1, -1, -1
+	for i, s := range pb.Steps {
+		switch s.Action {
+		case "schematic.wire.create":
+			if wireIdx < 0 {
+				wireIdx = i
+			}
+		case "schematic.primitives.delete":
+			deleteIdx = i
+		case "schematic.save":
+			saveIdx = i
+		}
+		if s.Run == "sch check" && checkIdx < 0 {
+			checkIdx = i
+		}
+	}
+	if wireIdx < 0 || checkIdx < 0 || deleteIdx < 0 || saveIdx < 0 ||
+		!((wireIdx < checkIdx) && (checkIdx < deleteIdx) && (deleteIdx < saveIdx)) {
+		t.Fatalf("wrong playbook order: %+v", pb.Steps)
+	}
+}
