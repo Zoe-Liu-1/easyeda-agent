@@ -18,6 +18,7 @@
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
+| 直连机会/文字移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读，仅尝试移动阻挡的 part Designator/Value 文字，不落图 |
 | 执行计划 | `sch apply <playbook.json>` |
 
 生成器的输入、支持范围与位号/身份规则集中在 [schematic-data.md](schematic-data.md)。

@@ -71,6 +71,11 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 重排顶点，直接回放可能产生斜线/回折；应从干净的正交模板生成，逐段 `sch wire`，完成后跑
 `sch bridge-check` + `sch read` 逐脚对账。
 
+**直连机会规划先只读。** `sch direct-connect-plan` 会列出同网不同线岛的近距离标签对、
+当前 L 路径的阻挡对象，并尝试用 5 网格的小位移移动阻挡的 part Designator/Value 文字。
+它只输出 `move-proposed` / `unresolved`，不调用 modify、wire、connect 或 save；导线、
+器件本体或 netflag/netport 阻挡不会被第一层文字规划器自动移动。
+
 **批次内互斥 (issue #138):** 同一批(--spec / 多 --pin)里**已规划的短桩会当作
 既存导线注册回 scene**,后续连接对它做同样的异网硬拒——同器件相邻异网引脚
 (隔离 DC-DC 的 B0512S 类四域脚)不再出现短桩共线相触被 EasyEDA 合并成隐性
