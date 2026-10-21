@@ -110,6 +110,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `sch attribute-modify --from <patch.json>`，`schematic.attribute.modify` | 严格修改一个 Name/Designator/Value 属性的 `rotation`、`valueVisible`、`keyVisible` 或 `value`。payload 带完整原始状态；只向官方 `sch_PrimitiveAttribute.modify` 发送允许字段。写后 fresh 状态必须等于“原状态 + 请求字段”，其余文字、显隐、样式和父级保持逐字段一致。部分或未验证结果非零退出且禁止自动重试 |
 | 批量标签显隐/横排修复 | `sch label-fix --doc <page> [--id <attributeIds>] [--apply] [--save] [--allow-partial]`；把隐藏 Name 设为可见，把 90/270 文字旋转改为 0；空 Name 只有在父 wire/netflag/netport 已有明确网名时才补齐。缺失原生 Name 或无法确定网名保持 blocked。应用前后比较 pin→net、bridge 与可见文字 finding，新增遮挡则逆序回滚 |
 | 电源/GND 朝向修复 | `sch power-orientation-fix --doc <page> [--id <netflagIds>] [--apply] [--save] [--allow-partial]`；电源旗配置到 body-up、GND 配置到 body-down。只处理单桩 netflag，首段沿实测引脚外向，可用本地 2–4 段正交路径；反向脚保持 blocked，要求显式 `orientationExempt`。应用逐标记比较完整 pin→net、bridge 和目标 finding，失败逆序回滚 |
+| 可见文字避让 | `sch visual-text-fix --doc <page> [--id <textIds>] [--apply] [--save] [--allow-partial]`；对每条 `visible-text-overlap` 在 60 单位内搜索 5 单位槽位。属性走 protected `attribute.move`，自由文字走 `text.move`；候选避开器件/引脚/marker/其他文字/异网导线/图签/纸张边界。应用后比较全部 visible-text finding、pin→net 和 bridge，新增问题或残留目标 finding 时逆序回滚 |
 | `sch place`，`schematic.component.place` | 使用库 UUID；自动回填可确定的 C 号与空属性是 best-effort，须检查警告。没有 place 自定义属性输入契约；V4 复数 symbol/device/footprint association 在 canonical selector 完成前写前拒绝，不能取第一项 |
 | `sch modify`，`schematic.component.modify` | `otherProperty`/`customAttributes` 二选一，合并保留原属性。`verified:false` 需要再回读，不能当已验证 |
 | `sch prim-delete/clear` | 删除后按 ID 或完整图元清单验证；默认保护 sheet。未知枚举或幸存图元不能报告清空 |
@@ -151,7 +152,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `power-cluster-candidate` | 消费电源脚与就近本地被动件（R/C/L/D）分属多个线岛、且每个线岛各有同名电源符号。先物理接入消费脚，再合并成一个符号；非 GND 按 250 单位 WARN，GND 按 150 单位 INFO（仍不自动落图）。跨功能区、10 器件以上通道不自动合并。独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 登记为 INFO 例外。 |
 | `signal-netflag-type` / `signal-netport-type` | 非电源/地网络使用 netflag 或 netport 均为 WARN。信号网统一使用文字网络标签；确属模块边界的 netport 必须用 `--signal-port-exempt <primitiveId,...>` 显式登记，登记项转为 `signal-port-exempt` INFO 并保留审计。 |
 | `designator-wire-overlap` | 导线进入可见文字 bbox。应扩展到 Value、网络名和自由文字；网络标签只排除自身挂载线，Designator/Value/自由文字的全部导线都参与碰撞。 |
-| `visible-text-overlap` | 可见文字压器件/标识/其他文字/导线/引脚（含 body 外 lead）；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
+| `visible-text-overlap` | 可见文字压器件/标识/其他文字/导线/引脚（含 body 外 lead）；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。`sch visual-text-fix` 可规划局部槽位并执行；无锚点或无可清槽位保持 blocked。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
 | `titleblock-overlap` | 器件、标记、导线或可见文字落入图签 keep-out；sheet 自身的图签字段豁免。 |
 | `out-of-sheet` | 包含可见属性文字；只包器件 body 不算入框或出图通过。 |
 | `zones-not-claimed` | 多器件页面未登记任何 zone 或虚拟组。INFO；功能框存在不代表已证明器件归属，`layout-score` 的 proximity 只是全页兜底。 |

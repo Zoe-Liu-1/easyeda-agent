@@ -379,6 +379,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `sch power-orientation-fix` 把电源 netflag 重接到 body-up、GND 重接到 body-down。
 仅接受单段可安全重建的 netflag 桩；首段沿实测引脚外向，再走本地正交折线。反向脚不改，
 必须已有 `orientationExempt`。每个替换都复核 pin→net、bridge 和目标 finding，失败逆序恢复。
+`sch visual-text-fix` 对 `visible-text-overlap` 在 60 单位内按 5 单位搜索局部空槽；
+Name/Designator/Value 走 `attribute.move`，自由文字走 `text.move`。应用后重读全部可见文字，
+任何移动目标仍重叠或新增文字/导线碰撞都回滚，同时保持 pin→net 与 bridge 不变。
 
 
 ## 修改属性时保留供应商身份

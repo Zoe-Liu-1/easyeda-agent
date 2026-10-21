@@ -53,7 +53,8 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `label-visibility` / `label-orientation` | 直接执行或显式阻断 | `sch label-fix` 设置可见和水平；空名称只有父 wire/marker 已携带明确网名时补齐。缺原生 Name 或网名未知不猜 |
 | `label-distance` | 语义选择或重排 | 用 `attribute-move` 把可见名称移回挂载点附近，并复查文字/导线碰撞 |
 | `polarity-convention-outlier` | 语义选择 | 对照器件极性和同页多数派确认是否反装；编号约定本身不证明电气极性 |
-| `visible-text-overlap` / `marker-wire-overlap` | 重排重布 | 移动文字/标记或改线，必须复查器件、引脚、导线和标题区 |
+| `visible-text-overlap` | 直接执行或显式阻断 | `visual-text-fix` 在 60 单位内搜索无碰撞槽位，属性/自由文字分别走 typed move；无锚点或无可清槽位保持 blocked |
+| `marker-wire-overlap` | 重排重布 | 移动 marker 或改走线，必须复查器件、引脚、导线和标题区 |
 | `titleblock-overlap` / `out-of-sheet` | 重排重布 | 移入图签外/图纸内；不缩小页面或隐藏文字来规避 |
 | `partition-overlap` / `designator-overlap` / `designator-wire-overlap` / `part-out-of-frame` / `part-frame-unresolved` / `designator-out-of-frame` | 重排重布 | 重新布局功能组、区框或文字槽位；不能删除位号或把未认领器件硬塞进框 |
 | `missing-partition` / `missing-titleblock` / `missing-note` / `zones-not-claimed` / `titleblock-key-absent` | 显式计划或语义选择 | `zones` / `zone-draw` / `titleblock` 按已声明归属生成；字段内容无依据时保留待确认 |
