@@ -147,6 +147,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchAlignmentApplyCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchAlignmentFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchMarkerCleanCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchLabelFixCmd(cfg, &window, stdout, stderr))
 	// `sch apply` is the schematic-domain entry point for the shared, ordered
 	// playbook executor. The executor itself remains shared so queue semantics
 	// and WebSocket response handling stay identical across domains.
@@ -676,6 +677,7 @@ not relax guarded page replacement or clear.`,
 
 	// ── place ─────────────────────────────────────────────────────────────
 	sch.AddCommand(newSchAttributeMoveCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchAttributeModifyCmd(cfg, &window, stdout, stderr))
 
 	// schematic.component.place
 	{

@@ -50,7 +50,8 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `cross-chip-direct-wire` / `pin-exit-direction` | 重排重布 | 芯片间改同名网络标签；首段先沿引脚外向再正交折线 |
 | `signal-netflag-type` / `signal-netport-type` | 语义选择 | 信号改文字网络标签；模块边界端口需显式豁免，不能静默换型 |
 | `power-ground-orientation` / `reversed-net-flag` | 显式计划 | 先按引脚外向和碰撞找新桩；反向脚登记 `orientationExempt` |
-| `label-visibility` / `label-orientation` / `label-distance` | 语义选择或重排 | 先恢复可见、水平、靠近挂载点的名称；内容缺失不得猜网名 |
+| `label-visibility` / `label-orientation` | 直接执行或显式阻断 | `sch label-fix` 设置可见和水平；空名称只有父 wire/marker 已携带明确网名时补齐。缺原生 Name 或网名未知不猜 |
+| `label-distance` | 语义选择或重排 | 用 `attribute-move` 把可见名称移回挂载点附近，并复查文字/导线碰撞 |
 | `polarity-convention-outlier` | 语义选择 | 对照器件极性和同页多数派确认是否反装；编号约定本身不证明电气极性 |
 | `visible-text-overlap` / `marker-wire-overlap` | 重排重布 | 移动文字/标记或改线，必须复查器件、引脚、导线和标题区 |
 | `titleblock-overlap` / `out-of-sheet` | 重排重布 | 移入图签外/图纸内；不缩小页面或隐藏文字来规避 |

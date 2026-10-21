@@ -153,7 +153,8 @@ func dispatchTimed(cfg *appConfig, action, window string, payload any, timeout t
 		return libraryWriteFailureError(action, respBody, errors.Join(errActionFailed, &actionError{Action: action, Code: parsed.Error.Code,
 			Message: parsed.Error.Message, Detail: parsed.Error.Detail}))
 	}
-	if action == "pcb.silk.align" || action == "pcb.silk.set" || action == "schematic.attribute.move" {
+	if action == "pcb.silk.align" || action == "pcb.silk.set" ||
+		action == "schematic.attribute.move" || action == "schematic.attribute.modify" {
 		var envelope struct {
 			Result map[string]any `json:"result"`
 		}
@@ -161,6 +162,9 @@ func dispatchTimed(cfg *appConfig, action, window string, payload any, timeout t
 			return errActionFailed
 		}
 		if err := schAttributeMoveResultError(action, envelope.Result); err != nil {
+			return err
+		}
+		if err := schAttributeModifyResultError(action, envelope.Result); err != nil {
 			return err
 		}
 		if err := silkSetResultError(action, envelope.Result, respBody); err != nil {
@@ -565,6 +569,9 @@ func requestActionOnce(cfg *appConfig, action, window string, payload any, timeo
 	if err := schAttributeMoveResultError(action, res.Result); err != nil {
 		return res, err
 	}
+	if err := schAttributeModifyResultError(action, res.Result); err != nil {
+		return res, err
+	}
 	if err := silkSetResultError(action, res.Result, respBody); err != nil {
 		return res, err
 	}
@@ -650,6 +657,9 @@ func dispatchCaptureTimed(cfg *appConfig, action, window string, payload any, st
 		return res, err
 	}
 	if err := schAttributeMoveResultError(action, res.Result); err != nil {
+		return res, err
+	}
+	if err := schAttributeModifyResultError(action, res.Result); err != nil {
 		return res, err
 	}
 	if err := silkSetResultError(action, res.Result, respBody); err != nil {

@@ -1,5 +1,6 @@
 import { projectOpen, projectExport, projectImport } from './project-transfer';
 import { moveSchematicAttribute } from './schematic-attribute-move';
+import { modifySchematicAttributeProperties } from './schematic-attribute-modify';
 import { documentSourceGet, documentSourceRoundtrip } from './document-source';
 import { applyAndVerifyPourOrder, preparePourOrder, PourOrderError, verifyPourOrderReadback, type PourOrderVerification } from './pcb-pour-order';
 import { listSystemCommonLibrary } from './common-library';
@@ -15731,6 +15732,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.components.list': schematicComponentsList,
 	'schematic.attribute.inspect': schematicAttributeInspect,
 	'schematic.attribute.move': payload => moveSchematicAttribute(payload, attribute => schAttributeStateRecord(attribute, readCurrentNativePageAttributes)),
+	'schematic.attribute.modify': payload => modifySchematicAttributeProperties(payload, attribute => schAttributeStateRecord(attribute, readCurrentNativePageAttributes)),
 	'schematic.designators.list': schematicDesignatorsList,
 	'schematic.component.place': schematicComponentPlace,
 	'schematic.component.modify': schematicComponentModify,

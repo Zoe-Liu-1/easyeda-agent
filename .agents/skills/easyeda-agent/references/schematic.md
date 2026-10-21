@@ -372,6 +372,10 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `direct-connect-fix --allow-move` 执行。执行器只处理选中的一对；移动后重新读取页面，
 要求同一 net 的唯一 `already-clear` 路径后才能建线并删除标签。移动前后完整 pin→net
 与 bridge 集必须一致，移动本身新增重复网络名也会阻止判定完成。
+`sch label-fix` 消费 `label-visibility`/`label-orientation`：隐藏 Name 改为可见，
+90/270 文字改为 0；空 Name 仅在父 wire/marker 已有明确网名时补齐。每一写使用完整
+原生属性状态和严格 `schematic.attribute.modify` 字段集合，写后逐字段验证；新增
+`visible-text-overlap`、pin→net 或 bridge 变化时逆序回滚。
 
 
 ## 修改属性时保留供应商身份
