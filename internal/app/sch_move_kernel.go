@@ -101,6 +101,11 @@ type moveReport struct {
 	StillBroken []string // 恢复后仍断的 pin refs(可直接喂 `sch connect`)
 	NewBridges  []string // 对账检出的新增 wire-bridge(真短路)
 	NetDiffs    []string // 对账检出的网表差异(人类可读)
+	// NewNameDuplicates are marker IDs created by this run that duplicate an
+	// existing same-kind marker or visible wire label on the same wire tree.
+	// Electrical reconciliation can pass while the drawing gains a second name;
+	// the move must not report a clean result until marker-clean resolves it.
+	NewNameDuplicates []string
 	// FreeConnected 是**几何不受任何计划约束**地落地的 pin(既没有显式计划端子,
 	// 也复现不出移动前的桩,只能交给 autoconnect 自由评分挑方向和桩长)。
 	//
@@ -440,6 +445,12 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 	// 是「知道原来长什么样就别乱猜」。free 策略只关掉常规步的复现,不该连
 	// 「火警现场的记忆」一起关掉。
 	stubSnap := moveKernelStubSnapshot(nil, comps, wires)
+	baselineMarkerIDs := map[string]bool{}
+	for _, c := range comps {
+		if isSchMarker(c.ComponentType) {
+			baselineMarkerIDs[c.ID] = true
+		}
+	}
 	rotBefore := map[string]float64{}
 	for _, c := range comps {
 		if c.Rotation != nil {
@@ -1053,11 +1064,31 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 		}
 		return strings.Join(parts, ";")
 	}
+	requireNoNewNames := func() error {
+		compsAfter, wiresAfter, serr := ops.scene()
+		if serr != nil {
+			return fmt.Errorf("读移动后名称几何: %w", serr)
+		}
+		_, labelsAfter, lerr := ops.wireSnapshot()
+		if lerr != nil {
+			return fmt.Errorf("读移动后网络标签: %w", lerr)
+		}
+		rep.NewNameDuplicates = moveKernelNewMarkerDuplicates(
+			baselineMarkerIDs, compsAfter, wiresAfter, labelsAfter)
+		if len(rep.NewNameDuplicates) == 0 {
+			return nil
+		}
+		return fmt.Errorf("%s 新增了 %d 个重复网络名称:%s —— 运行 `sch marker-clean --doc <page>` 复核候选，显式删除本次新增对象后再判定完成",
+			label, len(rep.NewNameDuplicates), strings.Join(rep.NewNameDuplicates, ","))
+	}
 	diffs, newBridges, afterCur, rerr := reconcile()
 	if rerr != nil {
 		return rep, recoverConns("对账", rerr)
 	}
 	if len(diffs) == 0 && len(newBridges) == 0 {
+		if err := requireNoNewNames(); err != nil {
+			return rep, err
+		}
 		fmt.Fprintf(stdout, "✓ %s 对账:网表逐引脚一致、无新增 bridge(%d 移动 / %d no-op)\n", label, len(rep.Moved), len(rep.Skipped))
 		return rep, nil
 	}
@@ -1142,6 +1173,9 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 	rep.NetDiffs, rep.NewBridges = diffs, newBridges
 	if len(diffs) == 0 && len(newBridges) == 0 {
 		rep.Notes = append(rep.Notes, "对账首轮红,恢复段全页补连后达成一致")
+		if err := requireNoNewNames(); err != nil {
+			return rep, err
+		}
 		fmt.Fprintf(stdout, "✓ %s 对账:恢复段全页补连后网表逐引脚一致、无新增 bridge\n", label)
 		return rep, nil
 	}
@@ -1160,6 +1194,79 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 			len(rep.StillBroken), strings.Join(rep.StillBroken, " "))
 	}
 	return rep, fmt.Errorf("%s 对账不过(判据是电气不是坐标):%s;`sch check` 复核后重试", label, msg)
+}
+
+// moveKernelNewMarkerDuplicates reports only markers born in this move that
+// duplicate an existing name on the same wire tree. Baseline IDs establish
+// provenance: pre-existing debt is left visible to `sch check`, while a name
+// created by this run cannot be reported as a clean move.
+func moveKernelNewMarkerDuplicates(baselineMarkerIDs map[string]bool, comps []layoutComp,
+	wires []schGroupWire, labels []moveWireLabel) []string {
+	roots := tidyWireRoots(wires)
+	wireIndex := map[string]int{}
+	for i, w := range wires {
+		wireIndex[w.ID] = i
+	}
+	rootAt := func(x, y float64) (int, bool) {
+		for i, w := range wires {
+			if pointOnPolyline(x, y, w.Points, moveKernelPosEps) {
+				return roots[i], true
+			}
+		}
+		return 0, false
+	}
+	type markerKey struct {
+		root int
+		net  string
+		kind string
+	}
+	type markerGroup struct {
+		all []string
+		new []string
+	}
+	markerGroups := map[markerKey]markerGroup{}
+	for _, c := range comps {
+		if !isSchMarker(c.ComponentType) || !c.AnchorAvailable || c.Net == "" {
+			continue
+		}
+		root, ok := rootAt(c.X, c.Y)
+		if !ok {
+			continue
+		}
+		key := markerKey{root: root, net: c.Net, kind: c.ComponentType}
+		g := markerGroups[key]
+		g.all = append(g.all, c.ID)
+		if !baselineMarkerIDs[c.ID] {
+			g.new = append(g.new, c.ID)
+		}
+		markerGroups[key] = g
+	}
+	labelGroups := map[string]bool{}
+	for _, label := range labels {
+		if label.Net == "" {
+			continue
+		}
+		idx, ok := wireIndex[label.WireID]
+		if !ok {
+			continue
+		}
+		labelGroups[fmt.Sprintf("%d|%s", roots[idx], label.Net)] = true
+	}
+	var out []string
+	for key, group := range markerGroups {
+		if len(group.new) == 0 {
+			continue
+		}
+		if len(group.all) > 1 {
+			out = append(out, group.new...)
+			continue
+		}
+		if labelGroups[fmt.Sprintf("%d|%s", key.root, key.net)] {
+			out = append(out, group.new...)
+		}
+	}
+	sort.Strings(out)
+	return uniqueIDs(out)
 }
 
 // ── 生产 ops:连接器实现 ─────────────────────────────────────────────────────

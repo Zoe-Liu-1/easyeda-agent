@@ -330,7 +330,9 @@ planner 不调用 modify/wire/connect/prim-delete/save，应用前仍需确认 z
 wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → 复验 → save；
 任何接线或图检失败都不会进入删除步骤。
 `cross-kind-label-economy` 统一检查同一线岛上的导线标签与 netflag/netport/netlabel 混合重复；
-拟保留表示自身不可见或名称为空时只报 WARN、不生成 `suggestDeleteIds`，先恢复可见名称再复核；
+没有移动前基线时只报告候选，不按 ID 字典序生成删除建议。需要清理时运行
+`sch marker-clean`，显式选择非基线对象，并在删除前后核对完整 pin→net 表。
+拟保留表示自身不可见或名称为空时先恢复可见名称再复核；
 `label-distance` 报可见标签离所属导线/符号超过 50 单位；`signal-netflag-type` 和
 `signal-netport-type` 均为 WARN。模块边界 netport 必须由
 `sch check --signal-port-exempt <primitiveId,...>` 显式登记，登记项转为

@@ -687,14 +687,14 @@ func runZoneArrangeApply(cfg *appConfig, win, docUUID string, out *zoneArrangeOu
 	}
 	fmt.Fprintf(stdout, "断言②绿:%d 只曾连接 pin 全部仍连接且网名一致\n", len(allSnaps(execs)))
 
-	// 假失败清创(自动化的例行步,此前每页人肉扫多轮):停摆期「报失败的写」
-	// 大概率已落地,重试即同位重复/同树冗余标记 —— 判据现成(check 的
-	// duplicate/redundant-net-marker 带 suggestDeleteIds),这里直接执行处方。
-	// best-effort:清不掉只 warn,电气正确性由 bridge-check 把关。
-	if n, derr := zaaSweepGhostMarkers(cfg, win, docUUID); derr != nil {
-		fmt.Fprintf(stderr, "⚠ 假失败清创未完成(%v)—— 手补:`sch check` 按 suggestDeleteIds `sch prim-delete`\n", derr)
-	} else if n > 0 {
-		fmt.Fprintf(stdout, "假失败清创:清除 %d 个重复/冗余标记(停摆期已落地的\"失败\"写)\n", n)
+	// 停摆期“报失败的写”可能晚到，留下同位/同树重复名称。扫描可以复用
+	// sch check 的判据，但 primitiveId 本身不证明哪个对象是原物，不能在这里
+	// 按字典序自动删除。只点名候选；由用户/代理显式执行 marker-clean。
+	if ids, derr := zaaReviewGhostMarkers(cfg, win, docUUID); derr != nil {
+		fmt.Fprintf(stderr, "⚠ 重复网络名称扫描未完成(%v)—— 保存后运行 `sch marker-clean --doc <page>` 复核\n", derr)
+	} else if len(ids) > 0 {
+		fmt.Fprintf(stderr, "⚠ 发现 %d 个疑似重复/冗余网络名称候选:%s；来源不明确，未自动删除。先运行 `sch marker-clean --doc <page>`，再按候选显式 --delete\n",
+			len(ids), strings.Join(ids, ","))
 	}
 
 	// 真短路(wire-bridge)判据已内置在内核对账(bridge 增量检查,红即失败 +
@@ -752,40 +752,33 @@ func runZoneArrangeApply(cfg *appConfig, win, docUUID string, out *zoneArrangeOu
 	return nil
 }
 
-// zaaSweepGhostMarkers 清掉停摆期假失败留下的鬼影标记:同位重复
-// (duplicate-net-marker)与同树冗余(redundant-net-marker)。判据复用 `sch check`
-// 的函数本体(同一把尺),删除清单 = 两条规则的 suggestDeleteIds 并集(去重 ——
-// 平台对含重复 id 的批次整批静默拒)。返回实际提交删除的 id 数。
-func zaaSweepGhostMarkers(cfg *appConfig, win, docUUID string) (int, error) {
+// zaaReviewGhostMarkers 只扫描停摆期假失败可能留下的同位/同树重复名称。
+// 它绝不根据 primitiveId 排序猜原物，也不写画布。marker-clean 要求调用方在
+// 看到候选后显式选择要删的 ID，并执行网表保持校验。
+func zaaReviewGhostMarkers(cfg *appConfig, win, docUUID string) ([]string, error) {
 	res, err := requestAutolayoutAction(cfg, "schematic.components.list", win,
 		map[string]any{"includeBBox": true}, docUUID, "ghost-marker sweep read")
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	comps, err := parseLayoutComps(res.Result)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	wires, err := fetchSchWirePolylinesStable(cfg, win, docUUID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	var ids []string
 	for _, f := range duplicateNetMarkerFindings(comps) {
-		ids = append(ids, f.SuggestDeleteIds...)
+		ids = append(ids, f.PrimitiveIds...)
 	}
 	for _, f := range redundantNetMarkerFindings(comps, wires) {
-		ids = append(ids, f.SuggestDeleteIds...)
+		ids = append(ids, f.PrimitiveIds...)
 	}
 	ids = dropSheetIDs(uniqueIDs(ids), comps)
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	if _, err := requestAutolayoutAction(cfg, "schematic.primitives.delete", win,
-		map[string]any{"primitiveIds": ids}, docUUID, "ghost-marker sweep delete"); err != nil {
-		return 0, err
-	}
-	return len(ids), nil
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // zaaBrokenPins 从断言②的报文提取「位号:脚」键(与 zaaVerifyConnectivity 的

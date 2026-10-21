@@ -48,9 +48,14 @@ func TestCrossKindLabelEconomyFindings(t *testing.T) {
 	}
 	got := crossKindLabelEconomyFindings([]visibleTextItem{label, flagName}, []layoutComp{flag}, wires)
 	if len(got) != 1 || got[0].Type != "cross-kind-label-economy" ||
-		got[0].SuggestKeepId != "f1" || len(got[0].SuggestDeleteIds) != 1 ||
+		got[0].SuggestKeepId != "" || len(got[0].SuggestDeleteIds) != 0 {
+		t.Fatalf("without provenance cross-kind must report only, got %+v", got)
+	}
+	got = crossKindLabelEconomyFindingsWithPreferred(
+		[]visibleTextItem{label, flagName}, []layoutComp{flag}, wires, map[string]bool{"f1": true})
+	if len(got) != 1 || got[0].SuggestKeepId != "f1" || len(got[0].SuggestDeleteIds) != 1 ||
 		got[0].SuggestDeleteIds[0] != "lbl" {
-		t.Fatalf("want marker-preferred GND duplicate, got %+v", got)
+		t.Fatalf("want baseline-preferred GND marker, got %+v", got)
 	}
 
 	// A hidden marker name cannot justify deleting the visible wire label.
@@ -64,9 +69,14 @@ func TestCrossKindLabelEconomyFindings(t *testing.T) {
 	label.Value = "SIG"
 	flagName.Value = "SIG"
 	got = crossKindLabelEconomyFindings([]visibleTextItem{label}, []layoutComp{flag}, wires)
+	if len(got) != 1 || got[0].SuggestKeepId != "" || len(got[0].SuggestDeleteIds) != 0 {
+		t.Fatalf("without provenance signal cross-kind must report only, got %+v", got)
+	}
+	got = crossKindLabelEconomyFindingsWithPreferred(
+		[]visibleTextItem{label}, []layoutComp{flag}, wires, map[string]bool{"lbl": true})
 	if len(got) != 1 || got[0].SuggestKeepId != "lbl" ||
 		len(got[0].SuggestDeleteIds) != 1 || got[0].SuggestDeleteIds[0] != "f1" {
-		t.Fatalf("want label-preferred signal duplicate, got %+v", got)
+		t.Fatalf("want baseline-preferred signal label, got %+v", got)
 	}
 
 	hiddenLabel := label

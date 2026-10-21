@@ -9,8 +9,14 @@ func TestSchWireGeometryAdapterPreservesEvidenceAndBlocks(t *testing.T) {
 		"pinsAvailable": true, "pins": []any{map[string]any{"pinNumber": "1", "x": 30.0, "y": 10.0, "rotation": 0.0}},
 	}}, "wires": "original observation must remain intact"}
 	fs := schWireGeometryFindings(result, []schGroupWire{{ID: "stable-wire-id", Points: []float64{10, 10, 30, 10}}})
-	if len(fs) != 2 {
-		t.Fatalf("expected direction and penetration: %+v", fs)
+	types := map[string]bool{}
+	for _, f := range fs {
+		types[f.Type] = true
+	}
+	for _, want := range []string{"wire-through-body", "wire-over-pin-lead", "pin-exit-direction"} {
+		if !types[want] {
+			t.Fatalf("missing %s in geometry findings: %+v", want, fs)
+		}
 	}
 	for _, f := range fs {
 		if f.WirePrimitiveId != "stable-wire-id" || f.Designator != "U1" || f.PrimitiveId != "u1" || f.Message == "" {

@@ -243,6 +243,8 @@ failed pins, never replay the whole spec** (a blind re-run stacks duplicate mark
 on the already-connected pins, which `NetKnown=false` after a connector drop can't
 detect). **Always run `sch check` right after a batch autoconnect** — its new
 `duplicate-net-marker` rule is the guard that catches those stacked markers.
+Review them with `sch marker-clean`; a primitiveId is not provenance, so deletion
+requires explicit IDs and the full pin-net comparison performed by that command.
 
 **带痕候选不再静默入选。** 硬拒之外的碰撞惩罚是软性累加,此前选中候选哪怕
 score 上千(真机:score=1737 的长桩扎进邻组标签区)也照连且报告只显示落选项。

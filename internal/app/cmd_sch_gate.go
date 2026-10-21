@@ -549,7 +549,7 @@ var gateAdviceRules = []struct{ match, advice string }{
 	{"orphan-stub", "孤儿桩(仅 --strict 阻塞):要么 `sch connect` 补上网络标识,要么 `sch prim-delete` 清掉"},
 	{"orphan-flag", "孤儿标识(仅 --strict 阻塞):flag 不挨任何导线,`sch prim-delete` 清掉 —— 新线穿过会静默继承其网名"},
 	{"orphan-tree", "悬空树(仅 --strict 阻塞):flag+桩线成树却不触任何引脚(挪件残留)或纯裸死线,`sch prim-delete` 整树(wireIds+flagIds)清掉"},
-	{"finding", "按 finding 类型分治:duplicate-net-marker 喂 `sch prim-delete`(带 suggestDeleteIds),floating-pin 用 `sch no-connect`,wire-* 用 `sch disconnect` 后重连"},
+	{"finding", "按 finding 类型分治:重复网络名称先跑 `sch marker-clean` 并显式选择 --delete；floating-pin 用 `sch no-connect` 或接线；wire-* 回到连接/布局计划后重连"},
 	{"fatal DRC", "跑 `sch drc --verbose` 看逐条明细(gate 只汇总);DRC 需要 EasyEDA 窗口在前台"},
 }
 

@@ -1,0 +1,66 @@
+# 原理图检查与修复覆盖
+
+检查发现说明“画布与规则不符”，不自动授予修复动作。先按本页给 finding 归类，再从
+最新快照生成计划；修复后重新运行原 finding、完整网表和 bridge-check。
+
+## 修复等级
+
+| 等级 | 含义 | 必须满足 |
+|---|---|---|
+| 直接执行 | 已实现带前后验证的 typed 命令 | 默认 dry-run，显式 `--apply`；回读证明保存与电气结果 |
+| 显式计划 | 工具能算完整计划，但必须选定对象或目标 | 计划 `ready`；候选/来源不代替参数 |
+| 语义选择 | 修复会改变设计含义或表示法 | 人工/代理必须先决定“接到哪里、保留什么” |
+| 重排重布 | 需要移动器件、标签或重走整棵线树 | 用布局/布线 planner 重算，局部补线不能替代 |
+| 仅诊断 | 数据源、规则或写入接口尚不足以安全执行 | 保留 finding 与证据，标 `unsupported` / `incomplete` |
+
+## 名称去重与来源
+
+`duplicate-net-marker`、`redundant-net-marker`、`label-economy` 与
+`cross-kind-label-economy` 是候选组，不是删除清单。primitiveId 的字典序、创建时间或
+“看起来像新对象”都不构成来源证据；没有移动前基线时只报告候选。
+
+有唯一基线时，可以保留基线中的可见名称并删除新增对象。执行统一走：
+
+```text
+sch marker-clean --doc <page>
+sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
+```
+
+命令拒绝非候选、隐藏名称和会删除线岛最后一个可见名称的请求。删除后必须证明对象已消失、
+完整 pin→net 表不变；变化时恢复已删名称并回读。`zone-arrange --apply` 只提示这类候选，
+不得在收尾时自动扫删。move kernel 在每次移动后比较移动前后 marker ID：本次新生 marker
+若在同树同名上形成重复，报告 `NewNameDuplicates` 并拒绝把操作判成完成，避免完整网表
+通过却把视觉重复留在页面上。
+
+## Finding 覆盖表
+
+| Finding | 等级 | 执行边界 |
+|---|---|---|
+| `duplicate-net-marker` / `redundant-net-marker` | 显式计划 | `sch marker-clean`；保留对象需要基线或明确选择 |
+| `label-economy` / `cross-kind-label-economy` | 显式计划 | `sch marker-clean`；同一线岛至少留一个可见名称 |
+| `marker-overlap` | 直接执行 | `sch destagger --apply` 只处理可安全换向/改短桩的 marker；跳过项必须读出 |
+| `direct-connect-opportunity` | 直接执行或重排 | 仅 `already-clear` 可用 `sch direct-connect-apply --apply --save`；移动候选先计划 |
+| `alignment-opportunity` | 显式计划 | `alignment-plan` 完整、无 blocker 且边界重连齐全后才可 `alignment-apply` |
+| `power-cluster-candidate` | 显式计划 | 先由 `power-cluster-plan` 生成接线与“先接后删”顺序；不能直接删符号 |
+| `floating-pin` | 语义选择 | 设计上使用则接线；明确不用才 `sch no-connect`；未知不等于 NC |
+| `geom-net-mismatch` / `net-marker-mismatch` | 语义选择或重排 | 先确定触脚但网表未认领的原因，再重连或修名称；不能靠重导网表掩盖 |
+| `dangling-wire` / `zero-length-wire` | 语义选择 | 先确认是否为有意命名端点；删除局部残支前核对共享树 |
+| `multi-net-wire` / `wire-bridge` / `wire-crossing` / `non-orthogonal-wire` | 重排重布 | 先找短路/并网来源，拆树或按正交通道重走；不得只删交叉点 |
+| `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 重排重布 | 从引脚外向首段重走；删除局部段可能切断共享树 |
+| `cross-chip-direct-wire` / `pin-exit-direction` | 重排重布 | 芯片间改同名网络标签；首段先沿引脚外向再正交折线 |
+| `signal-netflag-type` / `signal-netport-type` | 语义选择 | 信号改文字网络标签；模块边界端口需显式豁免，不能静默换型 |
+| `power-ground-orientation` / `reversed-net-flag` | 显式计划 | 先按引脚外向和碰撞找新桩；反向脚登记 `orientationExempt` |
+| `label-visibility` / `label-orientation` / `label-distance` | 语义选择或重排 | 先恢复可见、水平、靠近挂载点的名称；内容缺失不得猜网名 |
+| `polarity-convention-outlier` | 语义选择 | 对照器件极性和同页多数派确认是否反装；编号约定本身不证明电气极性 |
+| `visible-text-overlap` / `marker-wire-overlap` | 重排重布 | 移动文字/标记或改线，必须复查器件、引脚、导线和标题区 |
+| `titleblock-overlap` / `out-of-sheet` | 重排重布 | 移入图签外/图纸内；不缩小页面或隐藏文字来规避 |
+| `partition-overlap` / `designator-overlap` / `designator-wire-overlap` / `part-out-of-frame` / `part-frame-unresolved` / `designator-out-of-frame` | 重排重布 | 重新布局功能组、区框或文字槽位；不能删除位号或把未认领器件硬塞进框 |
+| `missing-partition` / `missing-titleblock` / `missing-note` / `zones-not-claimed` / `titleblock-key-absent` | 显式计划或语义选择 | `zones` / `zone-draw` / `titleblock` 按已声明归属生成；字段内容无依据时保留待确认 |
+| `peripheral-not-direct` | 重排重布 | 把外围真实短线接到核心脚；标签只作证不清白时的兜底并继续报警 |
+| `*-unavailable` / `*-unverified` / `peripheral-direct-unverified` | 仅诊断 | 修复采集或写入数据源后重跑；不得把不可见范围当通过 |
+
+## 收尾判据
+
+一次修复只有在原 finding 消失、完整 pin→net 表与预期一致、无新增 bridge、bridge-check
+通过、保存返回 `saved:true`，并在 save/reload 后 fresh readback 一致时才算完成。
+DRC 的 WARN 仍要单独解释；不能用 bridge-check 或 DRC 之一代替其他覆盖范围。

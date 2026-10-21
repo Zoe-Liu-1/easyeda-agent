@@ -55,6 +55,7 @@ metadata:
 | 需求、选型与设计取舍 | [设计流程](references/design-flow.md)、[决策参考](references/design-decisions.md)、[器件选型](references/part-selection.md) |
 | 原理图数据、布局与 Apply | [数据契约](references/schematic-data.md)、[执行步骤](references/auto-layout-sop.md) |
 | 原理图检查或局部修复 | [原理图](references/schematic.md)、[放置](references/schematic-placement.md)、[连接](references/schematic-wiring.md) |
+| 检查后选择修复入口，或需要区分“能发现但不能安全自动修” | [修复覆盖](references/schematic-repair-coverage.md) |
 | PCB 布局与机械 | [PCB](references/pcb.md)、[布局](references/pcb-layout.md) |
 | PCB 布线、铺铜与禁布区 | [布线](references/pcb-routing.md) |
 | 规则与网络类 | [配置](references/pcb-config.md) |

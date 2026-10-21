@@ -30,7 +30,7 @@ func TestDuplicateNetMarker_CoincidentAndFloatDrift(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 duplicate groups (GND, MOTOR_G), got %d: %+v", len(got), got)
 	}
-	// The GND group: keep the lexically-smallest id, delete the rest.
+	// The GND group is a candidate set: no survivor is guessed from opaque IDs.
 	var gnd *checkFinding
 	for i := range got {
 		if got[i].MarkerNet == "GND" {
@@ -46,11 +46,43 @@ func TestDuplicateNetMarker_CoincidentAndFloatDrift(t *testing.T) {
 	if len(gnd.PrimitiveIds) != 3 {
 		t.Errorf("GND group should carry all 3 coincident ids (incl. float-drift g3), got %v", gnd.PrimitiveIds)
 	}
-	if gnd.SuggestKeepId != "g1" {
-		t.Errorf("keep id should be lexically-smallest g1, got %q", gnd.SuggestKeepId)
+	if gnd.SuggestKeepId != "" || len(gnd.SuggestDeleteIds) != 0 {
+		t.Errorf("without provenance the check must not guess a keep/delete plan, got %+v", gnd)
 	}
-	if len(gnd.SuggestDeleteIds) != 2 {
-		t.Errorf("should suggest deleting g2,g3, got %v", gnd.SuggestDeleteIds)
+	if !stringsContains(gnd.Message, "来源歧义") {
+		t.Errorf("message must explain why no automatic plan is given: %q", gnd.Message)
+	}
+
+	got = duplicateNetMarkerFindingsWithPreferred(comps, map[string]bool{"g1": true})
+	for i := range got {
+		if got[i].MarkerNet != "GND" {
+			continue
+		}
+		if got[i].SuggestKeepId != "g1" || len(got[i].SuggestDeleteIds) != 2 {
+			t.Errorf("unique baseline must preserve g1 and delete the other two: %+v", got[i])
+		}
+	}
+}
+
+func TestPreferredMarkerKeepRequiresUniqueBaseline(t *testing.T) {
+	markers := []layoutComp{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	for _, tc := range []struct {
+		name      string
+		preferred map[string]bool
+		keep      string
+		deletes   int
+	}{
+		{name: "none", preferred: nil},
+		{name: "zero in group", preferred: map[string]bool{"outside": true}},
+		{name: "one", preferred: map[string]bool{"b": true}, keep: "b", deletes: 2},
+		{name: "multiple", preferred: map[string]bool{"a": true, "c": true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			keep, del := preferredMarkerKeep(markers, tc.preferred)
+			if keep != tc.keep || len(del) != tc.deletes {
+				t.Fatalf("keep=%q delete=%v, want keep=%q delete=%d", keep, del, tc.keep, tc.deletes)
+			}
+		})
 	}
 }
 
@@ -313,9 +345,14 @@ func TestRedundantNetMarkerFindings(t *testing.T) {
 		t.Fatalf("expected exactly one redundant group, got %d: %+v", len(fs), fs)
 	}
 	f := fs[0]
-	if f.Type != "redundant-net-marker" || f.MarkerNet != "3V3" || f.SuggestKeepId != "fA" ||
-		len(f.SuggestDeleteIds) != 1 || f.SuggestDeleteIds[0] != "fB" {
+	if f.Type != "redundant-net-marker" || f.MarkerNet != "3V3" ||
+		f.SuggestKeepId != "" || len(f.SuggestDeleteIds) != 0 {
 		t.Fatalf("unexpected finding: %+v", f)
+	}
+	got := redundantNetMarkerFindingsWithPreferred(comps, wires, map[string]bool{"fA": true})
+	if len(got) != 1 || got[0].SuggestKeepId != "fA" ||
+		len(got[0].SuggestDeleteIds) != 1 || got[0].SuggestDeleteIds[0] != "fB" {
+		t.Fatalf("unique baseline must preserve fA and delete fB: %+v", got)
 	}
 	// Clean board: single flag per (tree, net).
 	if got := redundantNetMarkerFindings(comps[1:], wires); len(got) != 0 {

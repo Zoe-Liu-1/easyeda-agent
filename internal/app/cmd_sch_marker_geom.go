@@ -273,9 +273,18 @@ func markerWireOverlapFindings(comps []layoutComp, wires []schGroupWire, eps flo
 
 // duplicateNetMarkerFindings groups net markers by (kind, net, quantized anchor)
 // and reports every group of 2+ as one finding carrying ALL coincident primitive
-// IDs plus a keep/delete suggestion. Different kinds, nets, or anchors never merge,
-// so a legitimately distinct marker at another point is not a false positive.
+// IDs. Different kinds, nets, or anchors never merge, so a legitimately distinct
+// marker at another point is not a false positive.
+//
+// A finding is not a deletion plan by itself: primitive IDs are opaque and do not
+// prove which representation existed before a move/repair. The wrapper therefore
+// reports the candidate group without guessing a survivor. When a caller has a
+// unique provenance baseline, the WithPreferred form may name the keep/delete set.
 func duplicateNetMarkerFindings(comps []layoutComp) []checkFinding {
+	return duplicateNetMarkerFindingsWithPreferred(comps, nil)
+}
+
+func duplicateNetMarkerFindingsWithPreferred(comps []layoutComp, preferred map[string]bool) []checkFinding {
 	type gkey struct {
 		kind   string
 		net    string
@@ -300,30 +309,32 @@ func duplicateNetMarkerFindings(comps []layoutComp) []checkFinding {
 		if len(g) < 2 {
 			continue
 		}
-		// Deterministic keep: the lexically-smallest primitiveId.
 		sort.Slice(g, func(i, j int) bool { return g[i].ID < g[j].ID })
 		ids := make([]string, len(g))
 		for i, c := range g {
 			ids[i] = c.ID
 		}
-		keepID := ids[0]
-		delIDs := append([]string(nil), ids[1:]...)
+		keepID, delIDs := preferredMarkerKeep(g, preferred)
 		netTxt := g[0].Net
 		if netTxt == "" {
 			netTxt = "(unnamed)"
+		}
+		message := fmt.Sprintf("重复 %s(%s) @(%.2f,%.2f) ×%d — 候选 %s；保留对象存在来源歧义，先选 keep，再执行 `sch marker-clean --delete`",
+			g[0].ComponentType, netTxt, round2(g[0].X), round2(g[0].Y), len(g), strings.Join(ids, ","))
+		if keepID != "" {
+			message = fmt.Sprintf("重复 %s(%s) @(%.2f,%.2f) ×%d — 按基线优先保留 %s，删除 %s",
+				g[0].ComponentType, netTxt, round2(g[0].X), round2(g[0].Y), len(g), keepID, strings.Join(delIDs, ","))
 		}
 		out = append(out, checkFinding{
 			Type:             "duplicate-net-marker",
 			Level:            "warn",
 			ComponentType:    g[0].ComponentType,
 			MarkerNet:        g[0].Net,
-			PrimitiveId:      keepID,
 			PrimitiveIds:     ids,
 			SuggestKeepId:    keepID,
 			SuggestDeleteIds: delIDs,
 			At:               &checkPoint{X: round2(g[0].X), Y: round2(g[0].Y)},
-			Message: fmt.Sprintf("重复 %s(%s) @(%.2f,%.2f) ×%d — 建议保留 %s，删除 %s (sch prim-delete)",
-				g[0].ComponentType, netTxt, round2(g[0].X), round2(g[0].Y), len(g), keepID, strings.Join(delIDs, "、")),
+			Message:          message,
 		})
 	}
 	return out
@@ -730,9 +741,14 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 // differ so no duplicate, bbox graze was under the overlap eps, electrically the
 // tree is fine so bridge-check is silent. Visually it renders as stacked text.
 // Rule: within ONE wire tree, ≥2 markers of the same (net, componentType) are
-// redundant — one names the net, the rest are debris. WARN + suggestDeleteIds
-// (keep the first by stable order).
+// redundant. WARN reports the candidate IDs; survivor selection requires
+// provenance and is executed only through sch marker-clean.
 func redundantNetMarkerFindings(comps []layoutComp, wires []schGroupWire) []checkFinding {
+	return redundantNetMarkerFindingsWithPreferred(comps, wires, nil)
+}
+
+func redundantNetMarkerFindingsWithPreferred(comps []layoutComp, wires []schGroupWire,
+	preferred map[string]bool) []checkFinding {
 	if len(wires) == 0 {
 		return nil
 	}
@@ -797,12 +813,15 @@ func redundantNetMarkerFindings(comps []layoutComp, wires []schGroupWire) []chec
 		}
 		sort.Slice(ms, func(i, j int) bool { return ms[i].ID < ms[j].ID })
 		ids := make([]string, len(ms))
-		var del []string
 		for i, m := range ms {
 			ids[i] = m.ID
-			if i > 0 {
-				del = append(del, m.ID)
-			}
+		}
+		keepID, del := preferredMarkerKeep(ms, preferred)
+		message := fmt.Sprintf("同一根线树上有 %d 个 %s(%s)标志 — 候选 %s；保留对象存在来源歧义，先选 keep，再执行 `sch marker-clean --delete`",
+			len(ms), k.net, k.typ, strings.Join(ids, ","))
+		if keepID != "" {
+			message = fmt.Sprintf("同一根线树上有 %d 个 %s(%s)标志 — 按基线优先保留 %s，删除 %s",
+				len(ms), k.net, k.typ, keepID, strings.Join(del, ","))
 		}
 		findings = append(findings, checkFinding{
 			Type:             "redundant-net-marker",
@@ -810,16 +829,38 @@ func redundantNetMarkerFindings(comps []layoutComp, wires []schGroupWire) []chec
 			MarkerNet:        k.net,
 			ComponentType:    k.typ,
 			PrimitiveIds:     ids,
-			SuggestKeepId:    ms[0].ID,
+			SuggestKeepId:    keepID,
 			SuggestDeleteIds: del,
 			At:               &checkPoint{X: ms[0].X, Y: ms[0].Y},
 			Count:            len(ms),
-			Message: fmt.Sprintf("同一根线树上有 %d 个 %s(%s)标志 — 一个命名即可,其余是修补残留(视觉堆叠);建议保留 %s,删除 %s",
-				len(ms), k.net, k.typ, ms[0].ID, strings.Join(del, ",")),
+			Message:          message,
 		})
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].SuggestKeepId < findings[j].SuggestKeepId })
 	return findings
+}
+
+func preferredMarkerKeep(markers []layoutComp, preferred map[string]bool) (string, []string) {
+	if len(preferred) == 0 {
+		return "", nil
+	}
+	var baseline []string
+	for _, marker := range markers {
+		if preferred[marker.ID] {
+			baseline = append(baseline, marker.ID)
+		}
+	}
+	if len(baseline) != 1 {
+		return "", nil
+	}
+	keep := baseline[0]
+	var del []string
+	for _, marker := range markers {
+		if marker.ID != keep {
+			del = append(del, marker.ID)
+		}
+	}
+	return keep, del
 }
 
 // schPartitionMinParts is the part-count above which a page is expected to be

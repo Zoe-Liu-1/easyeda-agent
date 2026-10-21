@@ -228,7 +228,8 @@ buffer:
   同岛重复由 `redundant-net-marker` 处理。局部电源/地优先用“无名导线 + 末端 netflag”
   定义网名，避免 `sch wire --net` 在导线上重复显示网名。
   同一线岛不能一边用导线 Name、一边再挂同网 netflag/netport/netlabel；由
-  `cross-kind-label-economy` 统一给 keep/delete。可见网络标签偏离所属导线/符号超过
+  `cross-kind-label-economy` 只报告候选，保留对象必须有来源依据；再由
+  `sch marker-clean` 显式删除。可见网络标签偏离所属导线/符号超过
   50 画布单位报 `label-distance`，不能把标签漂在空白处。信号网的 netflag/netport
   均为 WARN；模块边界 netport 必须用 `--signal-port-exempt` 显式登记，并保留 INFO
   审计。直连规划先用短 L，再用 5 单位障碍感知 A* 搜索多折正交路径；只有

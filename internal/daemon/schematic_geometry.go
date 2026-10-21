@@ -178,12 +178,7 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 		return failed, nil
 	}
 	readCtx := ctx
-	var cancelPublication context.CancelFunc
-	defer func() {
-		if cancelPublication != nil {
-			cancelPublication()
-		}
-	}()
+	publicationCancelPending := true
 	previousSeq := res.Seq
 	for attempt := 0; ; attempt++ {
 		suffix := "after"
@@ -224,8 +219,11 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 				if !errors.As(err, &incomplete) || attempt+1 >= wirePublicationMaxReads {
 					return failReadback(nil, err.Error())
 				}
-				if cancelPublication == nil {
+				if publicationCancelPending {
+					var cancelPublication context.CancelFunc
 					readCtx, cancelPublication = context.WithTimeout(ctx, protocol.SchematicWirePublicationBudget)
+					defer cancelPublication()
+					publicationCancelPending = false
 				}
 				timer := time.NewTimer(wirePublicationDelay)
 				select {

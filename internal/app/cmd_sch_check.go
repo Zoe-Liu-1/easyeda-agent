@@ -85,8 +85,8 @@ type checkFinding struct {
 	// components.list bboxes/anchors — the electrical check never sees them.
 	ComponentType    string            `json:"componentType,omitempty"`    // primary primitive's type
 	PrimitiveIds     []string          `json:"primitiveIds,omitempty"`     // duplicate-net-marker: ALL coincident ids; marker-overlap: [a,b]
-	SuggestKeepId    string            `json:"suggestKeepId,omitempty"`    // duplicate-net-marker: id to keep
-	SuggestDeleteIds []string          `json:"suggestDeleteIds,omitempty"` // duplicate-net-marker: ids to prim-delete
+	SuggestKeepId    string            `json:"suggestKeepId,omitempty"`    // only with a unique provenance baseline
+	SuggestDeleteIds []string          `json:"suggestDeleteIds,omitempty"` // only with a unique provenance baseline
 	BBox             *layoutBBox       `json:"bbox,omitempty"`             // primary primitive bbox (titleblock/marker overlap)
 	Keepout          *layoutBBox       `json:"keepout,omitempty"`          // titleblock-overlap: the keep-out rect
 	Other            *checkOverlapSide `json:"other,omitempty"`            // marker-overlap: the B side
@@ -436,10 +436,10 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 		fmt.Fprintln(w, "→ non-orthogonal-wire: split every diagonal/non-axis segment into horizontal/vertical runs, then rerun bridge-check")
 	}
 	if s.LabelEconomy > 0 {
-		fmt.Fprintln(w, "→ label-economy: one label per line island; delete duplicate same-net labels (suggestDeleteIds)")
+		fmt.Fprintln(w, "→ label-economy: one label per line island; run `sch marker-clean` to review candidates, then pass explicit `--delete` IDs")
 	}
 	if s.CrossKindLabelEconomy > 0 {
-		fmt.Fprintln(w, "→ cross-kind-label-economy: same net has both a wire label and a netflag/netport/netlabel on one physical island — keep one representation, then delete the suggested duplicates")
+		fmt.Fprintln(w, "→ cross-kind-label-economy: same net has both a wire label and a marker on one island — run `sch marker-clean`, choose the survivor from source evidence, then pass explicit `--delete` IDs")
 	}
 	if s.SignalMarkerTypes > 0 {
 		fmt.Fprintln(w, "→ signal-marker-type: 信号网优先用网络标签；netflag 是硬类型不匹配，netport 仅作为模块边界例外的 INFO")
@@ -472,7 +472,7 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 		fmt.Fprintln(w, "→ stray wires: delete the zero-length/dangling segments (sch prim-delete --ids <wirePrimitiveId>)")
 	}
 	if s.DuplicateNetMarkers > 0 {
-		fmt.Fprintln(w, "→ duplicate markers: a partial autoconnect stacked coincident flags/ports — sch prim-delete the suggested IDs (keep one)")
+		fmt.Fprintln(w, "→ duplicate markers: primitive IDs alone do not prove which object is original — run `sch marker-clean`, then delete explicit non-baseline IDs")
 	}
 	if s.TitleblockOverlaps > 0 {
 		fmt.Fprintln(w, "→ title-block: a part/marker intrudes the A4 图签 keep-out — move it out or pick another connect direction")
@@ -494,7 +494,7 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 
 	if s.RedundantNetMarkers > 0 {
-		fmt.Fprintln(w, "→ redundant-net-marker: 同一线树上同网标志重复(修补残留)— 按 suggestDeleteIds `sch prim-delete` 清冗余(保留一个)")
+		fmt.Fprintln(w, "→ redundant-net-marker: 同一线树上同网标志重复 — `sch marker-clean` 只列候选；确认来源后显式 `--delete` 非基线对象")
 	}
 	if s.FoldedNetLabels > 0 {
 		fmt.Fprintln(w, "→ folded-net-label: netport 竖排、网名侧向难读 — `sch disconnect` 后重连(autoconnect 现已惩罚竖排,水平错列优先),或显式 --direction left|right")

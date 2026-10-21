@@ -228,6 +228,11 @@ func labelDistanceFindings(items []visibleTextItem, comps []layoutComp, wires []
 // same net on the SAME physical wire island. label-economy only sees wire
 // labels; redundant-net-marker only sees same-kind markers.
 func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire) []checkFinding {
+	return crossKindLabelEconomyFindingsWithPreferred(items, comps, wires, nil)
+}
+
+func crossKindLabelEconomyFindingsWithPreferred(items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, preferred map[string]bool) []checkFinding {
 	if len(wires) == 0 {
 		return nil
 	}
@@ -298,13 +303,13 @@ func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, 
 		sort.Slice(g.markers, func(i, j int) bool { return g.markers[i].ID < g.markers[j].ID })
 		sort.Slice(g.labels, func(i, j int) bool { return g.labels[i].ID < g.labels[j].ID })
 		ids := []string{}
+		var visibleIDs []string
 		var keep string
 		var deleteIDs []string
 		if isRailLabelNet(g.net) {
-			visibleMarkers := []layoutComp{}
 			for _, m := range g.markers {
 				if visibleName[m.ID] {
-					visibleMarkers = append(visibleMarkers, m)
+					visibleIDs = append(visibleIDs, m.ID)
 				}
 			}
 			for _, m := range g.markers {
@@ -313,7 +318,7 @@ func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, 
 			for _, l := range g.labels {
 				ids = append(ids, l.ID)
 			}
-			if len(visibleMarkers) == 0 {
+			if len(visibleIDs) == 0 {
 				out = append(out, checkFinding{
 					Type: "cross-kind-label-economy", Level: "warn",
 					MarkerNet: g.net, PrimitiveIds: ids, Count: len(ids),
@@ -321,20 +326,10 @@ func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, 
 				})
 				continue
 			}
-			keep = visibleMarkers[0].ID
-			for _, l := range g.labels {
-				deleteIDs = append(deleteIDs, l.ID)
-			}
-			for _, m := range g.markers {
-				if m.ID != keep {
-					deleteIDs = append(deleteIDs, m.ID)
-				}
-			}
 		} else {
-			visibleLabels := []visibleTextItem{}
 			for _, l := range g.labels {
 				if l.Visible == nil || *l.Visible {
-					visibleLabels = append(visibleLabels, l)
+					visibleIDs = append(visibleIDs, l.ID)
 				}
 			}
 			for _, l := range g.labels {
@@ -343,7 +338,7 @@ func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, 
 			for _, m := range g.markers {
 				ids = append(ids, m.ID)
 			}
-			if len(visibleLabels) == 0 {
+			if len(visibleIDs) == 0 {
 				out = append(out, checkFinding{
 					Type: "cross-kind-label-economy", Level: "warn",
 					MarkerNet: g.net, PrimitiveIds: ids, Count: len(ids),
@@ -351,12 +346,32 @@ func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, 
 				})
 				continue
 			}
-			keep = visibleLabels[0].ID
-			for _, m := range g.markers {
-				deleteIDs = append(deleteIDs, m.ID)
+		}
+		if len(preferred) > 0 {
+			for _, id := range visibleIDs {
+				if preferred[id] {
+					if keep != "" {
+						keep = ""
+						break
+					}
+					keep = id
+				}
+			}
+			if keep != "" {
+				for _, id := range ids {
+					if id != keep {
+						deleteIDs = append(deleteIDs, id)
+					}
+				}
 			}
 		}
 		if len(deleteIDs) == 0 {
+			out = append(out, checkFinding{
+				Type: "cross-kind-label-economy", Level: "warn",
+				MarkerNet: g.net, PrimitiveIds: ids, Count: len(ids),
+				Message: fmt.Sprintf("同一线岛网络 '%s' 同时有导线标签和标识符号 — 候选 %s；来源不明，先选 keep，再执行 `sch marker-clean --delete`",
+					g.net, strings.Join(ids, ",")),
+			})
 			continue
 		}
 		at := &checkPoint{X: round2(g.markers[0].X), Y: round2(g.markers[0].Y)}
