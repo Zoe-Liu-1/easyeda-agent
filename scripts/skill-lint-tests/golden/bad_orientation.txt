@@ -3,3 +3,6 @@
 🟡 朝向不顺导线 (2):
   - netflag      +3V3 @(100, 230)  rot= 90 应为   0  (导线朝down, body应朝up, power)
   - netflag       GND @(160, 70)  rot=180 应为   0  (导线朝up, body应朝down, ground)
+
+🟠 信号网使用 netflag/netport (1):
+  - 信号网 'SIG' 使用了 netport f3 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

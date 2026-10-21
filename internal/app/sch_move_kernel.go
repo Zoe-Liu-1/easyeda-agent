@@ -146,6 +146,22 @@ type moveKernelOpts struct {
 	// 「能自动救回」变成「N 个 pin 待手工恢复」。恢复段带来的伸展由 --apply 的
 	// 落地复判如实报出来(而不是打绿勾),这是「正确性 > 收敛性,但偏差必须可见」。
 	MaxStub float64
+	// Boundary authorizes an explicitly planned replacement of shared wire trees.
+	// Only the listed wire ids may cross the usual fail-closed shared-tree guard;
+	// their fixed+moved pin refs are excluded from autoconnect and must instead be
+	// connected by the exact orthogonal wires supplied here.
+	Boundary *moveKernelBoundary
+}
+
+type moveKernelBoundary struct {
+	SharedWireIDs []string
+	PinRefs       []string
+	Wires         []moveKernelBoundaryWire
+}
+
+type moveKernelBoundaryWire struct {
+	Net    string
+	Points []float64
 }
 
 // stubRules 是常规重连步给 autoconnect 的规则(带硬上限)。
@@ -528,13 +544,27 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 		rigid = moveKernelRigidTrees(segs, labels, comps, delta)
 	}
 	before := groupRebuildSnapshotOf(live)
+	boundaryPins := map[string]bool{}
+	allowedShared := map[string]bool{}
+	if opts.Boundary != nil {
+		for _, ref := range opts.Boundary.PinRefs {
+			if ref = strings.TrimSpace(ref); ref != "" {
+				boundaryPins[strings.ToUpper(ref)] = true
+			}
+		}
+		for _, id := range opts.Boundary.SharedWireIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				allowedShared[id] = true
+			}
+		}
+	}
 	// bridge 基线:没有基线就无法把「新增短路」归因给本次移动(fail-closed,
 	// 读不到直接拒 —— 没有证明不算过)。
 	bridgeBefore, err := ops.bridgeSignatures()
 	if err != nil {
 		return rep, fmt.Errorf("%s 快照 bridge 基线(没有基线无法归因新增短路,拒绝执行):%w", label, err)
 	}
-	deleteIDs, err := tidyDeepSweepPlan(memberSet, comps, wires)
+	deleteIDs, err := tidyDeepSweepPlanAllowShared(memberSet, comps, wires, allowedShared)
 	if err != nil {
 		// 共享树(触到非成员 pin):删掉它会切断组外电路 —— fail-closed,零 mutation。
 		return rep, fmt.Errorf("%s:%w", label, err)
@@ -786,7 +816,7 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 			var third []movePinDeficit
 			for _, d := range defs {
 				desig := strings.ToUpper(strings.SplitN(d.Ref, ":", 2)[0])
-				if !memberSet[desig] {
+				if !memberSet[desig] && !boundaryPins[strings.ToUpper(d.Ref)] {
 					third = append(third, d)
 				}
 			}
@@ -828,6 +858,27 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 	// labels as they were; their pins are not reconnected through markers.
 	covered, relayNotes := relayRigidTrees(ops, rigid, max(opts.RetryDelay, 1500*time.Millisecond))
 	rep.Notes = append(rep.Notes, relayNotes...)
+	if opts.Boundary != nil {
+		for ref := range boundaryPins {
+			covered[ref] = true
+		}
+		for _, wire := range opts.Boundary.Wires {
+			if len(wire.Points) != 4 ||
+				(math.Abs(wire.Points[0]-wire.Points[2]) > moveKernelPosEps &&
+					math.Abs(wire.Points[1]-wire.Points[3]) > moveKernelPosEps) {
+				return rep, recoverConns("边界重连预检", fmt.Errorf("invalid non-orthogonal boundary wire: %v", wire.Points))
+			}
+			if err := ops.createWire([4]float64{
+				wire.Points[0], wire.Points[1], wire.Points[2], wire.Points[3],
+			}, wire.Net); err != nil {
+				return rep, recoverConns("边界重连", err)
+			}
+		}
+		if len(opts.Boundary.Wires) > 0 {
+			rep.Notes = append(rep.Notes, fmt.Sprintf("按计划重建 %d 段共享边界导线", len(opts.Boundary.Wires)))
+			fmt.Fprintf(stdout, "  边界重连:%d 段正交导线按计划重建\n", len(opts.Boundary.Wires))
+		}
+	}
 	for _, n := range relayNotes {
 		fmt.Fprintf(stderr, "  ⚠ %s —— 这些引脚改走标记重连,由对账兜底\n", n)
 	}

@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNetLabelOrientationFindings(t *testing.T) {
 	rot := func(v float64) *float64 { return &v }
@@ -121,5 +124,27 @@ func TestDirectConnectOpportunityBlockedByPin(t *testing.T) {
 	}
 	if got := directConnectOpportunityFindings(items, comps, wires, nil, nil); len(got) != 0 {
 		t.Fatalf("a pin between the labels must block the L route: %+v", got)
+	}
+}
+
+func TestDirectConnectOpportunityFindsObstacleAwareDetour(t *testing.T) {
+	box := func(x0, y0, x1, y1 float64) *layoutBBox {
+		return &layoutBBox{MinX: x0, MinY: y0, MaxX: x1, MaxY: y1}
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, 0, 0, 100}},
+		{ID: "w2", Points: []float64{200, 40, 200, 120}},
+	}
+	items := []visibleTextItem{
+		{ID: "t1", ComponentType: "wire", ParentID: "w1", Key: "Name", Value: "SIG", BBox: box(0, 40, 20, 48)},
+		{ID: "t2", ComponentType: "wire", ParentID: "w2", Key: "Name", Value: "SIG", BBox: box(200, 80, 220, 88)},
+	}
+	comps := []layoutComp{{
+		ID: "wall", Designator: "B1", ComponentType: schLayoutPartType,
+		BBox: box(80, 25, 120, 100),
+	}}
+	got := directConnectOpportunityFindings(items, comps, wires, nil, nil)
+	if len(got) != 1 || !strings.Contains(got[0].Message, "正交绕行路径") {
+		t.Fatalf("multi-bend obstacle-aware opportunity not found: %+v", got)
 	}
 }

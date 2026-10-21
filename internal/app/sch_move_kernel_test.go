@@ -596,6 +596,43 @@ func TestMoveKernel_SharedTreeRefusesWithZeroMutation(t *testing.T) {
 	}
 }
 
+func TestMoveKernel_ExplicitBoundaryCanReplaceSharedTree(t *testing.T) {
+	f := kernelFixture()
+	f.wires = append(f.wires, schGroupWire{ID: "w3", Points: []float64{95, 100, 495, 500}})
+	nets := map[string]map[string]bool{
+		"5V":  {"R1.1": true, "U9.1": true},
+		"GND": {"R1.2": true},
+	}
+	f.netSeq = []map[string]map[string]bool{nets}
+	rep, err := schMoveKernelWith(f, []moveItem{
+		{Designator: "R1", HasTarget: true, X: 100, Y: 140},
+	}, moveKernelOpts{
+		Label: "boundary-test", RetryDelay: 1,
+		Boundary: &moveKernelBoundary{
+			SharedWireIDs: []string{"w3"},
+			PinRefs:       []string{"R1:1", "U9:1"},
+			Wires: []moveKernelBoundaryWire{
+				{Net: "5V", Points: []float64{95, 140, 495, 140}},
+				{Net: "5V", Points: []float64{495, 140, 495, 500}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("explicit boundary replacement should succeed: %v", err)
+	}
+	if len(rep.Moved) != 1 || rep.Moved[0] != "R1" {
+		t.Fatalf("moved=%v", rep.Moved)
+	}
+	if len(f.createdSeg) != 2 {
+		t.Fatalf("planned boundary wires not created: %+v", f.createdSeg)
+	}
+	for _, call := range f.log {
+		if call == "autoconnect R1:1 replace=false" || strings.Contains(call, "autoconnect R1:1,U9:1") {
+			t.Fatalf("boundary pins must be excluded from autoconnect: %v", f.log)
+		}
+	}
+}
+
 // ── 目标页不可解析(工程被重建)→ fail-closed:零 mutation、零恢复输出 ────────
 //
 // 真机 smoke 实录:ceshi 工程被重建后,旧内核一路走到重连步才报 `--doc no

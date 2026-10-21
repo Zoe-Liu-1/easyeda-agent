@@ -2,3 +2,6 @@
 
 🟡 网络标签竖排/折叠 (1):
   - 名称「SIG」 @bbox(95,120) rotation=90 竖排/折叠（应水平显示）
+
+🟠 信号网使用 netflag/netport (1):
+  - 信号网 'SIG' 使用了 netflag f1 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

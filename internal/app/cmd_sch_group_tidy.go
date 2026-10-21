@@ -1232,6 +1232,15 @@ func tidySelfCheck(cfg *appConfig, win, docUUID string) error {
 // grey half-segment live-reported 2026-08-12) is debris to delete wholesale
 // before rebuilding. Pure function — table-testable.
 func tidyDeepSweepPlan(memberDesigs map[string]bool, comps []layoutComp, wires []schGroupWire) (deleteIDs []string, sharedErr error) {
+	return tidyDeepSweepPlanAllowShared(memberDesigs, comps, wires, nil)
+}
+
+// tidyDeepSweepPlanAllowShared is tidyDeepSweepPlan with an explicit exception
+// set for inter-part wire trees that the caller has already planned to replace.
+// The exception is a wire-id allowlist, never a blanket "allow shared" switch:
+// every other tree that reaches a non-member pin still fails closed.
+func tidyDeepSweepPlanAllowShared(memberDesigs map[string]bool, comps []layoutComp, wires []schGroupWire,
+	allowedShared map[string]bool) (deleteIDs []string, sharedErr error) {
 	const eps = 0.5
 	const graze = 2.0
 	// Union-find over wires (same touch semantics as the group expansion family).
@@ -1263,6 +1272,12 @@ func tidyDeepSweepPlan(memberDesigs map[string]bool, comps []layoutComp, wires [
 			if touched {
 				parent[find(i)] = find(j)
 			}
+		}
+	}
+	allowedRoots := map[int]bool{}
+	for wi, w := range wires {
+		if allowedShared[w.ID] {
+			allowedRoots[find(wi)] = true
 		}
 	}
 	// Member pin set, member bboxes, and NON-member part pins.
@@ -1319,7 +1334,7 @@ func tidyDeepSweepPlan(memberDesigs map[string]bool, comps []layoutComp, wires [
 		}
 	}
 	for root := range treeTouchesMember {
-		if treeTouchesOther[root] {
+		if treeTouchesOther[root] && !allowedRoots[root] {
 			return nil, fmt.Errorf("成员的连线树同时触及非成员器件 pin(共享导线)— 深度清扫会切断邻件,拒绝(先手工梳理该树或把邻件一并入组)")
 		}
 	}

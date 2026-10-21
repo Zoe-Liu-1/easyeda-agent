@@ -50,3 +50,7 @@
 
 🟡 过度按名接线 (flag≈pin) (1):
   - 标识/端口 25 / 引脚 31 = 81% > 60% → 过度按名接线(flag-every-pin),簇内/短网络应改本地导线 (SOP Step3 决策表)
+
+🟠 信号网使用 netflag/netport (2):
+  - 信号网 'SIG' 使用了 netport ? — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true
+  - 信号网 'SIG' 使用了 netport ? — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

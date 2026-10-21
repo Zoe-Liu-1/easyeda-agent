@@ -20,6 +20,27 @@ func dcBlockingText(id string, x0, x1 float64) visibleTextItem {
 	}
 }
 
+func TestDirectConnectPlaybookContainsOnlyClearPairs(t *testing.T) {
+	pairs := []dcPairPlan{
+		{Net: "SIG", LabelA: "a", LabelB: "b", Status: "already-clear",
+			PathPoints: [][2]float64{{0, 0}, {100, 0}}},
+		{Net: "SIG", LabelA: "c", LabelB: "d", Status: "part-move-proposed",
+			PathPoints: [][2]float64{{0, 0}, {0, 40}, {100, 40}}},
+	}
+	pb, err := directConnectPlaybook(pairs, "", "project", "doc")
+	if err != nil {
+		t.Fatalf("compile direct-connect playbook: %v", err)
+	}
+	if len(pb.Steps) != 1 || pb.Steps[0].Run != "sch direct-connect-apply" ||
+		pb.Steps[0].Flags["pair"] != "a,b" || pb.Steps[0].Flags["apply"] != true ||
+		!pb.RequireFullExecution {
+		t.Fatalf("wrong playbook: %+v", pb)
+	}
+	if _, err := directConnectPlaybook(pairs[1:], "", "project", "doc"); err == nil {
+		t.Fatal("move-required pair must not compile into an executable playbook")
+	}
+}
+
 func TestPlanDirectConnectTextMoves(t *testing.T) {
 	wires := []schGroupWire{
 		{ID: "w1", Points: []float64{0, 0, 0, 100}},
@@ -282,11 +303,17 @@ func TestDirectConnectPlanUsesWireAttachmentPoint(t *testing.T) {
 	}}
 	plans := planDirectConnectTextMoves(items, comps, wires, nil,
 		&layoutBBox{MinX: -20, MinY: -20, MaxX: 240, MaxY: 140}, nil, 250, 40)
-	if len(plans) != 1 || plans[0].Status != "unresolved" {
-		t.Fatalf("route must start on the wire, not the text center: %+v", plans)
+	if len(plans) != 1 || plans[0].Status != "already-clear" || len(plans[0].PathPoints) < 2 {
+		t.Fatalf("obstacle-aware route should now find a detour from the wire attachment: %+v", plans)
 	}
-	if len(plans[0].BlockersA) == 0 || !strings.Contains(strings.Join(plans[0].BlockersA, ","), "part:D1") {
-		t.Fatalf("wire-side obstacle must be reported: %+v", plans[0].BlockersA)
+	if math.Abs(plans[0].PathPoints[0][0]) > 0.5 || math.Abs(plans[0].PathPoints[0][1]-50) > 0.5 {
+		t.Fatalf("route must start on the wire attachment (0,50), got %+v", plans[0].PathPoints)
+	}
+	for i := 0; i+1 < len(plans[0].PathPoints); i++ {
+		p, q := plans[0].PathPoints[i], plans[0].PathPoints[i+1]
+		if schSegmentCrossesBox(p[0], p[1], q[0], q[1], *comps[0].BBox) {
+			t.Fatalf("detour crosses blocker D1: %+v", plans[0].PathPoints)
+		}
 	}
 }
 

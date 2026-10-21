@@ -3,6 +3,7 @@
 import json, sys
 from collections import defaultdict, Counter
 from math import hypot
+import heapq
 import orient
 
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -55,6 +56,17 @@ def family(f):
     if f['type'] == 'netport': return 'port'
     n = (f.get('net') or '').lower()
     return 'ground' if any(g in n for g in ('gnd','vss','agnd','dgnd','pgnd')) else 'power'
+
+def is_power_name(n):
+    return any(p in (n or '').lower() for p in ('vcc','vdd','3v3','5v','+','vbat','vbus'))
+
+def is_gnd_name(n):
+    return any(g in (n or '').lower() for g in ('gnd','vss','agnd'))
+
+def is_rail_name(n):
+    s = (n or '').lower()
+    return (is_power_name(s) or is_gnd_name(s) or
+            any(s.startswith(prefix) for prefix in ('vout', 'vload', 'vbias', 'dc')))
 
 problems = defaultdict(list)
 
@@ -140,6 +152,43 @@ for i in range(len(bb)):
     for j in range(i+1, len(bb)):
         if overlap(bb[i][1], bb[j][1]):
             problems['bbox_overlap'].append(f"{bb[i][0]} 与 {bb[j][0]} bbox 重叠")
+
+# ---- Check 6b: drawing / title-block bounds when measured geometry exists ----
+def as_box(value):
+    if isinstance(value, dict):
+        keys = ('minX','minY','maxX','maxY')
+        if all(isinstance(value.get(k), (int,float)) for k in keys):
+            return [float(value[k]) for k in keys]
+    if isinstance(value, (list, tuple)) and len(value) == 4 and all(isinstance(v, (int,float)) for v in value):
+        return [float(v) for v in value]
+    return None
+
+sheet_box = next((as_box(p.get('bbox')) for p in sheets if as_box(p.get('bbox'))), None)
+keepouts = []
+for item in data.get('keepouts') or []:
+    box = as_box(item.get('bbox') if isinstance(item, dict) else item)
+    if box:
+        keepouts.append(box)
+if sheet_box:
+    for p in parts:
+        box = as_box(p.get('bbox'))
+        if box and not (sheet_box[0] <= box[0] and sheet_box[1] <= box[1] and box[2] <= sheet_box[2] and box[3] <= sheet_box[3]):
+            problems['out_of_sheet'].append(f"器件 {p.get('designator') or p.get('pid')} 越出图纸 bbox")
+        if box:
+            for ko in keepouts:
+                if overlap(box, ko):
+                    problems['titleblock_overlap'].append(f"器件 {p.get('designator') or p.get('pid')} 落入图签/禁放区")
+    for f in flags:
+        if not (sheet_box[0] <= f['x'] <= sheet_box[2] and sheet_box[1] <= f['y'] <= sheet_box[3]):
+            problems['out_of_sheet'].append(f"标识 {f.get('pid')} 越出图纸 @({f['x']},{f['y']})")
+        for ko in keepouts:
+            if ko[0] <= f['x'] <= ko[2] and ko[1] <= f['y'] <= ko[3]:
+                problems['titleblock_overlap'].append(f"标识 {f.get('pid')} 落入图签/禁放区")
+    for w in wires:
+        for a, b in segs(w.get('line') or []):
+            if not (sheet_box[0] <= a[0] <= sheet_box[2] and sheet_box[1] <= a[1] <= sheet_box[3]
+                    and sheet_box[0] <= b[0] <= sheet_box[2] and sheet_box[1] <= b[1] <= sheet_box[3]):
+                problems['out_of_sheet'].append(f"导线 {w['pid']} 越出图纸 {a}->{b}")
 
 # ---- Check 7: duplicate designators ----
 desigs = Counter(p['designator'] for p in parts if p.get('designator'))
@@ -237,6 +286,13 @@ def seg_intersects_seg(a, b, c, d):
             (abs(o2) <= 1e-9 and on_seg(a,d,b)) or
             (abs(o3) <= 1e-9 and on_seg(c,a,d)) or
             (abs(o4) <= 1e-9 and on_seg(c,b,d)))
+
+for w in wires:
+    for a, b in segs(w.get('line') or []):
+        for ko in keepouts:
+            if seg_intersects_box(a, b, ko):
+                problems['titleblock_overlap'].append(
+                    f"导线 {w['pid']} 进入图签/禁放区 {a}->{b}")
 
 for f in flags:
     ax, ay = f['x'], f['y']
@@ -353,6 +409,20 @@ for t in visible_text_boxes():
             f"名称「{t['net'] or t['label']}」 @bbox({t['bbox'][0]:g},{t['bbox'][1]:g}) "
             f"rotation={rot:g} 竖排/折叠（应水平显示）")
 
+# ---- Check 10d3: signal nets must use text-only labels; explicit module ports stay audited ----
+for f in flags:
+    if f['type'] not in ('netflag', 'netport') or not (f.get('net') or '').strip():
+        continue
+    if is_rail_name(f['net']):
+        continue
+    if f['type'] == 'netport' and f.get('moduleBoundaryExempt'):
+        problems['signal_port_exempt'].append(
+            f"信号网 '{f['net']}' 的模块边界端口 {f.get('pid','?')} 显式豁免（仍应人工复核边界语义）")
+        continue
+    problems['signal_marker_type'].append(
+        f"信号网 '{f['net']}' 使用了 {f['type']} {f.get('pid','?')} — 应改文字网络标签；"
+        f"模块边界 netport 须在源数据标 moduleBoundaryExempt:true")
+
 # ---- net trace (union-find) for power/ground audit ----
 uf = {}
 def ufind(x):
@@ -390,13 +460,54 @@ for (net, root), group in labels_by_island.items():
             f"线岛 {root} 上网络 '{net}' 有 {len(group)} 个同名标签 — 只保留一个："
             + ", ".join(f"@{t['bbox'][0]:g},{t['bbox'][1]:g}" for t in group))
 
+# ---- Check 10e2: cross-kind duplicates on one line island ----
+flags_by_pid = {f.get('pid'): f for f in flags if f.get('pid')}
+marker_labels = defaultdict(list)
+for t in visible_text_boxes():
+    if t['componentType'] not in ('netflag', 'netport', 'netlabel') or t['key'] != 'Name':
+        continue
+    f = flags_by_pid.get(t.get('parentWireId'))
+    if not f:
+        continue
+    root = ufind((f['x'], f['y']))
+    marker_labels[(f.get('net') or '', root)].append((f, t))
+for key, markers in marker_labels.items():
+    net, root = key
+    wire_labels = labels_by_island.get((net, root), [])
+    if wire_labels and markers:
+        problems['cross_kind_label_economy'].append(
+            f"线岛 {root} 网络 '{net}' 同时有导线标签和 {len(markers)} 个标识符号 — 只保留一个")
+
+# ---- Check 10e3: visible label text must stay within 50 units of its owner ----
+def seg_point_distance(px, py, a, b):
+    x0, y0 = a; x1, y1 = b
+    dx, dy = x1-x0, y1-y0
+    l2 = dx*dx + dy*dy
+    tt = 0 if l2 == 0 else max(0, min(1, ((px-x0)*dx + (py-y0)*dy) / l2))
+    return hypot(px-(x0+tt*dx), py-(y0+tt*dy))
+
+for t in visible_text_boxes():
+    if t['key'] != 'Name' or not t['bbox'] or t.get('visible') is False:
+        continue
+    px = (t['bbox'][0]+t['bbox'][2])/2
+    py = (t['bbox'][1]+t['bbox'][3])/2
+    dist = None
+    if t['componentType'] == 'wire' and t['parentWireId']:
+        for w in wires:
+            if w.get('pid') != t['parentWireId']:
+                continue
+            for a, b in segs(w.get('line') or []):
+                d = seg_point_distance(px, py, a, b)
+                dist = d if dist is None else min(dist, d)
+    elif t['componentType'] in ('netflag', 'netport', 'netlabel'):
+        f = flags_by_pid.get(t.get('parentWireId'))
+        if f:
+            dist = hypot(px-f['x'], py-f['y'])
+    if dist is not None and dist > 50:
+        problems['label_distance'].append(
+            f"名称「{t['net'] or t['label']}」距所属导线/符号 {dist:.1f}u > 50u")
+
 # ---- Check 10f: same-net labels on different islands with a clear short L path ----
-def is_power_name(n):
-    return any(p in (n or '').lower() for p in ('vcc','vdd','3v3','5v','+','vbat','vbus'))
-
-def is_gnd_name(n):
-    return any(g in (n or '').lower() for g in ('gnd','vss','agnd'))
-
 def path_clear(points, excluded_roots, excluded_labels, text_items):
     for (a, b) in zip(points, points[1:]):
         if a == b:
@@ -410,9 +521,13 @@ def path_clear(points, excluded_roots, excluded_labels, text_items):
             if seg_intersects_box(a, b, t['bbox']):
                 return False
         for f in flags:
+            if (f['x'], f['y']) in (points[0], points[-1]):
+                continue
             if seg_intersects_box(a, b, [f['x']-0.5, f['y']-0.5, f['x']+0.5, f['y']+0.5]):
                 return False
         for pin in pin_pts:
+            if pin in (points[0], points[-1]):
+                continue
             if seg_intersects_box(a, b, [pin[0]-0.5, pin[1]-0.5, pin[0]+0.5, pin[1]+0.5]):
                 return False
         for w in wires:
@@ -423,13 +538,141 @@ def path_clear(points, excluded_roots, excluded_labels, text_items):
                     return False
     return True
 
+def label_attachment(t, root):
+    """Closest point on the label's own wire tree to the measured text center."""
+    px = (t['bbox'][0] + t['bbox'][2]) / 2
+    py = (t['bbox'][1] + t['bbox'][3]) / 2
+    best = None
+    for w in wires:
+        if wire_roots.get(w['pid']) != root:
+            continue
+        for a, b in segs(w.get('line') or []):
+            x0, y0 = a; x1, y1 = b
+            dx, dy = x1-x0, y1-y0
+            l2 = dx*dx + dy*dy
+            tt = 0 if l2 == 0 else max(0, min(1, ((px-x0)*dx + (py-y0)*dy) / l2))
+            qx, qy = x0 + tt*dx, y0 + tt*dy
+            d = hypot(px-qx, py-qy)
+            if best is None or d < best[0]:
+                best = (d, qx, qy)
+    return (best[1], best[2]) if best else (px, py)
+
+def orthogonal_detour(start, end, excluded_roots, excluded_labels, text_items, max_len=500):
+    """Obstacle-aware 5-unit A* used when both direct L paths are blocked."""
+    margin = 80
+    minx, miny = min(start[0], end[0])-margin, min(start[1], end[1])-margin
+    maxx, maxy = max(start[0], end[0])+margin, max(start[1], end[1])+margin
+    sheet = next((p.get('bbox') for p in sheets if p.get('bbox')), None)
+    if sheet:
+        minx, miny = max(minx, sheet[0]), max(miny, sheet[1])
+        maxx, maxy = min(maxx, sheet[2]), min(maxy, sheet[3])
+    dirs = [(1,0),(0,1),(-1,0),(0,-1)]
+    start_key = (start[0], start[1], -1)
+    best = {start_key: 0}
+    prev = {}
+    q = [(abs(start[0]-end[0])+abs(start[1]-end[1]), 0, start[0], start[1], -1)]
+    expanded = 0
+    while q and expanded < 12000:
+        _, g, x, y, last = heapq.heappop(q)
+        key = (x, y, last)
+        if g != best.get(key):
+            continue
+        if last >= 0 and (abs(x-end[0]) <= .5 or abs(y-end[1]) <= .5):
+            if g + abs(x-end[0])+abs(y-end[1]) <= max_len and path_clear(
+                    [(x,y), end], excluded_roots, excluded_labels, text_items):
+                prev[(end[0],end[1],4)] = key
+                chain = [(end[0],end[1],4)]
+                while chain[-1] in prev:
+                    chain.append(prev[chain[-1]])
+                pts = [start] + [(v[0],v[1]) for v in reversed(chain)]
+                out = []
+                for p in pts:
+                    if not out or p != out[-1]:
+                        out.append(p)
+                compact = []
+                for p in out:
+                    if len(compact) >= 2:
+                        a, b = compact[-2], compact[-1]
+                        if ((a[0] == b[0] == p[0]) or (a[1] == b[1] == p[1])):
+                            compact[-1] = p
+                            continue
+                    compact.append(p)
+                out = compact
+                return out
+        for di, (dx,dy) in enumerate(dirs):
+            if last >= 0 and (last+2) % 4 == di:
+                continue
+            nx, ny = x+dx*5, y+dy*5
+            if nx < minx-.5 or nx > maxx+.5 or ny < miny-.5 or ny > maxy+.5:
+                continue
+            if not path_clear([(x,y),(nx,ny)], excluded_roots, excluded_labels, text_items):
+                continue
+            cost = g + 5 + (0 if last < 0 or last == di else 2)
+            if cost > max_len:
+                continue
+            nk = (nx, ny, di)
+            if cost >= best.get(nk, 10**9):
+                continue
+            best[nk] = cost
+            prev[nk] = key
+            heapq.heappush(q, (cost+abs(nx-end[0])+abs(ny-end[1]), cost, nx, ny, di))
+        expanded += 1
+    return None
+
 all_text = visible_text_boxes()
+
+# ---- Check 10f0: visible text vs bodies, foreign pins and other text ----
+def boxes_positive_overlap(a, b):
+    return min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
+
+for i, a in enumerate(all_text):
+    if not a['bbox'] or a.get('visible') is False:
+        continue
+    hit = None
+    for p in parts:
+        if p.get('pid') == a.get('parentWireId'):
+            continue
+        if p.get('bbox') and boxes_positive_overlap(a['bbox'], p['bbox']):
+            hit = f"器件 {p.get('designator') or p.get('pid')} bbox"
+            break
+    if hit is None:
+        for f in flags:
+            if f.get('pid') == a.get('parentWireId'):
+                continue
+            box = [f['x']-.5, f['y']-.5, f['x']+.5, f['y']+.5]
+            if boxes_positive_overlap(a['bbox'], box):
+                hit = f"标识 {f.get('pid')}"
+                break
+    if hit is None:
+        for pin in pin_pts:
+            if pin[0] >= a['bbox'][0] and pin[0] <= a['bbox'][2] and pin[1] >= a['bbox'][1] and pin[1] <= a['bbox'][3]:
+                hit = f"引脚 {pin_pts[pin]}"
+                break
+    if hit is None:
+        for b in all_text[i+1:]:
+            if not b['bbox'] or b.get('visible') is False:
+                continue
+            if a.get('parentWireId') and a.get('parentWireId') == b.get('parentWireId'):
+                continue
+            if boxes_positive_overlap(a['bbox'], b['bbox']):
+                hit = f"文字「{b['label']}」"
+                break
+    if hit:
+        problems['visible_text_overlap'].append(f"{a['label']} 压缩 {hit}")
+    if sheet_box and a['bbox'] and not (
+            sheet_box[0] <= a['bbox'][0] and sheet_box[1] <= a['bbox'][1]
+            and a['bbox'][2] <= sheet_box[2] and a['bbox'][3] <= sheet_box[3]):
+        problems['out_of_sheet'].append(f"可见文字「{a['label']}」越出图纸")
+    for ko in keepouts:
+        if a['bbox'] and boxes_positive_overlap(a['bbox'], ko):
+            problems['titleblock_overlap'].append(f"可见文字「{a['label']}」进入图签/禁放区")
+
 label_items = []
 for t in all_text:
     if t['componentType'] != 'wire' or t['key'] != 'Name' or not t['parentWireId']:
         continue
     root = wire_roots.get(t['parentWireId'])
-    if root is None or is_power_name(t['net']) or is_gnd_name(t['net']):
+    if root is None or is_rail_name(t['net']):
         continue
     label_items.append((t, root))
 
@@ -446,8 +689,8 @@ for i in range(len(label_items)):
         if pair in seen_pairs:
             continue
         seen_pairs.add(pair)
-        a = ((ti['bbox'][0]+ti['bbox'][2])/2, (ti['bbox'][1]+ti['bbox'][3])/2)
-        b = ((tj['bbox'][0]+tj['bbox'][2])/2, (tj['bbox'][1]+tj['bbox'][3])/2)
+        a = label_attachment(ti, ri)
+        b = label_attachment(tj, rj)
         if abs(a[0]-b[0]) + abs(a[1]-b[1]) > 250:
             continue
         paths = [
@@ -460,6 +703,13 @@ for i in range(len(label_items)):
                     f"网络 '{ti['net']}' 的两个标签 @({a[0]:g},{a[1]:g}) 与 @({b[0]:g},{b[1]:g}) "
                     f"存在无遮挡短 L 路径（Manhattan={abs(a[0]-b[0])+abs(a[1]-b[1]):g}u）→ 优先直连，删除标签")
                 break
+        else:
+            path = orthogonal_detour(a, b, {ri, rj}, (ti, tj), all_text,
+                                     max_len=max(100, 2*(abs(a[0]-b[0])+abs(a[1]-b[1]))))
+            if path:
+                problems['direct_connect_opportunity'].append(
+                    f"网络 '{ti['net']}' 的两个标签 @({a[0]:g},{a[1]:g}) 与 @({b[0]:g},{b[1]:g}) "
+                    f"存在无遮挡正交绕行路径（{len(path)-1} 段）→ 优先直连，删除标签")
 
 net_members = defaultdict(lambda: {'pins': set(), 'flags': set()})
 net_pts = defaultdict(set)   # root -> set of (x,y) pin/flag points on that net (for span/proximity)
@@ -467,6 +717,58 @@ for pt in list(uf):
     root = ufind(pt)
     if pt in pin_pts: net_members[root]['pins'].add(pin_pts[pt]); net_pts[root].add(pt)
     if pt in flag_pts: net_members[root]['flags'].add(f"{flag_pts[pt]['net']}"); net_pts[root].add(pt)
+
+# ---- Check 10g: conservative H-V-H / V-H-V offset opportunity ----
+wire_segments = []
+for w in wires:
+    for a, b in segs(w.get('line') or []):
+        if a == b:
+            continue
+        if a[0] == b[0]:
+            ori = 'v'
+        elif a[1] == b[1]:
+            ori = 'h'
+        else:
+            continue
+        wire_segments.append({'a': a, 'b': b, 'ori': ori, 'wire': w['pid'], 'net': w.get('net') or ''})
+
+def other_end(seg, point):
+    if seg['a'] == point:
+        return seg['b']
+    if seg['b'] == point:
+        return seg['a']
+    return None
+
+seen_alignment = set()
+for connector in wire_segments:
+    if connector['ori'] not in ('h', 'v'):
+        continue
+    p0, p1 = connector['a'], connector['b']
+    if p0 in pin_pts or p1 in pin_pts or p0 in flag_pts or p1 in flag_pts:
+        continue
+    arm_ori = 'h' if connector['ori'] == 'v' else 'v'
+    arms0 = [s for s in wire_segments if s is not connector and s['ori'] == arm_ori and p0 in (s['a'], s['b'])]
+    arms1 = [s for s in wire_segments if s is not connector and s['ori'] == arm_ori and p1 in (s['a'], s['b'])]
+    if not arms0 or not arms1:
+        continue
+    a0, a1 = arms0[0], arms1[0]
+    o0, o1 = other_end(a0, p0), other_end(a1, p1)
+    if o0 is None or o1 is None:
+        continue
+    # Both arms extend to the same side; this is the conservative offset-jog
+    # shape that a group translation can align without changing topology.
+    d0 = (o0[0]-p0[0], o0[1]-p0[1])
+    d1 = (o1[0]-p1[0], o1[1]-p1[1])
+    if d0[0]*d1[0] + d0[1]*d1[1] <= 0:
+        continue
+    key = tuple(sorted((p0, p1, o0, o1)))
+    if key in seen_alignment:
+        continue
+    seen_alignment.add(key)
+    shape = 'H-V-H' if connector['ori'] == 'v' else 'V-H-V'
+    problems['alignment_opportunity'].append(
+        f"网络 '{connector['net'] or '?'}' 存在 {shape} 非必要偏轴折返 "
+        f"({p0}->{p1}->{o1}, arm={o0}) — 优先平移一侧功能组使两臂共线")
 
 def is_power(n): return any(p in n.lower() for p in ('vcc','vdd','3v3','5v','+','vbat','vbus'))
 def is_gnd(n):   return any(g in n.lower() for g in ('gnd','vss','agnd'))
@@ -542,7 +844,9 @@ if SOP_SCALE:
 
 order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
          'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_visibility','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
-         'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid']
+         'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid',
+         'cross_kind_label_economy','label_distance','signal_marker_type','signal_port_exempt',
+         'visible_text_overlap','titleblock_overlap','out_of_sheet','alignment_opportunity']
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
   'diagonal_wire':'🔴 斜线/非正交导线',
@@ -553,6 +857,14 @@ labels = {
   'label_visibility':'🟠 名称隐藏/为空',
   'label_vertical':'🟡 网络标签竖排/折叠',
   'redundant_label':'🟡 同线岛重复网络标签',
+  'cross_kind_label_economy':'🟡 同岛导线标签与标识混用重复',
+  'label_distance':'🟡 网络名称离所属对象过远',
+  'signal_marker_type':'🟠 信号网使用 netflag/netport',
+  'signal_port_exempt':'ℹ 信号模块端口显式豁免',
+  'visible_text_overlap':'🟠 可见文字压器件/标识/引脚/其他文字',
+  'titleblock_overlap':'🟠 图元/文字进入图签或禁放区',
+  'out_of_sheet':'🔴 图元或可见文字越出图纸',
+  'alignment_opportunity':'🔵 可平移消除的偏轴折返',
   'direct_connect_opportunity':'🔵 可直连的标签对',
   'orientation':'🟡 朝向不顺导线','power_ground_orientation':'🔴 电源/地标识朝向错误(应上/下)',
   'bbox_overlap':'🟠 元件 bbox 重叠',

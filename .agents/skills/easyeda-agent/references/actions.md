@@ -18,8 +18,10 @@
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
-| 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读。按风险从小到大给候选：①移 part Designator/Value 文字；②netflag/netport + 单段短桩带桩线做正交 L 迁移；③单器件连同相连线树/标识/标签刚体平移；④2–4 器件共享树功能块整体平移。共享/分支线树、疑似半移动、引脚直连、netlabel、多段桩、超大功能块一律跳过并给出原因，不落图 |
-| 直线化组移动计划 | `sch alignment-plan --doc <page> [--net <net>] [--json\|--out]`；只读。由 `alignment-opportunity` 生成完整移动组、专属导线/marker/标签、`boundaryPlans[]`、`sharedLabelIds[]`、`independentBlockerPlans[]` 和步骤顺序。主计划 `ready` 要求无阻塞且无共享边界；有共享边界为 `rewire-required`，有阻塞为 `blocked`。主组和独立阻塞组都复用整组移动的器件/引脚/文字/导线碰撞检查；阻塞组的安全落点按 5 单位栅格由近到远二维搜索，局部预算内才为 `ready`，超预算为 `review-required`，几何碰撞或自身带共享线为 `blocked`。边界草案还须避开器件本体、异网引脚/导线、可见文字、图签和图纸边界。主步骤在重读最终几何前始终不可执行 |
+| 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out\|--playbook <file>] [--pair A,B]`；规划只读。先测短 L，再用 5 单位障碍感知 A* 找多折正交路径；无遮挡路径直接记为 `already-clear`。仍有阻挡时按风险给出文字、netflag/netport 短桩、单器件刚体、2–4 器件功能块移动候选。`--playbook` 只为 `already-clear` 对生成完整执行队列；移动类候选仍需人工复核 |
+| 执行单对直连 | `sch direct-connect-apply --doc <page> --pair A,B [--apply] [--save] [--out file]`；默认 dry-run。重新规划并只接受 `already-clear`；创建导线前后、删除两个标签前后都比对完整 pin→net 表，变化时删除新线并恢复标签。`--apply` 才写入 |
+| 直线化组移动计划 | `sch alignment-plan --doc <page> [--net <net>] [--json\|--out]`；只读。由 `alignment-opportunity` 生成完整移动组、专属导线/marker/标签、`boundaryPlans[]`、`sharedLabelIds[]`、`independentBlockerPlans[]` 和步骤顺序。主计划 `ready` 要求无阻塞且无共享边界；有共享边界为 `rewire-required`，有阻塞为 `blocked`。主组和独立阻塞组都复用整组移动的器件/引脚/文字/导线碰撞检查；阻塞组的安全落点按 5 单位栅格由近到远二维搜索，局部预算内才为 `ready`，超预算为 `review-required`，几何碰撞或自身带共享线为 `blocked`。边界草案必须从每个引脚的外向首段出发，并避开器件本体、异网引脚/导线、可见文字、图签和图纸边界。`alignment-apply` 才能执行最终草案 |
+| 执行直线化计划 | `sch alignment-apply --doc <page> (--net <net> \| --plan <id>) [--apply] [--save] [--out file]`；默认 dry-run。只接受无 blockers 的 `rewire-required`；在现有 `schMoveKernel` 内显式允许计划中的共享树被替换，移动后按边界草案重建正交导线，并做全页逐脚网表与 bridge 对账。失败时走内核恢复段，不把部分写入报成成功 |
 | 电源局部簇规划 | `sch power-cluster-plan --doc <page> [--json\|--out] [--playbook <file>] [--exempt '<NET>\|<DESIGNATOR>'] [--include-gnd]`；只读。输出消费脚、每个被动件的短线路径、保留/删除符号和“先接后删验证”顺序；ready 全可接，partial 只接 clear 的被动件并删其符号，blocked 不给删除建议并列出阻挡对象。GND 默认不规划；`--include-gnd` 才纳入。`--playbook` 生成受保护 `sch apply` 队列：先接线/图检/bridge-check，再删被动侧符号，最后保存 |
 | 执行计划 | `sch apply <playbook.json>` |
 
@@ -135,10 +137,10 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `label-economy` | 同一线岛重复同名标签。覆盖信号标签和电源/地导线 Name；netflag/netport 的同岛重复由 `redundant-net-marker` 负责。电源/轨名仍不参与“信号直连机会”的数量统计。 |
 | `cross-kind-label-economy` | 同一线岛同名网络同时出现导线标签和 netflag/netport/netlabel。电源/地优先保留符号，信号优先保留导线标签；给出 keep/delete IDs，避免跨两套规则漏掉混合重复。拟保留表示自身不可见或名称为空时仍报 WARN，但不给删除建议；先恢复其可见名称再复核。 |
 | `label-distance` | 可见网络标签文字离所属导线/电源地符号超过 50 画布单位；隐藏或空名称不参与此规则（由 `label-visibility` 单独报）。 |
-| `direct-connect-opportunity` | 存在不交叉的正交短路径却用标签。当前实现只对**短 L 路径**给 INFO（器件/文字/导线/引脚阻挡即不报），多折点路径暂不提示；这是保守机会提示，不是硬门禁。 |
+| `direct-connect-opportunity` | 同网不同线岛之间存在不交叉的正交路径却使用标签。现场与离线检查都先测短 L；两条 L 均阻挡时再跑 5 单位障碍感知 A*，可报告多折绕行机会。器件/文字/导线/引脚/图签阻挡仍会排除路径。INFO，不是硬门禁。 |
 | `alignment-opportunity` | 端点/T 接的多个 wire primitive 先组成物理骨架，检测可整体平移消除的 `H-V-H`/`V-H-V` 偏轴折返。输出 `alignmentAxis`、`shiftX/shiftY`、`bendReduction`、`moveDesignators`、`moveWireIds`、`moveMarkerIds`、`moveLabelIds`、`sharedWireIds`、`blockers` 和 `independentBlockers`。锚点与移动侧按器件数、最大引脚数和局部拓扑确定，不绑定具体位号/型号/网络名；外围沿局部非电源网扩展，最多 16 件，遇到标准角色 `U`/`Q`/`IC` 且至少 4 脚的另一主动器件停止。共享边界线必须重连；独立阻塞组可生成前置移动计划和位移，超过局部预算的位置只供复核。INFO，折点为引脚/标识、网络不一致、移动出图或压器件时不当作可直接执行计划。 |
 | `power-cluster-candidate` | 消费电源脚与就近本地被动件（R/C/L/D）分属多个线岛、且每个线岛各有同名电源符号。先物理接入消费脚，再合并成一个符号；非 GND 按 250 单位 WARN，GND 按 150 单位 INFO（仍不自动落图）。跨功能区、10 器件以上通道不自动合并。独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 登记为 INFO 例外。 |
-| `signal-netflag-type` / `signal-netport-type` | 非电源/地网络使用 netflag（WARN）或 netport（INFO）。信号网优先用网络标签；netport 仅作为显式模块边界例外。 |
+| `signal-netflag-type` / `signal-netport-type` | 非电源/地网络使用 netflag 或 netport 均为 WARN。信号网统一使用文字网络标签；确属模块边界的 netport 必须用 `--signal-port-exempt <primitiveId,...>` 显式登记，登记项转为 `signal-port-exempt` INFO 并保留审计。 |
 | `designator-wire-overlap` | 导线进入可见文字 bbox。应扩展到 Value、网络名和自由文字；网络标签只排除自身挂载线，Designator/Value/自由文字的全部导线都参与碰撞。 |
 | `visible-text-overlap` | 可见文字压器件/标识/其他文字/导线/引脚（含 body 外 lead）；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
 | `titleblock-overlap` | 器件、标记、导线或可见文字落入图签 keep-out；sheet 自身的图签字段豁免。 |

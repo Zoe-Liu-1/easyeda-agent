@@ -2,3 +2,6 @@
 
 🟡 同线岛重复网络标签 (1):
   - 线岛 (100, 160) 上网络 'SIG' 有 2 个同名标签 — 只保留一个：@95,120, @95,135
+
+🟠 信号网使用 netflag/netport (1):
+  - 信号网 'SIG' 使用了 netflag f1 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

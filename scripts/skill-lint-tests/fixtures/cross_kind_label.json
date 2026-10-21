@@ -1,0 +1,42 @@
+{
+  "_intent": "A wire label and a same-net marker on one physical line island must be reported as a mixed duplicate.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 100,
+      "y": 100,
+      "pins": [{ "num": "1", "name": "P", "x": 100, "y": 100 }],
+      "bbox": [90, 90, 110, 110]
+    }
+  ],
+  "flags": [
+    { "pid": "f1", "type": "netflag", "net": "SIG", "x": 100, "y": 150, "rotation": 0 }
+  ],
+  "wires": [
+    { "pid": "w1", "net": "SIG", "line": [100, 100, 100, 150] }
+  ],
+  "visible_text": [
+    {
+      "pid": "t1",
+      "kind": "attribute",
+      "componentType": "wire",
+      "parentWireId": "w1",
+      "key": "Name",
+      "value": "SIG",
+      "rotation": 0,
+      "bbox": [95, 120, 115, 130]
+    },
+    {
+      "pid": "f1-name",
+      "kind": "attribute",
+      "componentType": "netflag",
+      "parentId": "f1",
+      "key": "Name",
+      "value": "SIG",
+      "rotation": 0,
+      "bbox": [95, 150, 115, 158]
+    }
+  ]
+}

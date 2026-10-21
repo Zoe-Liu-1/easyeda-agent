@@ -6,17 +6,17 @@ func alignmentTestPart(id, designator string, x, y float64, net string) layoutCo
 	return layoutComp{
 		ID: id, Designator: designator, ComponentType: schLayoutPartType,
 		BBox: &layoutBBox{MinX: x - 10, MinY: y - 5, MaxX: x + 10, MaxY: y + 5},
-		Pins: []layoutPin{{Number: "1", Net: net, X: x, Y: y}},
+		Pins: []layoutPin{{Number: "1", Net: net, X: x, Y: y, Rotation: 90, RotationKnown: true}},
 	}
 }
 
 func alignmentCorePart(id, designator string, x, y float64, net string) layoutComp {
 	c := alignmentTestPart(id, designator, x, y, net)
 	c.Pins = []layoutPin{
-		{Number: "1", Net: net, X: x, Y: y},
-		{Number: "2", Net: net, X: x + 5, Y: y},
-		{Number: "3", Net: net, X: x, Y: y + 5},
-		{Number: "4", Net: net, X: x + 5, Y: y + 5},
+		{Number: "1", Net: net, X: x, Y: y, Rotation: 90, RotationKnown: true},
+		{Number: "2", Net: net, X: x + 5, Y: y, Rotation: 90, RotationKnown: true},
+		{Number: "3", Net: net, X: x, Y: y + 5, Rotation: 90, RotationKnown: true},
+		{Number: "4", Net: net, X: x + 5, Y: y + 5, Rotation: 90, RotationKnown: true},
 	}
 	return c
 }

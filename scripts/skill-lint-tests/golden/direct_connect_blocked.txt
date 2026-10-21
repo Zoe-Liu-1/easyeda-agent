@@ -1,3 +1,8 @@
 == 概览 ==  parts=3 flags=2 wires=2 sheets=0 nets≈2
 
-✅ 无问题
+🔵 可直连的标签对 (1):
+  - 网络 'SIG' 的两个标签 @(100,119) 与 @(200,179) 存在无遮挡正交绕行路径（5 段）→ 优先直连，删除标签
+
+🟠 信号网使用 netflag/netport (2):
+  - 信号网 'SIG' 使用了 netflag f1 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true
+  - 信号网 'SIG' 使用了 netport f2 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

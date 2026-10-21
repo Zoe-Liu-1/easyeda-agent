@@ -2,3 +2,6 @@
 
 🔴 斜线/非正交导线 (1):
   - wire w1 段 (100, 100)->(150, 150) 不是水平/竖直（dx=50, dy=50）
+
+🟠 信号网使用 netflag/netport (1):
+  - 信号网 'SIG' 使用了 netport p1 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

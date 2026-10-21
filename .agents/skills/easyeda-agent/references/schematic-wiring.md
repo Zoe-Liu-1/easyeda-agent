@@ -52,7 +52,9 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 网络交叉的短路径时，先用真实导线；只有跨块/跨页/远距离、引脚首段方向不允许，或直连必然
 交叉/穿器件/压字时，才用同名标签。不得为省标签绕斜线或制造交叉。标签按**线岛**计数：
 同一线岛同一网络只标一次；标签水平、可见，不压导线/引脚/器件/文字；电源、地、器件名称
-不计入标签数量。
+不计入标签数量。非电源/地信号网使用 netflag 或带箭头的 netport 均为 WARN；确属模块边界
+的 netport 需用 `sch check --signal-port-exempt <primitiveId,...>` 显式登记，登记项只保留
+INFO 审计，不再静默放过。
 
 **局部电源/地不要用 `sch wire --net` 重复显示网名。** 导线本身不命名，末端 netflag 定义
 网名；否则 `--net` 会把网名画在导线上，与 netflag 名称重复并增加压字。信号网的
@@ -85,11 +87,11 @@ wire primitive 组成同一物理骨架，再对同网主干检查
 共享边界线必须删除后按移动后的真实端点重新布线。`boundaryPlans[]` 对每个边界网给出
 `fixedPins`、`movedPins`、正交 `wires`、`deleteWireIds`、`labelIds` 和阻塞原因；主网从目标
 轴线生成总线/分支，次网枚举正交 L 路由。草案要避开移动后的器件本体、异网引脚和导线、
-全部可见文字、图签区、图纸边界及其他网络交叉；同名共享线删除后由
-`restore-shared-labels` 恢复名称并重新查重和查重叠。`sch alignment-plan --doc <page>
-[--net <net>] [--json|--out]` 输出只读步骤和资源：`ready` 仅在无 blocking/shared 边界时
-成立；共享边界即使已有 `proposed` 草案也保持 `rewire-required`，`rewire-required` 与
-`blocked` 均不得批量执行，planner 不调用 group.move/delete/wire/save。
+全部可见文字、图签区、图纸边界及其他网络交叉。每段路径的第一段必须沿对应引脚的
+外向 rotation 出线；pin rotation 缺失时边界计划为 blocked。`sch alignment-plan --doc
+<page> [--net <net>] [--json|--out]` 输出只读步骤和资源。真正执行使用 `sch
+alignment-apply ... --apply --save`：安全内核只对计划列出的共享树解除 fail-closed，
+移动后重建边界线并逐脚比对全页网表；失败进入恢复段，不能把部分写入报成成功。
 
 **多段线树按自由端逐个复核。** 宿主会把同一网络的多段导线合并成一个 segment-array
 `Line`，不能因为树上任意一端已接引脚或标识，就把整根线判为已用尽。先按线段端点求度数，
@@ -102,8 +104,9 @@ wire primitive 组成同一物理骨架，再对同网主干检查
 重排顶点，直接回放可能产生斜线/回折；应从干净的正交模板生成，逐段 `sch wire`，完成后跑
 `sch bridge-check` + `sch read` 逐脚对账。
 
-**直连机会规划先只读。** `sch direct-connect-plan` 会列出同网不同线岛的近距离标签对、
-当前 L 路径的阻挡对象，并按风险从小到大给出 5 网格的小位移候选：
+**直连机会规划先只读。** `sch direct-connect-plan` 会列出同网不同线岛的近距离标签对。
+先检查两条短 L；都受阻时用 5 单位障碍感知 A* 搜索多折正交路径，A* 仍无干净路径时，
+才按风险从小到大给出小位移候选：
 
 1. `move-proposed`：只移动阻挡的 part Designator/Value 文字；
 2. `marker-move-proposed`：只处理 `netflag`/`netport` + **单段直线短桩**。标识本体与
@@ -122,6 +125,11 @@ wire primitive 组成同一物理骨架，再对同网主干检查
 导线，就会进入器件迁移候选；`partSkips` 会逐器件给出 `shared-wire-tree` /
 `no-clear-part-move` 等原因。共享线树意味着单器件一动就会撕裂与其它器件的连接，
 正确解法是移动整个功能块或重走该网络，不能靠单器件微调。
+
+`already-clear` 的对可由 `--playbook` 生成受保护队列，先创建真实导线，再删除两个
+冗余标签。单对执行也可用 `sch direct-connect-apply --pair A,B --apply --save`；它在
+建线前后和删标签前后比较完整 pin→net 表，失败时删除新线并恢复标签。移动类候选不在
+自动 playbook 范围内，必须先用 dry-run/预览确认。
 
 **共享线树按功能块处理。** 2–4 个器件通过共享线树连成的小块会整体刚体平移；如果标签
 本身所在的线岛也在被移动的块里，规划器会重新计算标签在线岛上的连接点再验路径。超过

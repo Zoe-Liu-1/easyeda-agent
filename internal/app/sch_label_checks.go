@@ -384,11 +384,11 @@ func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, 
 	return out
 }
 
-// signalMarkerTypeFindings enforces the marker-type convention: signal nets
-// should be named by net labels; a netflag on a signal net is a hard type
-// mismatch. Netports are split out as INFO because an explicit module-boundary
-// port can be intentional.
-func signalMarkerTypeFindings(comps []layoutComp) []checkFinding {
+// signalMarkerTypeFindings enforces the marker-type convention: signal nets are
+// named by text-only net labels. A signal netflag or netport is a WARN unless a
+// netport primitiveId is explicitly registered as a module-boundary exception;
+// the exception remains visible as INFO.
+func signalMarkerTypeFindings(comps []layoutComp, portExempt map[string]bool) []checkFinding {
 	var out []checkFinding
 	for _, c := range comps {
 		if c.ComponentType != "netflag" && c.ComponentType != "netport" {
@@ -401,9 +401,18 @@ func signalMarkerTypeFindings(comps []layoutComp) []checkFinding {
 		typ := "signal-netflag-type"
 		what := "电源旗标"
 		if c.ComponentType == "netport" {
-			level = "info"
-			typ = "signal-netport-type"
 			what = "端口符号"
+			typ = "signal-netport-type"
+			if portExempt[c.ID] {
+				out = append(out, checkFinding{
+					Type: "signal-port-exempt", Level: "info",
+					PrimitiveId: c.ID, Designator: c.Designator,
+					ComponentType: c.ComponentType, MarkerNet: c.Net,
+					At: &checkPoint{X: round2(c.X), Y: round2(c.Y)}, BBox: c.BBox,
+					Message: fmt.Sprintf("信号网 '%s' 的模块边界端口显式豁免：%s", c.Net, c.ID),
+				})
+				continue
+			}
 		}
 		out = append(out, checkFinding{
 			Type: typ, Level: level, PrimitiveId: c.ID, Designator: c.Designator,
@@ -643,6 +652,7 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 				{{a.ax, a.ay}, {a.ax, b.ay}, {b.ax, b.ay}},
 			}
 			candidates = filterDCPaths(candidates, sheet, titleBlock)
+			found := false
 			for _, path := range candidates {
 				if clear(path, a, b) {
 					out = append(out, checkFinding{
@@ -652,7 +662,21 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 						Message: fmt.Sprintf("网络 '%s' 的两个标签 @(%.0f,%.0f) 与 @(%.0f,%.0f) 存在无遮挡短 L 路径（Manhattan=%.0f）— 优先直连并删除标签",
 							a.it.Value, a.ax, a.ay, b.ax, b.ay, dist),
 					})
+					found = true
 					break
+				}
+			}
+			if !found {
+				if path, ok := dcMazePath([2]float64{a.ax, a.ay}, [2]float64{b.ax, b.ay},
+					a.root, b.root, a.it.ID, b.it.ID, items, comps, wires, find, wireIndex,
+					sheet, titleBlock, math.Max(100, dist*2)); ok && clear(path, a, b) {
+					out = append(out, checkFinding{
+						Type: "direct-connect-opportunity", Level: "info",
+						MarkerNet: a.it.Value, PrimitiveIds: []string{a.it.ID, b.it.ID},
+						At: &checkPoint{X: round2(a.ax), Y: round2(a.ay)},
+						Message: fmt.Sprintf("网络 '%s' 的两个标签 @(%.0f,%.0f) 与 @(%.0f,%.0f) 存在无遮挡正交绕行路径（%d 段）— 优先直连并删除标签",
+							a.it.Value, a.ax, a.ay, b.ax, b.ay, len(path)-1),
+					})
 				}
 			}
 		}

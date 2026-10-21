@@ -132,7 +132,7 @@ type dcBlocker struct {
 
 func newSchDirectConnectPlanCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var jsonOut bool
-	var out string
+	var out, playbookOut, pair string
 	var maxDistance, maxMove float64
 	cmd := &cobra.Command{
 		Use:   "direct-connect-plan",
@@ -207,15 +207,82 @@ Power/ground/rail labels are excluded from direct-connect candidates.`,
 				_, err = stdout.Write(b)
 				return err
 			}
+			if playbookOut != "" {
+				project := ""
+				if geom.Context != nil {
+					project = geom.Context.ProjectUUID
+				}
+				pb, perr := directConnectPlaybook(report.Pairs, pair, project, doc)
+				if perr != nil {
+					return perr
+				}
+				b, merr := json.MarshalIndent(pb, "", "  ")
+				if merr != nil {
+					return merr
+				}
+				if werr := os.WriteFile(playbookOut, append(b, '\n'), 0644); werr != nil {
+					return fmt.Errorf("write direct-connect playbook: %w", werr)
+				}
+				fmt.Fprintf(stderr, "direct-connect playbook written to %s (apply with easyeda sch apply %s --yes)\n", playbookOut, playbookOut)
+				return nil
+			}
 			renderDirectConnectPlan(report, stdout)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON")
 	cmd.Flags().StringVar(&out, "out", "", "write structured JSON to file")
+	cmd.Flags().StringVar(&playbookOut, "playbook", "", "write a guarded playbook for selected already-clear label pairs")
+	cmd.Flags().StringVar(&pair, "pair", "", "with --playbook, select LABEL_A,LABEL_B instead of all already-clear pairs")
 	cmd.Flags().Float64Var(&maxDistance, "max-distance", 250, "maximum Manhattan distance between label anchors")
 	cmd.Flags().Float64Var(&maxMove, "max-move", 40, "maximum text move per axis, in 5-unit steps")
 	return cmd
+}
+
+func directConnectPlaybook(pairs []dcPairPlan, pairArg, project, doc string) (*playbook, error) {
+	wanted := map[string]bool{}
+	for _, id := range strings.Split(pairArg, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			wanted[id] = true
+		}
+	}
+	var clear []dcPairPlan
+	for _, p := range pairs {
+		if p.Status != "already-clear" || len(p.PathPoints) < 2 {
+			continue
+		}
+		if len(wanted) > 0 && !(wanted[p.LabelA] && wanted[p.LabelB]) {
+			continue
+		}
+		clear = append(clear, p)
+	}
+	if len(clear) == 0 {
+		return nil, fmt.Errorf("direct-connect playbook: no selected already-clear pair; run the JSON plan without --playbook and inspect move-required pairs first")
+	}
+	timeout, retry := 120, 0
+	cont := false
+	confirm := true
+	pb := &playbook{
+		Version: 1, RequireFullExecution: true,
+		Meta:     playbookMeta{Name: "verified direct-connect", Project: project, Doc: doc},
+		Defaults: stepPolicy{TimeoutSec: &timeout, Retry: &retry, ContinueOnError: &cont},
+	}
+	for i, p := range clear {
+		pb.Steps = append(pb.Steps, playbookStep{
+			ID:   fmt.Sprintf("direct-connect-%03d", i+1),
+			Name: fmt.Sprintf("%s: direct-connect %s and %s", p.Net, p.LabelA, p.LabelB),
+			Run:  "sch direct-connect-apply",
+			Flags: map[string]any{
+				"doc": doc, "pair": p.LabelA + "," + p.LabelB,
+				"apply": true, "save": true,
+			},
+			Confirm: &confirm,
+		})
+	}
+	if errs := preflight(pb, nil); len(errs) > 0 {
+		return nil, fmt.Errorf("direct-connect playbook failed preflight: %v", errs)
+	}
+	return pb, nil
 }
 
 func parseVisibleAttributeAnchors(result map[string]any) map[string]checkPoint {
@@ -301,6 +368,16 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 					break
 				}
 			}
+			if clearIdx < 0 {
+				if maze, ok := dcMazePath([2]float64{a.ax, a.ay}, [2]float64{b.ax, b.ay},
+					a.root, b.root, a.it.ID, b.it.ID, items, comps, wires, find, wireIndex,
+					sheet, titleBlock, maxDistance*2); ok {
+					paths = append(paths, maze)
+					blockers = append(blockers, directPathBlockers(maze, a.root, b.root,
+						a.it.ID, b.it.ID, items, comps, wires, find, wireIndex))
+					clearIdx = len(paths) - 1
+				}
+			}
 			if clearIdx >= 0 {
 				pair.Status = "already-clear"
 				pair.Path = dcPathName(paths[clearIdx])
@@ -370,6 +447,24 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 	return out
 }
 
+func dcMazePath(start, end [2]float64, ra, rb int, aID, bID string,
+	items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	find func(int) int, wireIndex map[string]int, sheet, titleBlock *layoutBBox,
+	maxLength float64) ([][2]float64, bool) {
+	clear := func(p, q [2]float64) bool {
+		if titleBlock != nil && schSegmentCrossesBox(p[0], p[1], q[0], q[1], *titleBlock) {
+			return false
+		}
+		if sheet != nil && (!pointInBox2(p[0], p[1], *sheet, alignmentTolerance) ||
+			!pointInBox2(q[0], q[1], *sheet, alignmentTolerance)) {
+			return false
+		}
+		return len(directPathBlockers([][2]float64{p, q}, ra, rb, aID, bID,
+			items, comps, wires, find, wireIndex)) == 0
+	}
+	return dcFindOrthogonalPath(start, end, sheet, titleBlock, clear, maxLength)
+}
+
 func blockerLabels(bs []dcBlocker) []string {
 	var out []string
 	for _, b := range bs {
@@ -384,6 +479,14 @@ func cleanDCPath(p [][2]float64) [][2]float64 {
 		if len(out) > 0 {
 			last := out[len(out)-1]
 			if math.Abs(q[0]-last[0]) < 0.001 && math.Abs(q[1]-last[1]) < 0.001 {
+				continue
+			}
+		}
+		if len(out) >= 2 {
+			a, b := out[len(out)-2], out[len(out)-1]
+			if (math.Abs(a[0]-b[0]) < 0.001 && math.Abs(b[0]-q[0]) < 0.001) ||
+				(math.Abs(a[1]-b[1]) < 0.001 && math.Abs(b[1]-q[1]) < 0.001) {
+				out[len(out)-1] = q
 				continue
 			}
 		}

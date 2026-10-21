@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"math"
+	"strings"
+	"testing"
+)
 
 func TestBuildAlignmentPlanReport(t *testing.T) {
 	comps := []layoutComp{
@@ -68,21 +72,21 @@ func TestBuildAlignmentPlanAddsBoundaryRewireDraft(t *testing.T) {
 			ID: "u1", Designator: "U1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: -10, MinY: -5, MaxX: 0, MaxY: 5},
 			Pins: []layoutPin{
-				{Number: "1", Net: "MAIN", X: 0, Y: 0},
-				{Number: "2", Net: "MAIN", X: 0, Y: 3},
-				{Number: "3", Net: "NC1", X: -5, Y: 0},
-				{Number: "4", Net: "NC2", X: -5, Y: 5},
+				{Number: "1", Net: "MAIN", X: 0, Y: 0, Rotation: 0, RotationKnown: true},
+				{Number: "2", Net: "MAIN", X: 0, Y: 3, Rotation: 0, RotationKnown: true},
+				{Number: "3", Net: "NC1", X: -5, Y: 0, Rotation: 180, RotationKnown: true},
+				{Number: "4", Net: "NC2", X: -5, Y: 5, Rotation: 180, RotationKnown: true},
 			},
 		},
 		{
 			ID: "c1", Designator: "C1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 55, MinY: 40, MaxX: 75, MaxY: 55},
-			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 60, Y: 40}},
+			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 60, Y: 40, Rotation: 270, RotationKnown: true}},
 		},
 		{
 			ID: "r1", Designator: "R1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 85, MinY: 40, MaxX: 105, MaxY: 55},
-			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 90, Y: 40}},
+			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 90, Y: 40, Rotation: 270, RotationKnown: true}},
 		},
 	}
 	wires := []schGroupWire{{
@@ -206,6 +210,77 @@ func TestAlignmentPlanReviewRequiredBlockerStaysNonExecutable(t *testing.T) {
 	}
 }
 
+func TestAlignmentApplyEnvelopeRequiresProposedBoundary(t *testing.T) {
+	comps := []layoutComp{{
+		ID: "c10", Designator: "C10", ComponentType: schLayoutPartType,
+		X: 230, Y: 695,
+		BBox: &layoutBBox{MinX: 220, MinY: 685, MaxX: 240, MaxY: 705},
+	}}
+	valid := alignmentPlanItem{
+		ID: "alignment-001", Net: "DC55", Status: "rewire-required", ShiftY: -30,
+		MoveDesignators: []string{"C10"}, SharedWireIds: []string{"shared"},
+		BoundaryPlans: []alignmentBoundaryPlan{{
+			Net: "DC55", Status: "proposed",
+			FixedPins: []string{"U5.1", "U5.2"}, MovedPins: []string{"C10.1"},
+			Wires: []alignmentPlannedWire{{Net: "DC55", Points: []float64{230, 665, 230, 680}}},
+		}},
+	}
+	report, err := alignmentApplyEnvelope(valid, comps, false, false)
+	if err != nil {
+		t.Fatalf("valid apply envelope rejected: %v", err)
+	}
+	if len(report.Move) != 1 || report.Move[0].ToY != 665 ||
+		strings.Join(report.Boundary.PinRefs, ",") != "C10:1,U5:1,U5:2" ||
+		len(report.Boundary.Wires) != 1 {
+		t.Fatalf("wrong apply envelope: %+v", report)
+	}
+
+	blocked := valid
+	blocked.BoundaryPlans = append([]alignmentBoundaryPlan(nil), valid.BoundaryPlans...)
+	blocked.BoundaryPlans[0].Status = "blocked"
+	if _, err := alignmentApplyEnvelope(blocked, comps, false, false); err == nil {
+		t.Fatal("blocked boundary must be refused")
+	}
+}
+
+func TestAlignmentBoundaryRoutesRespectPinOutwardDirections(t *testing.T) {
+	anchors := []alignmentBoundaryPin{
+		{Key: "U5.1", X: 370, Y: 680, Rotation: 180, RotationKnown: true},
+		{Key: "U5.2", X: 370, Y: 670, Rotation: 180, RotationKnown: true},
+		{Key: "C10.1", X: 230, Y: 665, Rotation: 90, RotationKnown: true},
+	}
+	segs := alignmentBusWires(anchors, true, 680)
+	if len(segs) == 0 {
+		t.Fatal("no boundary bus generated")
+	}
+	for _, pin := range anchors {
+		wantX, wantY, ok := alignmentOutwardVector(pin)
+		if !ok {
+			t.Fatalf("bad fixture rotation for %s", pin.Key)
+		}
+		found := false
+		for _, seg := range segs {
+			var ox, oy float64
+			switch {
+			case math.Abs(seg[0]-pin.X) <= alignmentTolerance && math.Abs(seg[1]-pin.Y) <= alignmentTolerance:
+				ox, oy = seg[2], seg[3]
+			case math.Abs(seg[2]-pin.X) <= alignmentTolerance && math.Abs(seg[3]-pin.Y) <= alignmentTolerance:
+				ox, oy = seg[0], seg[1]
+			default:
+				continue
+			}
+			dx, dy := ox-pin.X, oy-pin.Y
+			if math.Hypot(dx, dy) > alignmentTolerance && dx*wantX+dy*wantY > 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no outward first segment: %v", pin.Key, segs)
+		}
+	}
+}
+
 func TestBuildAlignmentPlanBlocksBoundaryWireCrossing(t *testing.T) {
 	sheet := &layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 100}
 	comps := []layoutComp{
@@ -213,17 +288,17 @@ func TestBuildAlignmentPlanBlocksBoundaryWireCrossing(t *testing.T) {
 		{
 			ID: "c1", Designator: "C1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 50, MinY: 40, MaxX: 70, MaxY: 55},
-			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 60, Y: 40}},
+			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 60, Y: 40, Rotation: 90, RotationKnown: true}},
 		},
 		{
 			ID: "r1", Designator: "R1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 80, MinY: 40, MaxX: 100, MaxY: 55},
-			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 90, Y: 40}},
+			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 90, Y: 40, Rotation: 90, RotationKnown: true}},
 		},
 		{
 			ID: "c3", Designator: "C3", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 38, MinY: 0, MaxX: 42, MaxY: 5},
-			Pins: []layoutPin{{Number: "1", Net: "OTHER", X: 40, Y: 0}},
+			Pins: []layoutPin{{Number: "1", Net: "OTHER", X: 40, Y: 0, Rotation: 90, RotationKnown: true}},
 		},
 	}
 	wires := []schGroupWire{
@@ -295,12 +370,12 @@ func TestBuildAlignmentPlanBoundaryDraftAvoidsVisibleText(t *testing.T) {
 		{
 			ID: "c1", Designator: "C1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 50, MinY: 40, MaxX: 70, MaxY: 55},
-			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 60, Y: 40}},
+			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 60, Y: 40, Rotation: 90, RotationKnown: true}},
 		},
 		{
 			ID: "r1", Designator: "R1", ComponentType: schLayoutPartType,
 			BBox: &layoutBBox{MinX: 80, MinY: 40, MaxX: 100, MaxY: 55},
-			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 90, Y: 40}},
+			Pins: []layoutPin{{Number: "1", Net: "MAIN", X: 90, Y: 40, Rotation: 90, RotationKnown: true}},
 		},
 	}
 	wires := []schGroupWire{{

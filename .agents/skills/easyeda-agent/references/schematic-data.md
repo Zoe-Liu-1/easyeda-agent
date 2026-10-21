@@ -713,7 +713,7 @@ V4 完全未接线页可能无法导出网表，此时 `sch list` 的 `pinNetsAv
 范围外既有错误允许保留但必须逐条相同；任何新增/改变、目标错误残留、陈旧快照、部分删除、
 超时或不完整回读均失败。普通 `wire.create/connect_pin` 继续要求整页几何基线为零。
 | `wires[]` | `{net,points:[[x,y],...]}`，正交、非零、落网格。JSON 网名本身不能给实际线树命名，须连接对应引脚/标记。 |
-| `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；kind 为 `power/ground/net_port_in/net_port_out/net_port_bi`，方向 `up/down/left/right`，offset 为正的网格长度。转换生成真实引线。电源/地硬朝向（电源上、地下），反向脚显式豁免用可选 `orientationExempt:true`（附 `reason`），检查门跳过并在豁免清单单独列出。现场门禁同义：netflag 的 `otherProperty.orientationExempt=true` 持久豁免，或 `sch check --orientation-exempt/--orientation-exempt-file` 按 primitiveId 声明。裸 `sch netflag --rotation R` 是原始路径，存储角为 `(360-R) mod 360`；`connect_pin` 已补偿。 |
+| `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；kind 为 `power/ground/net_port_in/net_port_out/net_port_bi`，方向 `up/down/left/right`，offset 为正的网格长度。转换生成真实引线。电源/地硬朝向（电源上、地下），反向脚显式豁免用可选 `orientationExempt:true`（附 `reason`），检查门跳过并在豁免清单单独列出。现场门禁同义：netflag 的 `otherProperty.orientationExempt=true` 持久豁免，或 `sch check --orientation-exempt/--orientation-exempt-file` 按 primitiveId 声明。信号网默认使用文字 `netlabel`；确属模块边界的 netport 可在源数据标 `moduleBoundaryExempt:true`，现场检查同义入口为 `sch check --signal-port-exempt <primitiveId,...>`。裸 `sch netflag --rotation R` 是原始路径，存储角为 `(360-R) mod 360`；`connect_pin` 已补偿。 |
 | `terminals[]` | 可选 `{designator,pin,direction,kind?}`，默认 `net_port_bi`；引用本模块已测引脚，选择向外直出方向，不能与已有接线重复。 |
 | `titleMetrics` | 可选 `{title,fontSize,width,height}`，须与标题、字高相符的实测值；没有时采用保守预测，Apply 仍检查实际文字边界。 |
 

@@ -951,6 +951,14 @@ func TestTidyDeepSweepPlan(t *testing.T) {
 	if _, err := tidyDeepSweepPlan(map[string]bool{"C3": true}, comps, shared); err == nil {
 		t.Fatal("shared tree must be refused")
 	}
+	allowed, err := tidyDeepSweepPlanAllowShared(map[string]bool{"C3": true}, comps, shared, map[string]bool{"wRail": true})
+	if err != nil {
+		t.Fatalf("explicitly planned shared tree should be swept: %v", err)
+	}
+	wantAllowed := []string{"fOld", "wFrag", "wRail", "wStub"}
+	if strings.Join(allowed, ",") != strings.Join(wantAllowed, ",") {
+		t.Fatalf("allowed sweep ids = %v, want %v", allowed, wantAllowed)
+	}
 }
 
 // TestTidySkipHint: a two-flag cap with ONE flag present and the other pin bare

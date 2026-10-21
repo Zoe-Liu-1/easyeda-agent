@@ -1,0 +1,35 @@
+{
+  "_intent": "Offline geometry must report parts outside a measured sheet and inside a declared title-block keepout.",
+  "parts": [
+    {
+      "pid": "sheet",
+      "type": "sheet",
+      "x": 0,
+      "y": 0,
+      "bbox": [0, 0, 200, 150]
+    },
+    {
+      "pid": "u-out",
+      "type": "part",
+      "designator": "U1",
+      "x": 200,
+      "y": 20,
+      "pins": [],
+      "bbox": [190, 10, 210, 30]
+    },
+    {
+      "pid": "u-title",
+      "type": "part",
+      "designator": "U2",
+      "x": 170,
+      "y": 130,
+      "pins": [],
+      "bbox": [160, 120, 180, 140]
+    }
+  ],
+  "flags": [],
+  "wires": [],
+  "keepouts": [
+    [150, 110, 195, 145]
+  ]
+}

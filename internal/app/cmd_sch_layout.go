@@ -35,6 +35,11 @@ type layoutPin struct {
 	Number string
 	X      float64
 	Y      float64
+	// Rotation is the official outward pin direction in degrees when the
+	// connector reports it. RotationKnown distinguishes a real 0° pin from a
+	// legacy fixture that carried no direction evidence.
+	Rotation      float64
+	RotationKnown bool
 	// Net is the authoritative netlist name for this pin when the connector
 	// reported one. It is empty when the netlist was unavailable or the pin is
 	// genuinely unnamed; callers that need that distinction also check
@@ -871,6 +876,10 @@ func parseLayoutComps(result map[string]any) ([]layoutComp, error) {
 					Y:      py,
 					Net:    asString(pm["net"]),
 				})
+				if rot, ok := finiteFloat(pm["rotation"]); ok {
+					c.Pins[len(c.Pins)-1].Rotation = rot
+					c.Pins[len(c.Pins)-1].RotationKnown = true
+				}
 			}
 			if !pinsValid {
 				c.PinsAvailable = false

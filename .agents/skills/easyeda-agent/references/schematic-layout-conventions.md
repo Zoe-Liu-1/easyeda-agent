@@ -217,6 +217,8 @@ buffer:
   草案存在仍不能把步骤标成 `ready`，只能保持 `rewire-required` 并等待重读复核；
   长度缩短只是收益证据，不是触发条件。两侧都含核心、网络不一致、折点本身是连接点、
   移动后出新图/图签或压到其他器件时不生成可直接执行建议。
+  真正落图由 `sch alignment-apply` 在安全 move 内核内执行：计划共享树可被显式替换，
+  边界线逐段从引脚外向出发，移动后逐脚对账；无计划授权的共享树仍 fail-closed。
 - **命名符号纪律**：同一线岛同一网络只保留一个名称；信号标签和电源/地/端口符号的 Name 文字
   都必须可见、水平，不压导线/引脚/器件/其他文字。电源、地、器件名称不参与“信号直连机会”
   的数量统计，但它们的 Name 仍要过可见性、朝向、避让和同岛重复检查；netflag/netport 的
@@ -224,7 +226,10 @@ buffer:
   定义网名，避免 `sch wire --net` 在导线上重复显示网名。
   同一线岛不能一边用导线 Name、一边再挂同网 netflag/netport/netlabel；由
   `cross-kind-label-economy` 统一给 keep/delete。可见网络标签偏离所属导线/符号超过
-  50 画布单位报 `label-distance`，不能把标签漂在空白处。
+  50 画布单位报 `label-distance`，不能把标签漂在空白处。信号网的 netflag/netport
+  均为 WARN；模块边界 netport 必须用 `--signal-port-exempt` 显式登记，并保留 INFO
+  审计。直连规划先用短 L，再用 5 单位障碍感知 A* 搜索多折正交路径；只有
+  `already-clear` 对进入直连 playbook。
 - **局部电源簇（`power-cluster-candidate`）**：消费电源脚与就近本地被动件分属不同线树
   且各有符号时，先补物理短线，再删被动件侧符号；不能直接删符号制造未命名岛。当前检查
   按 250 单位就近归簇，GND 不自动报；独立去耦排/电源域用

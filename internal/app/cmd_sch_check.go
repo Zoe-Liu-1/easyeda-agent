@@ -182,7 +182,7 @@ type checkReport struct {
 // strict) returns a non-zero exit when there are findings. By default it is
 // informational — floating IO pins are normal on an MCU board until NC-marked.
 func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, overlapEps float64,
-	orientationExempt, powerClusterExempt map[string]bool, stdout, stderr io.Writer) error {
+	orientationExempt, powerClusterExempt, signalPortExempt map[string]bool, stdout, stderr io.Writer) error {
 	payload := map[string]any{}
 	if allPages {
 		payload["allPages"] = true
@@ -208,7 +208,7 @@ func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, o
 	// components.list `sch layout-lint` uses, and fold the findings into the report
 	// so `sch check` is the single delivery gate. Best-effort: a components.list
 	// failure leaves the electrical findings intact.
-	mergeMarkerGeomFindings(cfg, window, allPages, overlapEps, &rep, stderr, orientationExempt, powerClusterExempt)
+	mergeMarkerGeomFindings(cfg, window, allPages, overlapEps, &rep, stderr, orientationExempt, powerClusterExempt, signalPortExempt)
 
 	if asJSON {
 		// Wrap the reconstructed report in the same {id,type,version,ok,result}
@@ -285,6 +285,16 @@ func parseOrientationExemptSet(inline, file string) (map[string]bool, error) {
 		}
 	}
 	return set, nil
+}
+
+func parsePrimitiveIDSet(inline string) map[string]bool {
+	set := map[string]bool{}
+	for _, id := range strings.Split(inline, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			set[id] = true
+		}
+	}
+	return set
 }
 
 // parsePowerClusterExemptSet accepts comma-separated DESIGNATOR or

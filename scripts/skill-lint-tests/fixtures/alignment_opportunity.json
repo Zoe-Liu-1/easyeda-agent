@@ -1,0 +1,30 @@
+{
+  "_intent": "A conservative H-V-H offset jog away from pins should produce an offline alignment opportunity.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 200,
+      "y": 0,
+      "pins": [{ "num": "1", "name": "P", "x": 200, "y": 0 }],
+      "bbox": [190, -10, 210, 10]
+    },
+    {
+      "pid": "u2",
+      "type": "part",
+      "designator": "U2",
+      "x": 200,
+      "y": 40,
+      "pins": [{ "num": "1", "name": "P", "x": 200, "y": 40 }],
+      "bbox": [190, 30, 210, 50]
+    }
+  ],
+  "flags": [
+    { "pid": "f1", "type": "netflag", "net": "+5V", "x": 220, "y": 0, "rotation": 180 }
+  ],
+  "wires": [
+    { "pid": "w1", "net": "+5V", "line": [200, 0, 100, 0, 100, 40, 200, 40] },
+    { "pid": "w2", "net": "+5V", "line": [200, 0, 220, 0] }
+  ]
+}

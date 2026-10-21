@@ -1,0 +1,10 @@
+== 概览 ==  parts=1 flags=1 wires=1 sheets=0 nets≈1
+
+🟠 可见文字被导线穿过 (1):
+  - SIG bbox=(95,150)-(115,158) 被导线 w1 段 (100, 100)->(100, 150) 穿过
+
+🟡 同岛导线标签与标识混用重复 (1):
+  - 线岛 (100, 150) 网络 'SIG' 同时有导线标签和 1 个标识符号 — 只保留一个
+
+🟠 信号网使用 netflag/netport (1):
+  - 信号网 'SIG' 使用了 netflag f1 — 应改文字网络标签；模块边界 netport 须在源数据标 moduleBoundaryExempt:true

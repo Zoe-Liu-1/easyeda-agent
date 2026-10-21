@@ -1,0 +1,30 @@
+{
+  "_intent": "Free visible text over a component body must be reported by the offline visible-text overlap rule.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 100,
+      "y": 100,
+      "pins": [{ "num": "1", "name": "VCC", "x": 100, "y": 100 }],
+      "bbox": [90, 90, 110, 110]
+    }
+  ],
+  "flags": [
+    { "pid": "f1", "type": "netflag", "net": "+3V3", "x": 100, "y": 130, "rotation": 180 }
+  ],
+  "wires": [
+    { "pid": "w1", "net": "+3V3", "line": [100, 100, 100, 130] }
+  ],
+  "visible_text": [
+    {
+      "pid": "note",
+      "kind": "text",
+      "componentType": "text",
+      "content": "note",
+      "rotation": 0,
+      "bbox": [94, 94, 106, 106]
+    }
+  ]
+}

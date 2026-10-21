@@ -582,13 +582,13 @@ func markerLabel(c layoutComp) string {
 // counts and passed/total. Best-effort: a components.list failure is logged to
 // stderr and leaves the report untouched.
 func mergeMarkerGeomFindings(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer,
-	exempt, powerClusterExempt map[string]bool) {
-	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, rep, stderr, nil, exempt, powerClusterExempt)
+	exempt, powerClusterExempt, signalPortExempt map[string]bool) {
+	mergeMarkerGeomFindingsWith(cfg, window, allPages, overlapEps, rep, stderr, nil, exempt, powerClusterExempt, signalPortExempt)
 }
 
 // mergeMarkerGeomFindingsWith 是带**预读快照**的版本(geom=nil 时行为不变)。
 func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, overlapEps float64, rep *checkReport, stderr io.Writer,
-	geom *schGeomSnapshot, exempt, powerClusterExempt map[string]bool) {
+	geom *schGeomSnapshot, exempt, powerClusterExempt, signalPortExempt map[string]bool) {
 	// Pin nets are required by the local power-cluster rule. The extra field is
 	// read-only and does not affect the existing marker/geometry checks.
 	payload := map[string]any{"includeBBox": true, "includePins": true, "includePinNets": true}
@@ -609,7 +609,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	}
 	titleBlock, tbSource := titleBlockKeepoutWithSource(sheetBBoxOf(comps))
 	geo := analyzeMarkerGeometry(comps, titleBlock, tbSource, overlapEps)
-	geo = append(geo, signalMarkerTypeFindings(comps)...)
+	geo = append(geo, signalMarkerTypeFindings(comps, signalPortExempt)...)
 	pgProblems, pgExempted := powerGroundOrientationFindings(comps, exempt)
 	geo = append(geo, pgProblems...)
 	geo = append(geo, pgExempted...)

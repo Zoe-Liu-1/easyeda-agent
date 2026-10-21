@@ -306,9 +306,11 @@ ERROR，保留器件/引脚/线段证据。允许先向外再折线；不二次�
 再取真实 bbox。整页 `getAll()` 在 3.2.186 会返回空数组，不能据此判定无位号。
 位号不可读、隐藏、身份不符、bbox 缺失均属未验证；不能用默认文字宽度代替。
 位号与本体/标记/自由文字/其他位号/导线的遮挡及所属框越界进入 `sch check`。
-标记文字带目前仍为估算；自由说明文字压导线尚未覆盖，必须列为未验证并补数据检查，
-不能以官方导图代替机器检查。以下新增检查的现场通过须以安装版本和真实运行报告为证，
-源码或离线回放通过不代表已部署。
+`schematic.visible_text.bboxes` 同时采集自由文字和全部可见属性；自由说明文字与导线、
+器件、引脚、标记及其他文字的碰撞都由 `visible-text-overlap` 报告。离线 `lint.py`
+同样检查标签可见性/横排、同岛重复、跨类型重复、标签距离、文字碰撞、图签/出图边界、
+保守偏轴机会和障碍感知多折直连。标记 body 的精确 bbox 若源数据未提供，仍须以现场
+`sch check` 为准；缺失数据不能伪装成离线通过。
 `sch check` 的 `power-cluster-candidate` 把消费电源脚（U/J/Q 的电源脚）与 250 单位内的
 本地 R/C/L/D 归为候选：若它们分属不同线树 root 且各带同名电源符号，先物理接入消费脚，
 再合并为一个符号；已物理直连的簇不报，GND 暂作人工建议。该判据在未认领 zones 时是
@@ -325,8 +327,10 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 任何接线或图检失败都不会进入删除步骤。
 `cross-kind-label-economy` 统一检查同一线岛上的导线标签与 netflag/netport/netlabel 混合重复；
 拟保留表示自身不可见或名称为空时只报 WARN、不生成 `suggestDeleteIds`，先恢复可见名称再复核；
-`label-distance` 报可见标签离所属导线/符号超过 50 单位；`signal-netflag-type` 为 WARN，
-`signal-netport-type` 为 INFO（模块边界例外）；可见文字落入图签 keep-out 和压 body 外 lead
+`label-distance` 报可见标签离所属导线/符号超过 50 单位；`signal-netflag-type` 和
+`signal-netport-type` 均为 WARN。模块边界 netport 必须由
+`sch check --signal-port-exempt <primitiveId,...>` 显式登记，登记项转为
+`signal-port-exempt` INFO 并保留审计；可见文字落入图签 keep-out 和压 body 外 lead
 也分别进入 `titleblock-overlap` / `visible-text-overlap`。GND 局部簇按 150 单位 INFO，
 `power-cluster-plan` 默认不规划 GND，需显式 `--include-gnd`。多器件页没有 zone/虚拟组
 认领时另报 `zones-not-claimed` INFO；功能框不等于器件归属已证明，不能把该页的
@@ -349,7 +353,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 检查，阻塞组自身带共享线时保持 blocked。阻塞落点按 5 单位栅格二维搜索，只有局部预算内
 才为 ready，超预算为 review-required。主计划 `ready` 仅在无 blockers、无 sharedWireIds 时成立；有共享边界
 即使已有 proposed 草案仍为 `rewire-required`，`rewire-required` 和 `blocked` 都不得直接
-执行。planner 不调用 group.move/delete/wire/save。
+批量执行。`alignment-plan` 本身不调用 group.move/delete/wire/save；单计划执行使用
+`sch alignment-apply --apply --save`，由安全 move 内核显式替换计划共享树、按引脚外向
+首段重建边界并逐脚对账。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 

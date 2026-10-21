@@ -585,9 +585,11 @@ func alignmentBlockerMoveDeltas(mainAxis string) []alignmentDelta {
 }
 
 type alignmentBoundaryPin struct {
-	Key   string
-	X, Y  float64
-	Moved bool
+	Key           string
+	X, Y          float64
+	Rotation      float64
+	RotationKnown bool
+	Moved         bool
 }
 
 func alignmentBoundaryPlans(c alignmentCandidate, comps []layoutComp, items []visibleTextItem,
@@ -624,7 +626,9 @@ func alignmentBoundaryPlans(c alignmentCandidate, comps []layoutComp, items []vi
 				}
 				seen[key] = true
 				anchorsByNet[net] = append(anchorsByNet[net], alignmentBoundaryPin{
-					Key: comp.Designator + "." + pin.Number, X: pin.X, Y: pin.Y, Moved: group[comp.Designator],
+					Key: comp.Designator + "." + pin.Number, X: pin.X, Y: pin.Y,
+					Rotation: pin.Rotation, RotationKnown: pin.RotationKnown,
+					Moved: group[comp.Designator],
 				})
 			}
 		}
@@ -664,6 +668,19 @@ func alignmentBoundaryPlans(c alignmentCandidate, comps []layoutComp, items []vi
 		if len(fixed) == 0 || len(moved) == 0 {
 			bp.Status = "blocked"
 			bp.Blockers = []string{"no-cross-boundary-anchors"}
+			plans = append(plans, bp)
+			continue
+		}
+		var unknownRotation []string
+		for _, anchor := range anchors {
+			if !anchor.RotationKnown {
+				unknownRotation = append(unknownRotation, "pin-rotation-unavailable:"+anchor.Key)
+			}
+		}
+		if len(unknownRotation) > 0 {
+			sort.Strings(unknownRotation)
+			bp.Status = "blocked"
+			bp.Blockers = unknownRotation
 			plans = append(plans, bp)
 			continue
 		}
@@ -747,7 +764,7 @@ func alignmentBoundaryWireOptions(c alignmentCandidate, net string, fixed, moved
 func alignmentTreeOptions(hub alignmentBoundaryPin, leaves []alignmentBoundaryPin) [][][4]float64 {
 	options := [][][4]float64{{}}
 	for _, leaf := range leaves {
-		choices := alignmentL(hub, leaf)
+		choices := alignmentRoutesBetween(hub, leaf)
 		if len(choices) == 0 {
 			return nil
 		}
@@ -778,18 +795,33 @@ func alignmentBusWires(anchors []alignmentBoundaryPin, horizontal bool, trunk fl
 	if len(anchors) == 0 {
 		return nil
 	}
-	lo, hi := anchors[0].X, anchors[0].X
-	if !horizontal {
-		lo, hi = anchors[0].Y, anchors[0].Y
-	}
-	for _, a := range anchors[1:] {
-		v := a.X
-		if !horizontal {
-			v = a.Y
+	var out [][4]float64
+	var joins []float64
+	for _, a := range anchors {
+		lead, ok := alignmentOutwardLead(a)
+		if !ok {
+			return nil
 		}
+		out = append(out, [4]float64{a.X, a.Y, lead.X, lead.Y})
+		if horizontal {
+			if math.Abs(lead.Y-trunk) > alignmentTolerance {
+				out = append(out, [4]float64{lead.X, lead.Y, lead.X, trunk})
+			}
+			joins = append(joins, lead.X)
+		} else {
+			if math.Abs(lead.X-trunk) > alignmentTolerance {
+				out = append(out, [4]float64{lead.X, lead.Y, trunk, lead.Y})
+			}
+			joins = append(joins, lead.Y)
+		}
+	}
+	if len(joins) == 0 {
+		return nil
+	}
+	lo, hi := joins[0], joins[0]
+	for _, v := range joins[1:] {
 		lo, hi = math.Min(lo, v), math.Max(hi, v)
 	}
-	var out [][4]float64
 	if hi-lo > alignmentTolerance {
 		if horizontal {
 			out = append(out, [4]float64{lo, trunk, hi, trunk})
@@ -797,25 +829,66 @@ func alignmentBusWires(anchors []alignmentBoundaryPin, horizontal bool, trunk fl
 			out = append(out, [4]float64{trunk, lo, trunk, hi})
 		}
 	}
-	for _, a := range anchors {
-		if horizontal && math.Abs(a.Y-trunk) > alignmentTolerance {
-			out = append(out, [4]float64{a.X, a.Y, a.X, trunk})
-		}
-		if !horizontal && math.Abs(a.X-trunk) > alignmentTolerance {
-			out = append(out, [4]float64{a.X, a.Y, trunk, a.Y})
-		}
-	}
 	return alignmentDedupeSegments(out)
 }
 
-func alignmentL(a, b alignmentBoundaryPin) [][][4]float64 {
-	if math.Abs(a.X-b.X) <= alignmentTolerance || math.Abs(a.Y-b.Y) <= alignmentTolerance {
-		return [][][4]float64{{{a.X, a.Y, b.X, b.Y}}}
+const alignmentBoundaryLead = 5.0
+
+func alignmentOutwardLead(pin alignmentBoundaryPin) (alignmentBoundaryPin, bool) {
+	dx, dy, ok := alignmentOutwardVector(pin)
+	if !ok {
+		return alignmentBoundaryPin{}, false
 	}
-	return [][][4]float64{
-		{{a.X, a.Y, b.X, a.Y}, {b.X, a.Y, b.X, b.Y}},
-		{{a.X, a.Y, a.X, b.Y}, {a.X, b.Y, b.X, b.Y}},
+	pin.X += dx * alignmentBoundaryLead
+	pin.Y += dy * alignmentBoundaryLead
+	return pin, true
+}
+
+func alignmentOutwardVector(pin alignmentBoundaryPin) (float64, float64, bool) {
+	if !pin.RotationKnown {
+		return 0, 0, false
 	}
+	r := math.Mod(math.Mod(pin.Rotation, 360)+360, 360) / 90
+	if math.Abs(r-math.Round(r)) > alignmentTolerance {
+		return 0, 0, false
+	}
+	switch int(math.Round(r)) % 4 {
+	case 0:
+		return 1, 0, true
+	case 1:
+		return 0, 1, true
+	case 2:
+		return -1, 0, true
+	case 3:
+		return 0, -1, true
+	}
+	return 0, 0, false
+}
+
+func alignmentRoutesBetween(a, b alignmentBoundaryPin) [][][4]float64 {
+	aLead, aok := alignmentOutwardLead(a)
+	bLead, bok := alignmentOutwardLead(b)
+	if !aok || !bok {
+		return nil
+	}
+	leadA := [4]float64{a.X, a.Y, aLead.X, aLead.Y}
+	leadB := [4]float64{b.X, b.Y, bLead.X, bLead.Y}
+	var middles [][][4]float64
+	if math.Abs(aLead.X-bLead.X) <= alignmentTolerance || math.Abs(aLead.Y-bLead.Y) <= alignmentTolerance {
+		middles = append(middles, [][4]float64{{aLead.X, aLead.Y, bLead.X, bLead.Y}})
+	} else {
+		middles = append(middles,
+			[][4]float64{{aLead.X, aLead.Y, bLead.X, aLead.Y}, {bLead.X, aLead.Y, bLead.X, bLead.Y}},
+			[][4]float64{{aLead.X, aLead.Y, aLead.X, bLead.Y}, {aLead.X, bLead.Y, bLead.X, bLead.Y}},
+		)
+	}
+	var out [][][4]float64
+	for _, middle := range middles {
+		combined := append([][4]float64{leadA}, middle...)
+		combined = append(combined, leadB)
+		out = append(out, alignmentDedupeSegments(combined))
+	}
+	return out
 }
 
 func alignmentSegmentsLength(segs [][4]float64) float64 {
