@@ -109,6 +109,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `sch attribute-inspect --id <primitiveId>`，`schematic.attribute.inspect` | 只读诊断当前页指定属性的 `KeyVisible`/`ValueVisible`：分别记录全量枚举、按 ID 读取、按 ID 读取后 `toAsync().reset()` 的原值与类型，并核对前后文档身份及图元 ID。`undefined` 为不可读；诊断结果不补默认值，不放宽整页快照或清页守卫。仅调用官方读取接口，不调用 `done`/`modify` |
 | `sch attribute-modify --from <patch.json>`，`schematic.attribute.modify` | 严格修改一个 Name/Designator/Value 属性的 `rotation`、`valueVisible`、`keyVisible` 或 `value`。payload 带完整原始状态；只向官方 `sch_PrimitiveAttribute.modify` 发送允许字段。写后 fresh 状态必须等于“原状态 + 请求字段”，其余文字、显隐、样式和父级保持逐字段一致。部分或未验证结果非零退出且禁止自动重试 |
 | 批量标签显隐/横排修复 | `sch label-fix --doc <page> [--id <attributeIds>] [--apply] [--save] [--allow-partial]`；把隐藏 Name 设为可见，把 90/270 文字旋转改为 0；空 Name 只有在父 wire/netflag/netport 已有明确网名时才补齐。缺失原生 Name 或无法确定网名保持 blocked。应用前后比较 pin→net、bridge 与可见文字 finding，新增遮挡则逆序回滚 |
+| 电源/GND 朝向修复 | `sch power-orientation-fix --doc <page> [--id <netflagIds>] [--apply] [--save] [--allow-partial]`；电源旗配置到 body-up、GND 配置到 body-down。只处理单桩 netflag，首段沿实测引脚外向，可用本地 2–4 段正交路径；反向脚保持 blocked，要求显式 `orientationExempt`。应用逐标记比较完整 pin→net、bridge 和目标 finding，失败逆序回滚 |
 | `sch place`，`schematic.component.place` | 使用库 UUID；自动回填可确定的 C 号与空属性是 best-effort，须检查警告。没有 place 自定义属性输入契约；V4 复数 symbol/device/footprint association 在 canonical selector 完成前写前拒绝，不能取第一项 |
 | `sch modify`，`schematic.component.modify` | `otherProperty`/`customAttributes` 二选一，合并保留原属性。`verified:false` 需要再回读，不能当已验证 |
 | `sch prim-delete/clear` | 删除后按 ID 或完整图元清单验证；默认保护 sheet。未知枚举或幸存图元不能报告清空 |
@@ -141,6 +142,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `dangling-wire` | 按 wire primitive 的 degree-1 自由端逐个核验；同一树上的其他引脚/标识不能掩盖空白/自动网名分支上的无落点自由端。`at` 指向真正悬空端，`count` 为该树自由端数量；真实网名标签端点保留为有意连接。删除残留短支路或接到明确目标。 |
 | `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏项和空名称可由 `sch label-fix` 修复；空名称必须有父级明确网名，没有 Name 属性保持 blocked。 |
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。90/270 可由 `sch label-fix` 改为 0；符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |
+| `power-ground-orientation` | 电源/地旗 body 未朝上/下。`sch power-orientation-fix` 只重接单桩 netflag，首段沿引脚外向并搜索本地正交折线；共享/分支树或反向脚保持 blocked，反向脚显式 `orientationExempt`。 |
 | `label-economy` | 同一线岛重复同名标签。覆盖信号标签和电源/地导线 Name；netflag/netport 的同岛重复由 `redundant-net-marker` 负责。同名导线标签可进入 `sch marker-clean` 候选，但删除仍须显式选 ID 并验证网表。电源/轨名仍不参与“信号直连机会”的数量统计。 |
 | `cross-kind-label-economy` | 同一线岛同名网络同时出现导线标签和 netflag/netport/netlabel。检查只报告候选；没有移动前基线时不得按字典序猜保留对象，也不生成删除建议。用 `sch marker-clean` 显式选择幸存表示并比较完整 pin→net 表。拟保留表示自身不可见或名称为空时先恢复可见名称。 |
 | `label-distance` | 可见网络标签文字离所属导线/电源地符号超过 50 画布单位；隐藏或空名称不参与此规则（由 `label-visibility` 单独报）。 |

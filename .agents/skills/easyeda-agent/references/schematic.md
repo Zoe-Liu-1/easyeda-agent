@@ -376,6 +376,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 90/270 文字改为 0；空 Name 仅在父 wire/marker 已有明确网名时补齐。每一写使用完整
 原生属性状态和严格 `schematic.attribute.modify` 字段集合，写后逐字段验证；新增
 `visible-text-overlap`、pin→net 或 bridge 变化时逆序回滚。
+`sch power-orientation-fix` 把电源 netflag 重接到 body-up、GND 重接到 body-down。
+仅接受单段可安全重建的 netflag 桩；首段沿实测引脚外向，再走本地正交折线。反向脚不改，
+必须已有 `orientationExempt`。每个替换都复核 pin→net、bridge 和目标 finding，失败逆序恢复。
 
 
 ## 修改属性时保留供应商身份

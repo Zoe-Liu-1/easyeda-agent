@@ -49,7 +49,7 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 重排重布 | 从引脚外向首段重走；删除局部段可能切断共享树 |
 | `cross-chip-direct-wire` / `pin-exit-direction` | 重排重布 | 芯片间改同名网络标签；首段先沿引脚外向再正交折线 |
 | `signal-netflag-type` / `signal-netport-type` | 语义选择 | 信号改文字网络标签；模块边界端口需显式豁免，不能静默换型 |
-| `power-ground-orientation` / `reversed-net-flag` | 显式计划 | 先按引脚外向和碰撞找新桩；反向脚登记 `orientationExempt` |
+| `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。共享树、无单桩和反向脚保持 blocked，反向脚登记 `orientationExempt` |
 | `label-visibility` / `label-orientation` | 直接执行或显式阻断 | `sch label-fix` 设置可见和水平；空名称只有父 wire/marker 已携带明确网名时补齐。缺原生 Name 或网名未知不猜 |
 | `label-distance` | 语义选择或重排 | 用 `attribute-move` 把可见名称移回挂载点附近，并复查文字/导线碰撞 |
 | `polarity-convention-outlier` | 语义选择 | 对照器件极性和同页多数派确认是否反装；编号约定本身不证明电气极性 |
