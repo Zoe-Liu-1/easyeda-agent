@@ -97,7 +97,12 @@ func alignmentOpportunityCandidates(items []visibleTextItem, comps []layoutComp,
 		return nil
 	}
 	adj := alignmentSegmentAdjacency(segs)
+	find, wireIndex := wireTreeFinder(wires)
+	chipIslands := wireIslandActiveChips(comps, wires)
 	for connectorIndex, connector := range segs {
+		if wi, ok := wireIndex[connector.WireID]; ok && len(chipIslands[find(wi)]) > 1 {
+			continue
+		}
 		if connector.Horizontal {
 			for _, candidate := range alignmentCandidatesForConnector(
 				comps, segs, adj, connectorIndex, "x",

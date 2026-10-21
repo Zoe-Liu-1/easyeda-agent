@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
 )
 
 type dcTextMove struct {
@@ -331,6 +332,7 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 		}
 		labels = append(labels, label{it: it, root: find(idx), ax: ax, ay: ay})
 	}
+	chipIslands := wireIslandActiveChips(comps, wires)
 	partInfo := buildPartComponents(comps, wires)
 	wireOwners := wireOwnerMap(comps, wires)
 	var out []dcPairPlan
@@ -338,6 +340,9 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 		for j := i + 1; j < len(labels); j++ {
 			a, b := labels[i], labels[j]
 			if a.root == b.root || a.it.Value != b.it.Value {
+				continue
+			}
+			if labelsJoinDifferentChips(chipIslands, a.root, b.root) {
 				continue
 			}
 			dist := math.Abs(a.ax-b.ax) + math.Abs(a.ay-b.ay)
@@ -613,6 +618,19 @@ func directPathBlockers(points [][2]float64, ra, rb int, aID, bID string,
 				}
 				if pointOnSegment2(pin.X, pin.Y, p, q) {
 					add(dcBlocker{Kind: "pin", ID: c.ID + ":" + pin.Number, Label: "pin:" + c.Designator + "." + pin.Number})
+				}
+				if c.BBox != nil && pin.RotationKnown {
+					leadStart, leadEnd, ok := schguard.PinLeadInterval(
+						schguard.Point{X: pin.X, Y: pin.Y}, pin.Rotation,
+						schguard.BBox{MinX: c.BBox.MinX, MinY: c.BBox.MinY, MaxX: c.BBox.MaxX, MaxY: c.BBox.MaxY},
+					)
+					if ok && schguard.SegmentTouchesPinLead(
+						schguard.Point{X: p[0], Y: p[1]}, schguard.Point{X: q[0], Y: q[1]},
+						leadStart, leadEnd, schguard.Point{X: pin.X, Y: pin.Y},
+					) {
+						add(dcBlocker{Kind: "pin-lead", ID: c.ID + ":" + pin.Number,
+							Label: "pin-lead:" + c.Designator + "." + pin.Number})
+					}
 				}
 			}
 		}

@@ -309,6 +309,65 @@ for f in flags:
                     f"距离 {d:.1f} < {MARKER_WIRE_EPS}（异线经过标识附近，锚点近似）")
                 break
 
+# ---- Check 10b2: wire must not overlap the physical pin lead ----
+def pin_lead_segment(pin, part):
+    box = part.get('bbox')
+    if not box:
+        return None
+    x, y = pin['x'], pin['y']
+    rot = pin.get('rotation')
+    if isinstance(rot, (int, float)):
+        direction = int(round(rot)) % 360
+    elif x < box[0]:
+        direction = 180
+    elif x > box[2]:
+        direction = 0
+    elif y < box[1]:
+        direction = 270
+    elif y > box[3]:
+        direction = 90
+    else:
+        return None
+    if direction == 0 and x > box[2]: return ((x,y), (box[2],y))
+    if direction == 180 and x < box[0]: return ((x,y), (box[0],y))
+    if direction == 90 and y > box[3]: return ((x,y), (x,box[3]))
+    if direction == 270 and y < box[1]: return ((x,y), (x,box[1]))
+    return None
+
+def segment_overlaps_lead(a, b, lead, pin):
+    l0, l1 = lead
+    rx, ry = b[0]-a[0], b[1]-a[1]
+    sx, sy = l1[0]-l0[0], l1[1]-l0[1]
+    cross = rx*sy - ry*sx
+    qx, qy = l0[0]-a[0], l0[1]-a[1]
+    if abs(cross) > 1e-9:
+        t = (qx*sy - qy*sx) / cross
+        u = (qx*ry - qy*rx) / cross
+        if -1e-9 <= t <= 1+1e-9 and u > 1e-9 and u <= 1+1e-9:
+            px, py = a[0]+t*rx, a[1]+t*ry
+            return hypot(px-pin[0], py-pin[1]) > 0.5
+        return False
+    if abs(qx*ry - qy*rx) > 1e-9:
+        return False
+    den = sx*sx + sy*sy
+    if den <= 1e-9:
+        return False
+    ta = ((a[0]-l0[0])*sx + (a[1]-l0[1])*sy) / den
+    tb = ((b[0]-l0[0])*sx + (b[1]-l0[1])*sy) / den
+    lo, hi = min(ta, tb), max(ta, tb)
+    return hi > 1e-9 and lo < 1+1e-9
+
+for part in parts:
+    for pin in part.get('pins', []):
+        lead = pin_lead_segment(pin, part)
+        if not lead:
+            continue
+        for w in wires:
+            for a, b in segs(w.get('line') or []):
+                if a != b and segment_overlaps_lead(a, b, lead, (pin['x'], pin['y'])):
+                    problems['wire_over_pin_lead'].append(
+                        f"导线 {w['pid']} 段 {a}->{b} 覆盖 {part.get('designator')}.{pin.get('num')} 的引脚 lead")
+
 # ---- Check 10c: visible text vs wire (closed collision) ----
 def visible_text_boxes():
     out = []
@@ -445,6 +504,33 @@ def wire_root(w):
     return None
 
 wire_roots = {w['pid']: wire_root(w) for w in wires}
+active_by_root = defaultdict(set)
+root_nets = defaultdict(set)
+for w in wires:
+    root = wire_roots.get(w['pid'])
+    if root is None:
+        continue
+    if (w.get('net') or '').strip():
+        root_nets[root].add(w.get('net').strip())
+    for part in parts:
+        desig = str(part.get('designator') or '')
+        if not (desig.startswith(('U', 'Q', 'IC')) and len(part.get('pins', [])) >= 4):
+            continue
+        for pin in part.get('pins', []):
+            pt = (pin['x'], pin['y'])
+            if any(seg_dist_point(pt[0], pt[1], a, b) <= 0.5 for a, b in segs(w.get('line') or [])):
+                active_by_root[root].add(desig)
+                break
+
+for root, chips in active_by_root.items():
+    if len(chips) < 2:
+        continue
+    nets = root_nets.get(root, set())
+    if nets and all(is_rail_name(n) for n in nets):
+        continue
+    problems['cross_chip_direct_wire'].append(
+        f"不同主动芯片 {'/'.join(sorted(chips))} 被同一物理导线树直接连通 — 改用同名网络标签")
+
 labels_by_island = defaultdict(list)
 for t in visible_text_boxes():
     if t['componentType'] != 'wire' or t['key'] != 'Name' or not t['parentWireId']:
@@ -530,6 +616,11 @@ def path_clear(points, excluded_roots, excluded_labels, text_items):
                 continue
             if seg_intersects_box(a, b, [pin[0]-0.5, pin[1]-0.5, pin[0]+0.5, pin[1]+0.5]):
                 return False
+        for part in parts:
+            for pin in part.get('pins', []):
+                lead = pin_lead_segment(pin, part)
+                if lead and segment_overlaps_lead(a, b, lead, (pin['x'], pin['y'])):
+                    return False
         for w in wires:
             if wire_roots.get(w['pid']) in excluded_roots:
                 continue
@@ -703,6 +794,9 @@ for i in range(len(label_items)):
             continue
         if (ti['net'] or '') == '':
             continue
+        ca, cb = active_by_root.get(ri, set()), active_by_root.get(rj, set())
+        if ca and cb and not (ca & cb):
+            continue
         pair = (min(ti['label'], tj['label']), max(ti['label'], tj['label']))
         if pair in seen_pairs:
             continue
@@ -861,7 +955,7 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','marker_wire_overlap','text_wire_overlap','label_visibility','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','marker_wire_overlap','wire_over_pin_lead','cross_chip_direct_wire','text_wire_overlap','label_visibility','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid',
          'cross_kind_label_economy','label_distance','signal_marker_type','signal_port_exempt',
          'visible_text_overlap','titleblock_overlap','out_of_sheet','alignment_opportunity']
@@ -871,6 +965,8 @@ labels = {
   'dangling_wire':'🔴 导线空连端点','floating_pin':'🟠 悬空引脚',
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
   'marker_wire_overlap':'🟠 标识压在导线上(锚点近似)',
+  'wire_over_pin_lead':'🔴 导线覆盖器件引脚 lead',
+  'cross_chip_direct_wire':'🟠 不同主动芯片被长直连',
   'text_wire_overlap':'🟠 可见文字被导线穿过',
   'label_visibility':'🟠 名称隐藏/为空',
   'label_vertical':'🟡 网络标签竖排/折叠',

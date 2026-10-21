@@ -627,6 +627,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			geo = append(geo, redundantNetMarkerFindings(comps, wires)...)
 			geo = append(geo, reversedNetFlagFindings(comps, wires)...)
 			geo = append(geo, markerWireOverlapFindings(comps, wires, overlapEps)...)
+			geo = append(geo, crossChipDirectWireFindings(comps, wires)...)
 			geo = append(geo, schWireGeometryFindings(geometryResult.Result, wires)...)
 			geo = append(geo, powerClusterFindings(comps, wires, powerClusterExempt)...)
 			geo = append(geo, sheetBoundaryFindings(comps, wires, sheetBBoxOf(comps), titleBlock, tbSource, overlapEps)...)
@@ -668,6 +669,10 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.MarkerWireOverlaps++
 		case "non-orthogonal-wire":
 			rep.Summary.NonOrthogonalWires++
+		case "wire-over-pin-lead":
+			rep.Summary.WireOverPins++
+		case "cross-chip-direct-wire":
+			rep.Summary.CrossChipDirectWires++
 		case "visible-text-overlap":
 			rep.Summary.VisibleTextOverlaps++
 		case "label-economy":

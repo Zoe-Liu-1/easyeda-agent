@@ -116,6 +116,7 @@ type checkSummary struct {
 	MultiNetWires          int `json:"multiNetWires"`
 	WireCrossings          int `json:"wireCrossings"`
 	WireOverPins           int `json:"wireOverPins"`
+	CrossChipDirectWires   int `json:"crossChipDirectWires"`
 	NonOrthogonalWires     int `json:"nonOrthogonalWires"`
 	ZeroLengthWires        int `json:"zeroLengthWires"`
 	DanglingWires          int `json:"danglingWires"`
@@ -357,8 +358,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -427,6 +428,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.WireCrossings > 0 || s.WireOverPins > 0 {
 		fmt.Fprintln(w, "→ routing: reroute crossings in clear channels (L-bends); never run a wire through a pin")
+	}
+	if s.CrossChipDirectWires > 0 {
+		fmt.Fprintln(w, "→ cross-chip-direct-wire: 不同主动芯片之间改用同名网络标签；不要用长导线直接跨过芯片功能块")
 	}
 	if s.NonOrthogonalWires > 0 {
 		fmt.Fprintln(w, "→ non-orthogonal-wire: split every diagonal/non-axis segment into horizontal/vertical runs, then rerun bridge-check")

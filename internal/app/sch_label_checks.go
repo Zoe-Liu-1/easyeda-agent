@@ -546,6 +546,7 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 		}
 		labels = append(labels, label{it: it, root: find(idx), ax: ax, ay: ay})
 	}
+	chipIslands := wireIslandActiveChips(comps, wires)
 
 	var obstacles []*layoutBBox
 	for _, c := range comps {
@@ -641,6 +642,9 @@ func directConnectOpportunityFindings(items []visibleTextItem, comps []layoutCom
 		for j := i + 1; j < len(labels); j++ {
 			a, b := labels[i], labels[j]
 			if a.root == b.root || a.it.Value != b.it.Value {
+				continue
+			}
+			if labelsJoinDifferentChips(chipIslands, a.root, b.root) {
 				continue
 			}
 			dist := math.Abs(a.ax-b.ax) + math.Abs(a.ay-b.ay)

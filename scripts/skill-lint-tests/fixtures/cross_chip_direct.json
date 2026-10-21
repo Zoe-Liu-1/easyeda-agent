@@ -1,0 +1,37 @@
+{
+  "_intent": "A signal wire must not directly join two different active chips; same-name labels belong at the chip boundaries.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 0,
+      "y": 0,
+      "pins": [
+        { "num": "1", "name": "P1", "x": 0, "y": 0 },
+        { "num": "2", "name": "P2", "x": 0, "y": 0 },
+        { "num": "3", "name": "P3", "x": 0, "y": 0 },
+        { "num": "4", "name": "P4", "x": 0, "y": 0 }
+      ],
+      "bbox": [-20, -20, 20, 20]
+    },
+    {
+      "pid": "u2",
+      "type": "part",
+      "designator": "U2",
+      "x": 100,
+      "y": 0,
+      "pins": [
+        { "num": "1", "name": "P1", "x": 100, "y": 0 },
+        { "num": "2", "name": "P2", "x": 100, "y": 0 },
+        { "num": "3", "name": "P3", "x": 100, "y": 0 },
+        { "num": "4", "name": "P4", "x": 100, "y": 0 }
+      ],
+      "bbox": [80, -20, 120, 20]
+    }
+  ],
+  "flags": [],
+  "wires": [
+    { "pid": "cross", "net": "SIG", "line": [0, 0, 100, 0] }
+  ]
+}

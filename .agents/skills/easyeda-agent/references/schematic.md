@@ -275,10 +275,14 @@ typed 路径不会写入已知非法几何，不承担阶段许可，也不能�
 不盲重试或当作已撤销。几何输入校验不替代器件身份/位姿命中、电气连通或标记完整性的独立对账。
 写入和会切页的读取共用窗口互斥；不能在另一条写入回读期间切页或叠加修改。
 
-`sch check` 使用同一纯规则，逐条给出 `pin-exit-direction`、`wire-through-body` 等
-ERROR，保留器件/引脚/线段证据。允许先向外再折线；不二次套用器件旋转/镜像改变官方
+`sch check` 使用同一纯规则，逐条给出 `pin-exit-direction`、`wire-through-body`、
+`wire-over-pin-lead` 等 ERROR，保留器件/引脚/线段证据。`wire-over-pin-lead` 按实测 pin
+rotation 与 body bbox 重建 pin→body 的 lead 区间：正常外向桩线只在 pin 端点接触，
+沿 lead 进入符号或横穿 lead 都失败。允许先向外再折线；不二次套用器件旋转/镜像改变官方
 已经转换到页面坐标的引脚 rotation。原生手动编辑、任意 debug 脚本不是受保护的声明式
 施工入口，仍需重新读回检查，不能把这种调试操作包装成完成验收。
+`cross-chip-direct-wire` 对同一物理信号线树触及两个不同多脚主动芯片的情况报 WARN；
+芯片之间改用同名网络标签或显式模块端口，电源/地轨不套用该信号规则。
 `dangling-wire` 不按整根 `Line` 一刀切：对每个 degree-1 自由端分别核对引脚、marker、
 其他导线及同图元内其他线段；连通树上另一处已接引脚/标识，不能掩盖空网或自动网名分支
 上的残留短支路，finding 定位到真正悬空端点。

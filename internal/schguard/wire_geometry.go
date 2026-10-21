@@ -245,6 +245,22 @@ func AnalyzeWireGeometry(result map[string]any) []Finding {
 				continue
 			}
 			rotation = math.Round(rotation/90) * 90
+			if leadStart, leadEnd, hasLead := pinLeadInsideBody(at, rotation, box); hasLead {
+				for _, s := range segments {
+					if !segmentsTouchBeyondPoint(s.a, s.b, leadStart, leadEnd, at) {
+						continue
+					}
+					mid := Point{X: (leadStart.X + leadEnd.X) / 2, Y: (leadStart.Y + leadEnd.Y) / 2}
+					out = append(out, Finding{
+						Type: "wire-over-pin-lead", Level: "ERROR",
+						Designator: ref, PrimitiveId: id, WirePrimitiveId: s.id,
+						Pins: []string{number}, BBox: &box, At: &mid,
+						Segment: []Point{s.a, s.b},
+						Message: fmt.Sprintf("wire segment %d (%g,%g)→(%g,%g) overlaps the physical lead of pin %s instead of stopping at its outward endpoint",
+							s.index, s.a.X, s.a.Y, s.b.X, s.b.Y, number),
+					})
+				}
+			}
 			for _, s := range incident {
 				bad := false
 				for _, end := range []Point{s.a, s.b} {
@@ -262,6 +278,75 @@ func AnalyzeWireGeometry(result map[string]any) []Finding {
 		}
 	}
 	return out
+}
+
+// pinLeadInsideBody returns the physical pin-lead interval from the outward pin
+// endpoint to the body boundary. It is derived from measured pin orientation and
+// body bbox; no character-width or symbol-profile guess is involved.
+func pinLeadInsideBody(pin Point, rotation float64, box BBox) (Point, Point, bool) {
+	switch int(math.Round(math.Mod(rotation, 360))) % 360 {
+	case 0: // pin opens right, lead is to its left
+		if pin.Y >= box.MinY-epsilon && pin.Y <= box.MaxY+epsilon && pin.X > box.MaxX+epsilon {
+			return pin, Point{X: box.MaxX, Y: pin.Y}, true
+		}
+	case 90: // opens up, lead below
+		if pin.X >= box.MinX-epsilon && pin.X <= box.MaxX+epsilon && pin.Y > box.MaxY+epsilon {
+			return pin, Point{X: pin.X, Y: box.MaxY}, true
+		}
+	case 180: // opens left, lead to its right
+		if pin.Y >= box.MinY-epsilon && pin.Y <= box.MaxY+epsilon && pin.X < box.MinX-epsilon {
+			return pin, Point{X: box.MinX, Y: pin.Y}, true
+		}
+	case 270: // opens down, lead above
+		if pin.X >= box.MinX-epsilon && pin.X <= box.MaxX+epsilon && pin.Y < box.MinY-epsilon {
+			return pin, Point{X: pin.X, Y: box.MinY}, true
+		}
+	}
+	return Point{}, Point{}, false
+}
+
+// PinLeadInterval exposes the measured pin-to-body lead interval for upstream
+// routers. The returned start is the outward pin point; the end is the body edge.
+func PinLeadInterval(pin Point, rotation float64, box BBox) (Point, Point, bool) {
+	return pinLeadInsideBody(pin, rotation, box)
+}
+
+// segmentsTouchBeyondPoint reports any shared point other than the pin's outward
+// endpoint. A normal stub that starts at the pin and leaves outward intersects the
+// lead only at u=0, while a wire crossing or running along the lead has u>0.
+func segmentsTouchBeyondPoint(a, b, leadStart, leadEnd, pin Point) bool {
+	rx, ry := b.X-a.X, b.Y-a.Y
+	sx, sy := leadEnd.X-leadStart.X, leadEnd.Y-leadStart.Y
+	cross := rx*sy - ry*sx
+	qx, qy := leadStart.X-a.X, leadStart.Y-a.Y
+	if math.Abs(cross) > epsilon {
+		t := (qx*sy - qy*sx) / cross
+		u := (qx*ry - qy*rx) / cross
+		if t < -epsilon || t > 1+epsilon || u <= epsilon || u > 1+epsilon {
+			return false
+		}
+		p := Point{X: a.X + t*rx, Y: a.Y + t*ry}
+		return !same(p, pin)
+	}
+	if math.Abs(qx*ry-qy*rx) > epsilon {
+		return false
+	}
+	// Collinear: project the wire interval onto the lead parameter and require
+	// positive coverage beyond the pin endpoint.
+	den := sx*sx + sy*sy
+	if den <= epsilon {
+		return false
+	}
+	ta := ((a.X-leadStart.X)*sx + (a.Y-leadStart.Y)*sy) / den
+	tb := ((b.X-leadStart.X)*sx + (b.Y-leadStart.Y)*sy) / den
+	lo, hi := math.Min(ta, tb), math.Max(ta, tb)
+	return hi > epsilon && lo < 1+epsilon
+}
+
+// SegmentTouchesPinLead reports contact with the pin lead anywhere beyond the
+// outward pin endpoint. A normal outward first segment returns false.
+func SegmentTouchesPinLead(a, b, leadStart, leadEnd, pin Point) bool {
+	return segmentsTouchBeyondPoint(a, b, leadStart, leadEnd, pin)
 }
 
 func componentPinHaloExit(c map[string]any, a, b Point, box BBox) bool {

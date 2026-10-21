@@ -1,0 +1,20 @@
+{
+  "_intent": "A wire may end at the outward pin point but must not run along or across the physical pin lead into the symbol body.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 20,
+      "y": 20,
+      "pins": [
+        { "num": "1", "name": "P", "x": -10, "y": 20, "rotation": 180 }
+      ],
+      "bbox": [0, 0, 40, 40]
+    }
+  ],
+  "flags": [],
+  "wires": [
+    { "pid": "bad", "net": "SIG", "line": [-30, 20, -4, 20] }
+  ]
+}

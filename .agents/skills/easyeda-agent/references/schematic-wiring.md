@@ -52,9 +52,18 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 网络交叉的短路径时，先用真实导线；只有跨块/跨页/远距离、引脚首段方向不允许，或直连必然
 交叉/穿器件/压字时，才用同名标签。不得为省标签绕斜线或制造交叉。标签按**线岛**计数：
 同一线岛同一网络只标一次；标签水平、可见，不压导线/引脚/器件/文字；电源、地、器件名称
-不计入标签数量。非电源/地信号网使用 netflag 或带箭头的 netport 均为 WARN；确属模块边界
+不计入标签数量。**不同主动芯片之间的信号网不用长导线直连**；两块芯片各自在引脚端放置
+同名网络标签，只有同一芯片功能块内部的短外围才保持 wire 直连。非电源/地信号网使用
+netflag 或带箭头的 netport 均为 WARN；确属模块边界
 的 netport 需用 `sch check --signal-port-exempt <primitiveId,...>` 显式登记，登记项只保留
-INFO 审计，不再静默放过。
+INFO 审计，不再静默放过。跨芯片线树由 `cross-chip-direct-wire` 报 WARN，
+`direct-connect-plan` 和 `alignment-plan` 都跳过它，必须先把长线拆成标签连接，不能通过
+移动芯片继续优化这根线。
+
+**导线只能停在引脚外向端点，不能覆盖 pin lead。** 从 pin 坐标出发的合法桩线只允许在
+该端点与 lead 接触后向外延伸；沿 lead 进入符号、横穿 lead、或从符号内部穿过该引脚均为
+`wire-over-pin-lead` ERROR。正常的外向短桩不会触发，规则按实测 pin rotation 与 body bbox
+计算 lead 区间。
 
 **局部电源/地不要用 `sch wire --net` 重复显示网名。** 导线本身不命名，末端 netflag 定义
 网名；否则 `--net` 会把网名画在导线上，与 netflag 名称重复并增加压字。信号网的

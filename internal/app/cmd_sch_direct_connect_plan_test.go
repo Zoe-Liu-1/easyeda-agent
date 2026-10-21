@@ -41,6 +41,30 @@ func TestDirectConnectPlaybookContainsOnlyClearPairs(t *testing.T) {
 	}
 }
 
+func TestDirectPathBlockersRejectPinLeadOverlap(t *testing.T) {
+	comps := []layoutComp{{
+		ID: "u1", Designator: "U1", ComponentType: schLayoutPartType,
+		BBox: &layoutBBox{MinX: 0, MinY: 0, MaxX: 40, MaxY: 40},
+		Pins: []layoutPin{{Number: "1", X: -10, Y: 20, Rotation: 180, RotationKnown: true}},
+	}}
+	wires := []schGroupWire{
+		{ID: "w1", ObservedSegments: [][4]float64{{-30, 20, -10, 20}}},
+		{ID: "w2", ObservedSegments: [][4]float64{{100, 80, 100, 120}}},
+	}
+	find, index := wireTreeFinder(wires)
+	blockers := directPathBlockers([][2]float64{{-30, 20}, {-4, 20}}, find(0), find(1), "a", "b",
+		nil, comps, wires, find, index)
+	found := false
+	for _, blocker := range blockers {
+		if blocker.Kind == "pin-lead" && blocker.Label == "pin-lead:U1.1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("path along measured pin lead must be blocked: %+v", blockers)
+	}
+}
+
 func TestPlanDirectConnectTextMoves(t *testing.T) {
 	wires := []schGroupWire{
 		{ID: "w1", Points: []float64{0, 0, 0, 100}},

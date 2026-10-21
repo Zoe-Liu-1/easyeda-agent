@@ -18,7 +18,7 @@
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
-| 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out\|--playbook <file>] [--pair A,B]`；规划只读。先测短 L，再用 5 单位障碍感知 A* 找多折正交路径；无遮挡路径直接记为 `already-clear`。仍有阻挡时按风险给出文字、netflag/netport 短桩、单器件刚体、2–4 器件功能块移动候选。`--playbook` 只为 `already-clear` 对生成完整执行队列；移动类候选仍需人工复核 |
+| 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out\|--playbook <file>] [--pair A,B]`；规划只读。先测短 L，再用 5 单位障碍感知 A* 找多折正交路径；无遮挡路径直接记为 `already-clear`。不同主动芯片（`U/Q/IC` 且至少 4 脚）分属两个线岛时不允许生成直连，改用同名网络标签。仍有阻挡时按风险给出文字、netflag/netport 短桩、单器件刚体、2–4 器件功能块移动候选。`--playbook` 只为 `already-clear` 对生成完整执行队列；移动类候选仍需人工复核 |
 | 执行单对直连 | `sch direct-connect-apply --doc <page> --pair A,B [--apply] [--save] [--out file]`；默认 dry-run。重新规划并只接受 `already-clear`；创建导线前后、删除两个标签前后都比对完整 pin→net 表，变化时删除新线并恢复标签。`--apply` 才写入 |
 | 直线化组移动计划 | `sch alignment-plan --doc <page> [--net <net>] [--json\|--out]`；只读。由 `alignment-opportunity` 生成完整移动组、专属导线/marker/标签、`boundaryPlans[]`、`sharedLabelIds[]`、`independentBlockerPlans[]` 和步骤顺序。主计划 `ready` 要求无阻塞且无共享边界；有共享边界为 `rewire-required`，有阻塞为 `blocked`。主组和独立阻塞组都复用整组移动的器件/引脚/文字/导线碰撞检查；阻塞组的安全落点按 5 单位栅格由近到远二维搜索，局部预算内才为 `ready`，超预算为 `review-required`，几何碰撞或自身带共享线为 `blocked`。边界草案必须从每个引脚的外向首段出发，并避开器件本体、异网引脚/导线、可见文字、图签和图纸边界。`alignment-apply` 才能执行最终草案 |
 | 执行直线化计划 | `sch alignment-apply --doc <page> (--net <net> \| --plan <id>) [--apply] [--save] [--out file]`；默认 dry-run。只接受无 blockers 的 `rewire-required`；在现有 `schMoveKernel` 内显式允许计划中的共享树被替换，移动后按边界草案重建正交导线，并做全页逐脚网表与 bridge 对账。失败时走内核恢复段，不把部分写入报成成功 |
@@ -131,6 +131,8 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 |---|---|
 | `diagonal-wire` / `non-orthogonal-wire` | 斜线或非正交段。写入前几何守卫应拒绝；`sch check` 汇总层也应作为独立 finding 暴露，不能只在写回执里出现。 |
 | `wire-crossing` | `ERROR` 表示交叉点有引脚/标记或网络证据不完整；`INFO` 表示无接点交叉，电气安全但仍是可读性问题，不能直接当 Pass。只有记录坐标和原因的 deliberate exception 才能 `Waived`。 |
+| `wire-over-pin-lead` | 导线与测得的引脚 lead 区间发生非端点接触：包括沿 lead 共线进入符号、横穿 lead。正常桩线只能从 pin 外向端点离开，不能压进 lead；ERROR。 |
+| `cross-chip-direct-wire` | 同一物理信号线树直接触及两个不同主动芯片（多脚 `U/Q/IC`）。芯片之间改用同名网络标签或显式模块端口；电源/地轨不套用此信号规则。WARN。 |
 | `dangling-wire` | 按 wire primitive 的 degree-1 自由端逐个核验；同一树上的其他引脚/标识不能掩盖空白/自动网名分支上的无落点自由端。`at` 指向真正悬空端，`count` 为该树自由端数量；真实网名标签端点保留为有意连接。删除残留短支路或接到明确目标。 |
 | `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏名称必须补显示；没有 Name 属性直接报错。 |
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |

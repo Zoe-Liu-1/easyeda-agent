@@ -129,6 +129,26 @@ func TestWireGeometryCeshiUSBC1NegativeRegression(t *testing.T) {
 	}
 }
 
+func TestWireGeometryRejectsWireOverPinLead(t *testing.T) {
+	good := `{"components":[{"componentType":"part","primitiveId":"u1","designator":"U1","bbox":{"minX":0,"minY":0,"maxX":40,"maxY":40},"pinsAvailable":true,"pins":[{"pinNumber":"1","x":-10,"y":20,"rotation":180}]}],"wiresAvailable":true,"wires":[{"x0":-30,"y0":20,"x1":-10,"y1":20}]}`
+	var goodObj map[string]any
+	if err := json.Unmarshal([]byte(good), &goodObj); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(AnalyzeWireGeometry(goodObj), "wire-over-pin-lead"); got != 0 {
+		t.Fatalf("an outward stub touching only the pin endpoint must pass, got %d", got)
+	}
+
+	bad := `{"components":[{"componentType":"part","primitiveId":"u1","designator":"U1","bbox":{"minX":0,"minY":0,"maxX":40,"maxY":40},"pinsAvailable":true,"pins":[{"pinNumber":"1","x":-10,"y":20,"rotation":180}]}],"wiresAvailable":true,"wires":[{"x0":-30,"y0":20,"x1":-4,"y1":20}]}`
+	var badObj map[string]any
+	if err := json.Unmarshal([]byte(bad), &badObj); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(AnalyzeWireGeometry(badObj), "wire-over-pin-lead"); got != 1 {
+		t.Fatalf("a wire running into the measured pin lead must fail: %+v", AnalyzeWireGeometry(badObj))
+	}
+}
+
 func TestVerifyWirePresentSplitMergeReverseAndGap(t *testing.T) {
 	proposed := wire(20, 0, 40, 0, 40, 20).(map[string]any)
 	for _, tt := range []struct {
