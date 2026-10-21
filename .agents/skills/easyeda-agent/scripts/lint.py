@@ -589,6 +589,24 @@ def orthogonal_detour(start, end, excluded_roots, excluded_labels, text_items, m
                 for p in pts:
                     if not out or p != out[-1]:
                         out.append(p)
+                exact = []
+                for p in out:
+                    if not exact:
+                        exact.append(p)
+                        continue
+                    prev = exact[-1]
+                    if prev[0] == p[0] or prev[1] == p[1]:
+                        exact.append(p)
+                        continue
+                    candidates = [(p[0], prev[1]), (prev[0], p[1])]
+                    for mid in candidates:
+                        if path_clear([prev, mid], excluded_roots, excluded_labels, text_items) and \
+                           path_clear([mid, p], excluded_roots, excluded_labels, text_items):
+                            exact.extend([mid, p])
+                            break
+                    else:
+                        return None
+                out = exact
                 compact = []
                 for p in out:
                     if len(compact) >= 2:

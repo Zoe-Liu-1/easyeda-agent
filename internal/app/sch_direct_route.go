@@ -81,7 +81,10 @@ func dcFindOrthogonalPath(start, end [2]float64, sheet, titleBlock *layoutBBox,
 				clear(pathPoint, end) {
 				goal := dcRouteKey{X: end[0], Y: end[1]}
 				prev[goal] = state
-				return dcReconstructRoute(prev, goal, start, end), true
+				route := dcReconstructRoute(prev, goal, start, end)
+				if exact, ok := dcOrthogonalizeRoute(route, clear); ok {
+					return exact, true
+				}
 			}
 		}
 		for dir, delta := range dcRouteDirections {
@@ -122,6 +125,33 @@ func dcFindOrthogonalPath(start, end [2]float64, sheet, titleBlock *layoutBBox,
 		}
 	}
 	return nil, false
+}
+
+func dcOrthogonalizeRoute(path [][2]float64, clear func([2]float64, [2]float64) bool) ([][2]float64, bool) {
+	if len(path) < 2 {
+		return path, false
+	}
+	out := [][2]float64{path[0]}
+	for i := 1; i < len(path); i++ {
+		p, q := out[len(out)-1], path[i]
+		if math.Abs(p[0]-q[0]) <= 1e-6 || math.Abs(p[1]-q[1]) <= 1e-6 {
+			out = append(out, q)
+			continue
+		}
+		candidates := [][2]float64{{q[0], p[1]}, {p[0], q[1]}}
+		found := false
+		for _, mid := range candidates {
+			if clear(p, mid) && clear(mid, q) {
+				out = append(out, mid, q)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, false
+		}
+	}
+	return cleanDCPath(out), true
 }
 
 func dcReconstructRoute(prev map[dcRouteKey]dcRouteKey, goal dcRouteKey,
