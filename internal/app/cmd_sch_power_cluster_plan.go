@@ -46,6 +46,7 @@ type powerClusterConnection struct {
 func newSchPowerClusterPlanCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var jsonOut bool
 	var out, exemptInline, playbookOut string
+	var includeGround bool
 	cmd := &cobra.Command{
 		Use:   "power-cluster-plan",
 		Short: "Plan local power-cluster wiring and flag deletion (read-only)",
@@ -95,6 +96,15 @@ The command is read-only: it never calls modify, wire, connect, prim-delete or s
 			titleBlock, _ := titleBlockKeepoutWithSource(sheet)
 			exempt := parsePowerClusterExemptSet(exemptInline)
 			plans := planPowerClusters(comps, wires, items.Items, sheet, titleBlock, exempt)
+			if !includeGround {
+				filtered := plans[:0]
+				for _, p := range plans {
+					if !isPowerClusterGround(p.Net) {
+						filtered = append(filtered, p)
+					}
+				}
+				plans = filtered
+			}
 			if playbookOut != "" {
 				project := ""
 				if geom.Context != nil {
@@ -147,6 +157,7 @@ The command is read-only: it never calls modify, wire, connect, prim-delete or s
 	cmd.Flags().StringVar(&out, "out", "", "write structured JSON to file")
 	cmd.Flags().StringVar(&exemptInline, "exempt", "", "comma-separated DESIGNATOR or NET|DESIGNATOR clusters treated as intentional and not planned")
 	cmd.Flags().StringVar(&playbookOut, "playbook", "", "write a guarded sch apply playbook for ready/partial plans (read-only generation; does not execute)")
+	cmd.Flags().BoolVar(&includeGround, "include-gnd", false, "also plan GND local clusters (GND candidates are INFO in sch check and are excluded by default)")
 	return cmd
 }
 

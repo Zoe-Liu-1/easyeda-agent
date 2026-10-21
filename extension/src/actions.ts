@@ -49,6 +49,7 @@ import {
 	describeThrown,
 	filterExactLcsc,
 	footprintMatchesInstance,
+	freeWireEndIndexes,
 	isLcscQuery,
 	newArtifactId,
 	type NamedLibItem,
@@ -4798,8 +4799,9 @@ const schematicCheck: Handler = async (payload) => {
 	// zero-length segments and orphaned ("dangling") wires that connect to nothing.
 	// A stub whose pin/flag was deleted leaves a floating empty-net wire that
 	// silently pollutes the page (the ESP32 reference board accumulated 149/204
-	// zero-length wires this way). A wire is dangling when NONE of its vertices
-	// touches a pin, a netflag/netport/netlabel, or a DIFFERENT wire.
+	// zero-length wires this way). Check every degree-1 end separately: a pin or
+	// marker on another branch of the same merged wire tree cannot mask a leftover
+	// branch with no pin/marker/other-wire contact.
 	let zeroLengthWires = 0;
 	let danglingWires = 0;
 	const STRAY_CAP = 50;
@@ -4860,24 +4862,34 @@ const schematicCheck: Handler = async (payload) => {
 		const touchOf = (v: [number, number]) => ({
 			touchesPin: allPins.some(p => Math.hypot(v[0] - p.x, v[1] - p.y) <= COINCIDE_TOL),
 			touchesMarker: connectionMarkers.some(m => Math.hypot(v[0] - m.x, v[1] - m.y) <= COINCIDE_TOL)
-				|| wireSegs.some(ws => ws.wirePrimitiveId !== wirePid
-					&& pointOnSegment(v[0], v[1], ws.seg[0], ws.seg[1], ws.seg[2], ws.seg[3])),
+				|| wireSegs.some(ws => {
+					const endsAtV = Math.hypot(v[0] - ws.seg[0], v[1] - ws.seg[1]) <= COINCIDE_TOL
+						|| Math.hypot(v[0] - ws.seg[2], v[1] - ws.seg[3]) <= COINCIDE_TOL;
+					if (endsAtV) return ws.wirePrimitiveId !== wirePid;
+					return pointOnSegment(v[0], v[1], ws.seg[0], ws.seg[1], ws.seg[2], ws.seg[3]);
+				}),
 		});
 		const ends = endpoints.map(touchOf);
+		const freeEnds = freeWireEndIndexes(ends);
 		const verdict = classifyWireConnectivity(ends, wnet);
 		if (verdict !== 'connected') {
 			danglingWires++;
 			if (findings.filter(f => f.type === 'dangling-wire').length < STRAY_CAP) {
 				const orphan = verdict === 'orphan-stub';
+				const danglingEnd = verdict === 'dangling-end';
+				const at = danglingEnd && freeEnds.length > 0 ? endpoints[freeEnds[0]] : verts[0];
 				findings.push({
 					type: 'dangling-wire',
 					level: 'warn',
 					wirePrimitiveId: wirePid || undefined,
-					wireNet: orphan ? wnet : undefined,
-					at: { x: verts[0][0], y: verts[0][1] },
-					message: orphan
-						? `疑似孤儿 stub(一端连引脚、另一端游离,网名 ${wnet} 为 EasyEDA 自动生成 — flag/port 疑似已删除,wire 残留;用 sch disconnect 清除)`
-						: `悬挂导线(两端不接任何引脚/标识/导线${wnet ? '' : '、空网名'},孤立残留)`,
+					wireNet: (orphan || danglingEnd) && wnet ? wnet : undefined,
+					count: danglingEnd ? freeEnds.length : undefined,
+					at: { x: at[0], y: at[1] },
+					message: danglingEnd
+						? `多段线树有 ${freeEnds.length} 个无落点自由端(空网或自动网名)— 其他引脚/标识已连接也不能掩盖该多余短支路;删除该短支路,或把它接到明确目标`
+						: orphan
+							? `疑似孤儿 stub(一端连引脚、另一端游离,网名 ${wnet} 为 EasyEDA 自动生成 — flag/port 疑似已删除,wire 残留;用 sch disconnect 清除)`
+							: `悬挂导线(两端不接任何引脚/标识/导线${wnet ? '' : '、空网名'},孤立残留)`,
 				});
 			}
 		}

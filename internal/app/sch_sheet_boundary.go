@@ -134,6 +134,48 @@ func visibleTextBoundaryFindings(items []visibleTextItem, sheet *layoutBBox, eps
 	return out
 }
 
+// visibleTextTitleblockFindings extends the title-block keep-out from parts,
+// markers and wires to every visible text item. Sheet-owned title-block fields
+// are exempt because they are supposed to live inside that rectangle.
+func visibleTextTitleblockFindings(items []visibleTextItem, comps []layoutComp,
+	titleBlock *layoutBBox, eps float64) []checkFinding {
+	if titleBlock == nil {
+		return nil
+	}
+	sheetID := ""
+	for _, c := range comps {
+		if c.ComponentType == "sheet" {
+			sheetID = c.ID
+			break
+		}
+	}
+	var out []checkFinding
+	for _, it := range items {
+		if it.BBox == nil || (sheetID != "" && it.ParentID == sheetID) {
+			continue
+		}
+		ix, iy, hit := overlapExtent(*it.BBox, *titleBlock)
+		if !hit || math.Min(ix, iy) <= eps {
+			continue
+		}
+		what := "文字「" + it.Content + "」"
+		if it.Kind == "attribute" {
+			what = fmt.Sprintf("%s 的可见属性 %s", it.Designator, it.Key)
+			if it.Designator == "" {
+				what = fmt.Sprintf("%s 的可见属性 %s", it.ComponentType, it.Key)
+			}
+		}
+		out = append(out, checkFinding{
+			Type: "titleblock-overlap", Level: "warn", PrimitiveId: it.ID,
+			Designator: it.Designator, BBox: it.BBox, Keepout: titleBlock,
+			OverlapX: ix, OverlapY: iy,
+			Message: fmt.Sprintf("%s 落入图签 keep-out（重叠 %.0f×%.0f）— 移出图签或关闭该属性显示",
+				what, ix, iy),
+		})
+	}
+	return out
+}
+
 // visibleTextFindings reads the measured visible text and applies the ruler.
 // An older connector without the action is reported once on stderr (no
 // finding: the rule simply does not exist there); a failed read or items the
@@ -158,12 +200,16 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps
 	if json.Unmarshal(raw, &parsed) != nil {
 		return []checkFinding{{Type: "visible-text-unverified", Level: "warn", Message: "可见文字/属性测量结果无法解析"}}
 	}
+	titleBlock, _ := titleBlockKeepoutWithSource(sheet)
 	out := visibleTextBoundaryFindings(parsed.Items, sheet, eps)
+	out = append(out, visibleTextTitleblockFindings(parsed.Items, comps, titleBlock, eps)...)
 	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, wires, eps)...)
 	out = append(out, netLabelVisibilityFindings(parsed.Items)...)
 	out = append(out, netLabelOrientationFindings(parsed.Items)...)
 	out = append(out, netLabelEconomyFindings(parsed.Items, wires)...)
-	titleBlock, _ := titleBlockKeepoutWithSource(sheet)
+	out = append(out, crossKindLabelEconomyFindings(parsed.Items, comps, wires)...)
+	out = append(out, labelDistanceFindings(parsed.Items, comps, wires, 50)...)
+	out = append(out, alignmentOpportunityFindings(parsed.Items, comps, wires, sheet, titleBlock)...)
 	out = append(out, directConnectOpportunityFindings(parsed.Items, comps, wires, sheet, titleBlock)...)
 	if n := len(parsed.Unmeasured); n > 0 {
 		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "info",
@@ -254,6 +300,45 @@ func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, wir
 						WirePrimitiveId: w.ID, BBox: it.BBox,
 						Message: fmt.Sprintf("%s 压在导线 %s 上（线段 (%.0f,%.0f)→(%.0f,%.0f)）— 挪开文字或改走线",
 							describe(it), w.ID, seg[0], seg[1], seg[2], seg[3]),
+					})
+					hit = true
+					break
+				}
+			}
+			if hit {
+				break
+			}
+		}
+	}
+	// Pins can extend outside their part body (connectors/ICs with long leads).
+	// Text-vs-part catches the body; this loop closes the remaining lead blind
+	// spot while excluding a part's own attributes.
+	for _, it := range items {
+		if it.BBox == nil {
+			continue
+		}
+		hit := false
+		for _, c := range comps {
+			if it.ParentID == c.ID || (c.ComponentType != "" && c.ComponentType != schLayoutPartType) {
+				continue
+			}
+			for _, pin := range c.Pins {
+				if c.BBox != nil && pointInBox2(pin.X, pin.Y, *c.BBox, eps) {
+					continue // already covered by the text-vs-part body rule
+				}
+				if pointInBox2(pin.X, pin.Y, *it.BBox, eps) {
+					owner := c.Designator
+					if owner == "" {
+						owner = c.ID
+					}
+					if owner == "" {
+						owner = c.ComponentType
+					}
+					out = append(out, checkFinding{
+						Type: "visible-text-overlap", Level: "warn",
+						PrimitiveId: it.ID, Designator: it.Designator, BBox: it.BBox,
+						Message: fmt.Sprintf("%s 压在引脚 %s.%s 上 — 挪开文字或改引脚走线",
+							describe(it), owner, pin.Number),
 					})
 					hit = true
 					break

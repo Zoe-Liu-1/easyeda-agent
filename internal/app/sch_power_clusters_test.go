@@ -49,7 +49,7 @@ func TestPowerClusterAlreadyWired(t *testing.T) {
 	}
 }
 
-func TestPowerClusterRemoteAndGroundIgnored(t *testing.T) {
+func TestPowerClusterRemoteAndCoincidentGroundStaySilent(t *testing.T) {
 	comps := []layoutComp{
 		{
 			ID: "u1", Designator: "U1", ComponentType: "part",
@@ -77,6 +77,30 @@ func TestPowerClusterRemoteAndGroundIgnored(t *testing.T) {
 	}
 	if got := powerClusterFindings(comps, wires, nil); len(got) != 0 {
 		t.Fatalf("remote passive and local ground must not produce a warn candidate: %+v", got)
+	}
+}
+
+func TestPowerClusterGroundIsAdvisory(t *testing.T) {
+	comps := []layoutComp{
+		{
+			ID: "u1", Designator: "U1", ComponentType: "part",
+			Pins: []layoutPin{{Number: "1", X: 0, Y: 0, Net: "GND"}},
+		},
+		{
+			ID: "c1", Designator: "C1", ComponentType: "part",
+			Pins: []layoutPin{{Number: "1", X: 100, Y: 0, Net: "GND"}},
+		},
+		{ID: "g1", ComponentType: "netflag", Net: "GND", X: 0, Y: 10, AnchorAvailable: true},
+		{ID: "g2", ComponentType: "netflag", Net: "GND", X: 100, Y: 10, AnchorAvailable: true},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{0, -10, 0, 10}},
+		{ID: "w2", Points: []float64{100, -10, 100, 10}},
+	}
+	got := powerClusterFindings(comps, wires, nil)
+	if len(got) != 1 || got[0].Type != "power-cluster-candidate" ||
+		got[0].Level != "info" || got[0].MarkerNet != "GND" {
+		t.Fatalf("want one advisory GND cluster, got %+v", got)
 	}
 }
 

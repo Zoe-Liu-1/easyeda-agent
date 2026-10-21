@@ -178,7 +178,7 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 		}
 		for _, p := range c.Pins {
 			net := strings.TrimSpace(p.Net)
-			if net == "" || !isRailLabelNet(net) || isPowerClusterGround(net) {
+			if net == "" || !isRailLabelNet(net) {
 				continue
 			}
 			if isPowerClusterActive(c.Designator) {
@@ -204,7 +204,11 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 					best, bestDist = c, d
 				}
 			}
-			if bestDist > powerClusterRadius {
+			radius := powerClusterRadius
+			if isPowerClusterGround(rail) {
+				radius = 150
+			}
+			if bestDist > radius {
 				continue
 			}
 			key := rail + "|" + best.c.ID
@@ -294,8 +298,12 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 		}
 		msg := fmt.Sprintf("电源局部簇：%s(%s) 与本地被动件 %s 分属 %d 个线岛，且各有同名电源符号 — 先物理接入消费脚，再合并为一个符号（建议保留 %s，删除 %s）",
 			pins[0], g.rail, strings.Join(parts, "/"), len(roots), keep.ID, strings.Join(deleteIDs, ","))
+		level := "warn"
+		if isPowerClusterGround(g.rail) {
+			level = "info"
+		}
 		out = append(out, checkFinding{
-			Type: "power-cluster-candidate", Level: "warn",
+			Type: "power-cluster-candidate", Level: level,
 			Designator: g.consumer.Designator, MarkerNet: g.rail,
 			Pins: pins, PrimitiveIds: func() []string {
 				ids := make([]string, len(clusterFlags))

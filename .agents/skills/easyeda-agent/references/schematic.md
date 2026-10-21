@@ -279,6 +279,9 @@ typed 路径不会写入已知非法几何，不承担阶段许可，也不能�
 ERROR，保留器件/引脚/线段证据。允许先向外再折线；不二次套用器件旋转/镜像改变官方
 已经转换到页面坐标的引脚 rotation。原生手动编辑、任意 debug 脚本不是受保护的声明式
 施工入口，仍需重新读回检查，不能把这种调试操作包装成完成验收。
+`dangling-wire` 不按整根 `Line` 一刀切：对每个 degree-1 自由端分别核对引脚、marker、
+其他导线及同图元内其他线段；连通树上另一处已接引脚/标识，不能掩盖空网或自动网名分支
+上的残留短支路，finding 定位到真正悬空端点。
 
 严格内部 X 的无接点豁免按物理线岛取证：宿主 wire net 为空时，只有该岛上的逐 pin
 官方网表和明确 marker 唯一证明同一非空网络才可记 INFO；缺证据或冲突仍为 ERROR，
@@ -320,6 +323,24 @@ planner 不调用 modify/wire/connect/prim-delete/save，应用前仍需确认 z
 `--playbook <file>` 生成带 `requireFullExecution:true` 的 Apply 队列：源引脚核验 →
 wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → 复验 → save；
 任何接线或图检失败都不会进入删除步骤。
+`cross-kind-label-economy` 统一检查同一线岛上的导线标签与 netflag/netport/netlabel 混合重复；
+拟保留表示自身不可见或名称为空时只报 WARN、不生成 `suggestDeleteIds`，先恢复可见名称再复核；
+`label-distance` 报可见标签离所属导线/符号超过 50 单位；`signal-netflag-type` 为 WARN，
+`signal-netport-type` 为 INFO（模块边界例外）；可见文字落入图签 keep-out 和压 body 外 lead
+也分别进入 `titleblock-overlap` / `visible-text-overlap`。GND 局部簇按 150 单位 INFO，
+`power-cluster-plan` 默认不规划 GND，需显式 `--include-gnd`。多器件页没有 zone/虚拟组
+认领时另报 `zones-not-claimed` INFO；功能框不等于器件归属已证明，不能把该页的
+`layout-score` proximity 结果当模块关系通过。
+`alignment-opportunity` INFO 先把端点/T 接的多个 wire primitive 组成物理骨架，再检查
+同网主干的 `H-V-H`/`V-H-V` 偏轴折返：按两侧器件数、最大引脚数和拓扑中心性固定锚点侧，
+给出另一侧外围簇的整体平移方向、位移、
+`moveDesignators`、`bendReduction`、`moveWireIds`、`moveMarkerIds`、`moveLabelIds`、
+`sharedWireIds`、`blockers` 和 `independentBlockers`。外围组沿非 GND/非电源轨/非主干局部网扩展，最多 16 件，
+遇到标准角色 `U`/`Q`/`IC` 且至少 4 脚的另一主动器件停止；专属线树可随动，
+触及固定器件的共享线必须重连，
+运动包络内的实体器件作为前置阻塞项。单器件仅在非 GND 本地电源簇带可见电源标识时参与。
+与移动组不共享局部网的阻塞件进入 `independentBlockers`，可作为独立前置组处理。
+该 finding 不自动改图，也不能把“线更短”单独当移动理由。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 

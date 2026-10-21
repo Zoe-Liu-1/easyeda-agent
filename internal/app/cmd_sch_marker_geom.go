@@ -609,6 +609,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	}
 	titleBlock, tbSource := titleBlockKeepoutWithSource(sheetBBoxOf(comps))
 	geo := analyzeMarkerGeometry(comps, titleBlock, tbSource, overlapEps)
+	geo = append(geo, signalMarkerTypeFindings(comps)...)
 	pgProblems, pgExempted := powerGroundOrientationFindings(comps, exempt)
 	geo = append(geo, pgProblems...)
 	geo = append(geo, pgExempted...)
@@ -671,16 +672,26 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.VisibleTextOverlaps++
 		case "label-economy":
 			rep.Summary.LabelEconomy++
+		case "cross-kind-label-economy":
+			rep.Summary.CrossKindLabelEconomy++
 		case "label-visibility":
 			rep.Summary.LabelVisibility++
 		case "label-orientation":
 			rep.Summary.LabelOrientations++
+		case "label-distance":
+			rep.Summary.LabelDistance++
 		case "direct-connect-opportunity":
 			rep.Summary.DirectConnectOpportunities++
+		case "alignment-opportunity":
+			rep.Summary.AlignmentOpportunities++
 		case "power-cluster-candidate":
 			rep.Summary.PowerClusterCandidates++
 		case "power-cluster-exempt":
 			rep.Summary.PowerClusterExempted++
+		case "signal-netflag-type", "signal-netport-type":
+			rep.Summary.SignalMarkerTypes++
+		case "zones-not-claimed":
+			rep.Summary.ZonesNotClaimed++
 		case "missing-partition", "missing-titleblock":
 			// 交付件(区框/图签)共用一个聚合计数槽 —— 汇总行必须写成
 			// missing-deliverable 而不是 missing-partition:2026-08-17 真机上一条
@@ -830,7 +841,21 @@ func partitionFinding(cfg *appConfig, window string, comps []layoutComp, stderr 
 		return nil
 	}
 	ev := schPartitionPageEvidence(cfg, window, parseZoneMoveTexts(res.Result))
-	return partitionFindingForZones(parts, ev.Frames(), ev.Labels(), schTextCount(res.Result), ev.Zones)
+	out := partitionFindingForZones(parts, ev.Frames(), ev.Labels(), schTextCount(res.Result), ev.Zones)
+	if f := zonesNotClaimedFinding(parts, ev.ClaimsKnown, ev.Zones); f != nil {
+		out = append(out, f)
+	}
+	return out
+}
+
+func zonesNotClaimedFinding(parts int, claimsKnown bool, zones int) *checkFinding {
+	if !claimsKnown || zones != 0 || parts < schPartitionMinParts {
+		return nil
+	}
+	return &checkFinding{
+		Type: "zones-not-claimed", Level: "info", Count: parts,
+		Message: fmt.Sprintf("%d 个器件的页没有 zone/虚拟组认领 — 功能分区框存在也不等于归组已证明；layout-score proximity 会按全页最大件兜底。先 `sch zones set` 或 `sch group create` 再复核", parts),
+	}
 }
 
 // titleBlockFinding 判图签有没有填。**这是交付件不是装饰**:图纸标题、设计者、板名

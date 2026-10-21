@@ -150,6 +150,272 @@ func netLabelEconomyFindings(items []visibleTextItem, wires []schGroupWire) []ch
 	return out
 }
 
+// labelDistanceFindings catches a label whose text has drifted far from its
+// wire (wire Name) or its symbol body (netflag/netport Name). The platform
+// legitimately offsets text by a few units; 50 canvas units is already a
+// detached-looking annotation, not normal label padding.
+func labelDistanceFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire, maxDist float64) []checkFinding {
+	if maxDist <= 0 {
+		maxDist = 50
+	}
+	find, wireIndex := wireTreeFinder(wires)
+	compsByID := map[string]layoutComp{}
+	for _, c := range comps {
+		compsByID[c.ID] = c
+	}
+	var out []checkFinding
+	for _, it := range items {
+		if it.Kind != "attribute" || it.Key != "Name" || it.BBox == nil ||
+			strings.TrimSpace(it.Value) == "" || (it.Visible != nil && !*it.Visible) {
+			continue
+		}
+		cx := (it.BBox.MinX + it.BBox.MaxX) / 2
+		cy := (it.BBox.MinY + it.BBox.MaxY) / 2
+		distance := -1.0
+		var nearest *checkPoint
+		if it.ComponentType == "wire" && it.ParentID != "" {
+			idx, ok := wireIndex[it.ParentID]
+			if !ok {
+				continue
+			}
+			root := find(idx)
+			best := math.Inf(1)
+			for _, w := range wires {
+				wi, ok := wireIndex[w.ID]
+				if !ok || find(wi) != root {
+					continue
+				}
+				for _, s := range labelWireSegments(w) {
+					x, y, d := closestPointOnSegment(cx, cy, s[0], s[1], s[2], s[3])
+					if d < best {
+						best = d
+						nearest = &checkPoint{X: round2(x), Y: round2(y)}
+					}
+				}
+			}
+			if math.IsInf(best, 1) {
+				continue
+			}
+			distance = best
+		} else if isSchMarker(it.ComponentType) && it.ParentID != "" {
+			c, ok := compsByID[it.ParentID]
+			if !ok || c.BBox == nil {
+				continue
+			}
+			dx := math.Max(0, math.Max(c.BBox.MinX-it.BBox.MaxX, it.BBox.MinX-c.BBox.MaxX))
+			dy := math.Max(0, math.Max(c.BBox.MinY-it.BBox.MaxY, it.BBox.MinY-c.BBox.MaxY))
+			distance = math.Hypot(dx, dy)
+			nearest = &checkPoint{X: round2(c.X), Y: round2(c.Y)}
+		} else {
+			continue
+		}
+		if distance <= maxDist {
+			continue
+		}
+		out = append(out, checkFinding{
+			Type: "label-distance", Level: "warn", PrimitiveId: it.ID,
+			Designator: it.Designator, BBox: it.BBox, At: nearest,
+			Message: fmt.Sprintf("网络标签「%s」离所属%s约 %.0f 个画布单位（阈值 %.0f）— 移回线/符号旁，避免看起来像悬空标签",
+				it.Value, map[bool]string{true: "导线", false: "电源/地符号"}[it.ComponentType == "wire"], distance, maxDist),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PrimitiveId < out[j].PrimitiveId })
+	return out
+}
+
+// crossKindLabelEconomyFindings covers the one combination the existing rules
+// deliberately split: a wire Name label and a netflag/netport/netlabel for the
+// same net on the SAME physical wire island. label-economy only sees wire
+// labels; redundant-net-marker only sees same-kind markers.
+func crossKindLabelEconomyFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire) []checkFinding {
+	if len(wires) == 0 {
+		return nil
+	}
+	find, wireIndex := wireTreeFinder(wires)
+	visibleName := map[string]bool{}
+	for _, it := range items {
+		if it.Key == "Name" && strings.TrimSpace(it.Value) != "" &&
+			(it.Visible == nil || *it.Visible) && it.ParentID != "" {
+			visibleName[it.ParentID] = true
+		}
+	}
+	rootAtPoint := func(x, y float64) (int, bool) {
+		for _, w := range wires {
+			if !wireTouchesPoint(w, x, y) {
+				continue
+			}
+			if idx, ok := wireIndex[w.ID]; ok {
+				return find(idx), true
+			}
+		}
+		return 0, false
+	}
+	type group struct {
+		root    int
+		net     string
+		labels  []visibleTextItem
+		markers []layoutComp
+	}
+	groups := map[string]*group{}
+	for _, it := range items {
+		if it.ComponentType != "wire" || it.Key != "Name" || it.ParentID == "" || strings.TrimSpace(it.Value) == "" {
+			continue
+		}
+		idx, ok := wireIndex[it.ParentID]
+		if !ok {
+			continue
+		}
+		root := find(idx)
+		key := fmt.Sprintf("%d|%s", root, it.Value)
+		g := groups[key]
+		if g == nil {
+			g = &group{root: root, net: it.Value}
+			groups[key] = g
+		}
+		g.labels = append(g.labels, it)
+	}
+	for _, c := range comps {
+		if !isSchMarker(c.ComponentType) || !c.AnchorAvailable || c.Net == "" {
+			continue
+		}
+		root, ok := rootAtPoint(c.X, c.Y)
+		if !ok {
+			continue
+		}
+		key := fmt.Sprintf("%d|%s", root, c.Net)
+		g := groups[key]
+		if g == nil {
+			g = &group{root: root, net: c.Net}
+			groups[key] = g
+		}
+		g.markers = append(g.markers, c)
+	}
+	var out []checkFinding
+	for _, g := range groups {
+		if len(g.labels) == 0 || len(g.markers) == 0 {
+			continue
+		}
+		sort.Slice(g.markers, func(i, j int) bool { return g.markers[i].ID < g.markers[j].ID })
+		sort.Slice(g.labels, func(i, j int) bool { return g.labels[i].ID < g.labels[j].ID })
+		ids := []string{}
+		var keep string
+		var deleteIDs []string
+		if isRailLabelNet(g.net) {
+			visibleMarkers := []layoutComp{}
+			for _, m := range g.markers {
+				if visibleName[m.ID] {
+					visibleMarkers = append(visibleMarkers, m)
+				}
+			}
+			for _, m := range g.markers {
+				ids = append(ids, m.ID)
+			}
+			for _, l := range g.labels {
+				ids = append(ids, l.ID)
+			}
+			if len(visibleMarkers) == 0 {
+				out = append(out, checkFinding{
+					Type: "cross-kind-label-economy", Level: "warn",
+					MarkerNet: g.net, PrimitiveIds: ids, Count: len(ids),
+					Message: fmt.Sprintf("同一power/ground线岛上网络 '%s' 同时有导线标签和隐藏名称的标识符号 — 先显示标识名称，再决定删除哪一个；当前不给删除建议", g.net),
+				})
+				continue
+			}
+			keep = visibleMarkers[0].ID
+			for _, l := range g.labels {
+				deleteIDs = append(deleteIDs, l.ID)
+			}
+			for _, m := range g.markers {
+				if m.ID != keep {
+					deleteIDs = append(deleteIDs, m.ID)
+				}
+			}
+		} else {
+			visibleLabels := []visibleTextItem{}
+			for _, l := range g.labels {
+				if l.Visible == nil || *l.Visible {
+					visibleLabels = append(visibleLabels, l)
+				}
+			}
+			for _, l := range g.labels {
+				ids = append(ids, l.ID)
+			}
+			for _, m := range g.markers {
+				ids = append(ids, m.ID)
+			}
+			if len(visibleLabels) == 0 {
+				out = append(out, checkFinding{
+					Type: "cross-kind-label-economy", Level: "warn",
+					MarkerNet: g.net, PrimitiveIds: ids, Count: len(ids),
+					Message: fmt.Sprintf("同一signal线岛上网络 '%s' 同时有隐藏导线标签和标识符号 — 先显示导线标签，再删除标识；当前不给删除建议", g.net),
+				})
+				continue
+			}
+			keep = visibleLabels[0].ID
+			for _, m := range g.markers {
+				deleteIDs = append(deleteIDs, m.ID)
+			}
+		}
+		if len(deleteIDs) == 0 {
+			continue
+		}
+		at := &checkPoint{X: round2(g.markers[0].X), Y: round2(g.markers[0].Y)}
+		if len(g.labels) > 0 && g.labels[0].BBox != nil {
+			at = &checkPoint{X: round2(g.labels[0].BBox.MinX), Y: round2(g.labels[0].BBox.MinY)}
+		}
+		kind := "signal"
+		if isRailLabelNet(g.net) {
+			kind = "power/ground"
+		}
+		out = append(out, checkFinding{
+			Type: "cross-kind-label-economy", Level: "warn",
+			MarkerNet: g.net, PrimitiveIds: ids,
+			SuggestKeepId: keep, SuggestDeleteIds: deleteIDs, Count: len(ids), At: at,
+			Message: fmt.Sprintf("同一%s线岛上网络 '%s' 同时有导线标签和标识符号 — 只保留一个；建议保留 %s，删除 %s",
+				kind, g.net, keep, strings.Join(deleteIDs, ",")),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MarkerNet != out[j].MarkerNet {
+			return out[i].MarkerNet < out[j].MarkerNet
+		}
+		return out[i].SuggestKeepId < out[j].SuggestKeepId
+	})
+	return out
+}
+
+// signalMarkerTypeFindings enforces the marker-type convention: signal nets
+// should be named by net labels; a netflag on a signal net is a hard type
+// mismatch. Netports are split out as INFO because an explicit module-boundary
+// port can be intentional.
+func signalMarkerTypeFindings(comps []layoutComp) []checkFinding {
+	var out []checkFinding
+	for _, c := range comps {
+		if c.ComponentType != "netflag" && c.ComponentType != "netport" {
+			continue
+		}
+		if c.Net == "" || isRailLabelNet(c.Net) {
+			continue
+		}
+		level := "warn"
+		typ := "signal-netflag-type"
+		what := "电源旗标"
+		if c.ComponentType == "netport" {
+			level = "info"
+			typ = "signal-netport-type"
+			what = "端口符号"
+		}
+		out = append(out, checkFinding{
+			Type: typ, Level: level, PrimitiveId: c.ID, Designator: c.Designator,
+			ComponentType: c.ComponentType, MarkerNet: c.Net,
+			At: &checkPoint{X: round2(c.X), Y: round2(c.Y)}, BBox: c.BBox,
+			Message: fmt.Sprintf("信号网 '%s' 使用了%s — 信号命名优先使用网络标签；模块边界端口需显式说明例外", c.Net, what),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PrimitiveId < out[j].PrimitiveId })
+	return out
+}
+
 func wireTreeFinder(wires []schGroupWire) (func(int) int, map[string]int) {
 	parent := make([]int, len(wires))
 	for i := range parent {

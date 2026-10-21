@@ -92,6 +92,20 @@ type checkFinding struct {
 	Other            *checkOverlapSide `json:"other,omitempty"`            // marker-overlap: the B side
 	OverlapX         float64           `json:"overlapX,omitempty"`         // overlap extent (marker/titleblock)
 	OverlapY         float64           `json:"overlapY,omitempty"`
+	// Layout-straightening advisory: a same-net H-V-H/V-H-V jog can be removed
+	// by translating one complete functional group. This is never a hard finding.
+	AlignmentAxis   string   `json:"alignmentAxis,omitempty"` // x | y
+	ShiftX          float64  `json:"shiftX,omitempty"`
+	ShiftY          float64  `json:"shiftY,omitempty"`
+	BendReduction   int      `json:"bendReduction,omitempty"`
+	MoveDesignators []string `json:"moveDesignators,omitempty"`
+	MoveWireIds     []string `json:"moveWireIds,omitempty"`
+	MoveMarkerIds   []string `json:"moveMarkerIds,omitempty"`
+	MoveLabelIds    []string `json:"moveLabelIds,omitempty"`
+	SharedWireIds   []string `json:"sharedWireIds,omitempty"`
+	Blockers        []string `json:"blockers,omitempty"`
+	// Blockers sharing no movable local net can be handled as separate prerequisite groups.
+	IndependentBlockers []string `json:"independentBlockers,omitempty"`
 }
 
 type checkSummary struct {
@@ -120,11 +134,16 @@ type checkSummary struct {
 	LabelVisibility            int `json:"labelVisibility"`
 	LabelEconomy               int `json:"labelEconomy"`
 	LabelOrientations          int `json:"labelOrientations"`
+	LabelDistance              int `json:"labelDistance"`
+	CrossKindLabelEconomy      int `json:"crossKindLabelEconomy"`
 	DirectConnectOpportunities int `json:"directConnectOpportunities"`
+	AlignmentOpportunities     int `json:"alignmentOpportunities"`
 	// Local power-cluster rule: consumer pin + nearby passive(s) on separate
 	// wire roots, each carrying its own same-name power symbol.
 	PowerClusterCandidates int `json:"powerClusterCandidates"`
 	PowerClusterExempted   int `json:"powerClusterExempted"`
+	SignalMarkerTypes      int `json:"signalMarkerTypes"`
+	ZonesNotClaimed        int `json:"zonesNotClaimed"`
 	// Layout-organization rule (铁律 #15): a multi-module page with zero functional
 	// zone frames. Mechanical backstop so "分区分区" is enforced by
 	// the check, not by remembering the rule (which is unreliable — it was skipped
@@ -328,8 +347,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d label-orientation(s), %d direct-connect-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.LabelOrientations, s.DirectConnectOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -405,14 +424,29 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	if s.LabelEconomy > 0 {
 		fmt.Fprintln(w, "→ label-economy: one label per line island; delete duplicate same-net labels (suggestDeleteIds)")
 	}
+	if s.CrossKindLabelEconomy > 0 {
+		fmt.Fprintln(w, "→ cross-kind-label-economy: same net has both a wire label and a netflag/netport/netlabel on one physical island — keep one representation, then delete the suggested duplicates")
+	}
+	if s.SignalMarkerTypes > 0 {
+		fmt.Fprintln(w, "→ signal-marker-type: 信号网优先用网络标签；netflag 是硬类型不匹配，netport 仅作为模块边界例外的 INFO")
+	}
+	if s.ZonesNotClaimed > 0 {
+		fmt.Fprintln(w, "→ zones-not-claimed: 页上还没有 zone/虚拟组认领 — 先 `sch zones set` 或 `sch group create`，否则 layout-score proximity 只是全页最大件兜底")
+	}
 	if s.LabelVisibility > 0 {
 		fmt.Fprintln(w, "→ label-visibility: every netflag/netport/netlabel and wire label must have a visible, non-empty Name")
 	}
 	if s.LabelOrientations > 0 {
 		fmt.Fprintln(w, "→ label-orientation: net-label text must be horizontal; rotate the label or fix its parent wire")
 	}
+	if s.LabelDistance > 0 {
+		fmt.Fprintln(w, "→ label-distance: a label text drifted too far from its parent wire/symbol — move it back beside the attach point")
+	}
 	if s.DirectConnectOpportunities > 0 {
 		fmt.Fprintln(w, "→ direct-connect-opportunity: labels on different islands have a clear short L route; prefer a real wire and remove the labels")
+	}
+	if s.AlignmentOpportunities > 0 {
+		fmt.Fprintln(w, "→ alignment-opportunity: a same-net main run has a removable H-V-H/V-H-V offset — verify the complete functional group, then align the trunk; length alone is not a reason to move")
 	}
 	if s.PowerClusterCandidates > 0 {
 		fmt.Fprintln(w, "→ power-cluster-candidate: 消费电源脚与本地被动件分属多个线岛、各有同名电源符号 — 先物理接入消费脚，再合并为一个符号；不要直接删符号")

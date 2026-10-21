@@ -67,6 +67,26 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 母线或相邻脚；允许中间脚保留 1 个同名标签，外侧两脚仍直连。不要把这个例外扩大为
 “所有密集脚都用标签”。
 
+**先消除非必要偏轴折返，再比较线长。** 先把端点重合或端点落到另一线段上的多个
+wire primitive 组成同一物理骨架，再对同网主干检查
+`H-V-H` 和 `V-H-V`：若两个折点没有引脚/网络标识，且一侧是固定核心、另一侧是独立外围簇，
+优先把外围簇整体平移到同一直线。水平主路径通常通过 Y 向平移对齐，垂直主路径通过 X 向
+平移对齐。候选先从种子外围沿非 GND、非电源轨、非主干的局部网络扩展到完整功能组，
+再列出 `moveDesignators`、`moveWireIds`、`moveMarkerIds`、`moveLabelIds`、
+`sharedWireIds` 和运动包络中的 `blockers`。成员的上限为 16；扩展遇到另一颗多脚主动
+器件（标准角色 `U`/`Q`/`IC` 且至少 4 脚）时停止，不靠具体实例位号、器件型号或网络名
+决定核心。不能只为了缩短长度移动，也不能拆开反馈、
+电源/GND 或连接器功能组。与移动组不共享局部网的阻塞件列入
+`independentBlockers`，可作为独立前置组处理；共享边界线必须重新布线，只有移动和
+边界重连后重新检查通过才可执行。
+
+**多段线树按自由端逐个复核。** 宿主会把同一网络的多段导线合并成一个 segment-array
+`Line`，不能因为树上任意一端已接引脚或标识，就把整根线判为已用尽。先按线段端点求度数，
+对每个 degree-1 自由端分别检查是否命中引脚、netflag/netport/netlabel/short_symbol、
+其他导线端点或另一线段内部。树端数大于 2 且存在无落点自由端、网名为空或自动生成时，
+`sch check` 报 `dangling-wire`；finding 的 `at` 必须指向真正悬空的端点，`count` 为该线树
+上的无落点自由端数量。只保留明确短支路，删除残留分支或把它接到明确目标。
+
 **重画/复制已有布局时，不要回放宿主合并后的 `Line` 数组。** EasyEDA 会把多段线合并并
 重排顶点，直接回放可能产生斜线/回折；应从干净的正交模板生成，逐段 `sch wire`，完成后跑
 `sch bridge-check` + `sch read` 逐脚对账。
@@ -109,7 +129,8 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 判定顺序必须是：先按功能区和引脚网归簇，再看线树 root，最后才用距离。同一 root 上多个
 同名符号是重复候选；消费脚和本地被动件分属不同 root 且相距很近，是“应物理互联”的
 候选；跨功能区或 10 器件以上通道不做自动合并。`sch check` 已实现
-`power-cluster-candidate`（当前按 250 单位就近归簇，非 GND；GND 只作人工建议），
+`power-cluster-candidate`（非 GND 按 250 单位 WARN；GND 按 150 单位 INFO，
+仍不自动落图；`power-cluster-plan` 默认不规划 GND，需显式 `--include-gnd`），
 `sch power-cluster-plan` 提供只读接线计划：`ready` 输出每个被动件到消费脚的短线、
 保留/删除符号和“先接后验证再删”的顺序；`partial` 只接已经 clear 的被动件并删除其
 对应符号，被挡的 passive 保留符号；`blocked` 不生成删除步骤，只列阻挡对象。路径仍须

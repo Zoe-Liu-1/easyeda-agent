@@ -19,7 +19,7 @@
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
 | 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读。按风险从小到大给候选：①移 part Designator/Value 文字；②netflag/netport + 单段短桩带桩线做正交 L 迁移；③单器件连同相连线树/标识/标签刚体平移；④2–4 器件共享树功能块整体平移。共享/分支线树、疑似半移动、引脚直连、netlabel、多段桩、超大功能块一律跳过并给出原因，不落图 |
-| 电源局部簇规划 | `sch power-cluster-plan --doc <page> [--json\|--out] [--playbook <file>] [--exempt '<NET>\|<DESIGNATOR>']`；只读。输出消费脚、每个被动件的短线路径、保留/删除符号和“先接后删验证”顺序；ready 全可接，partial 只接 clear 的被动件并删其符号，blocked 不给删除建议并列出阻挡对象。`--playbook` 生成受保护 `sch apply` 队列：先接线/图检/bridge-check，再删被动侧符号，最后保存 |
+| 电源局部簇规划 | `sch power-cluster-plan --doc <page> [--json\|--out] [--playbook <file>] [--exempt '<NET>\|<DESIGNATOR>'] [--include-gnd]`；只读。输出消费脚、每个被动件的短线路径、保留/删除符号和“先接后删验证”顺序；ready 全可接，partial 只接 clear 的被动件并删其符号，blocked 不给删除建议并列出阻挡对象。GND 默认不规划；`--include-gnd` 才纳入。`--playbook` 生成受保护 `sch apply` 队列：先接线/图检/bridge-check，再删被动侧符号，最后保存 |
 | 执行计划 | `sch apply <playbook.json>` |
 
 生成器的输入、支持范围与位号/身份规则集中在 [schematic-data.md](schematic-data.md)。
@@ -122,20 +122,27 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 产物路径从 `artifacts[].path` 获取。`sch read/list` 本身直接输出 JSON；
 `sch check --json` 使用 `{ok,result}` 信封，问题在 `result.findings`。
 
-### 直连/标签类 finding 的判读边界
+### 导线/标签类 finding 的判读边界
 
 | finding | 判读 |
 |---|---|
 | `diagonal-wire` / `non-orthogonal-wire` | 斜线或非正交段。写入前几何守卫应拒绝；`sch check` 汇总层也应作为独立 finding 暴露，不能只在写回执里出现。 |
 | `wire-crossing` | `ERROR` 表示交叉点有引脚/标记或网络证据不完整；`INFO` 表示无接点交叉，电气安全但仍是可读性问题，不能直接当 Pass。只有记录坐标和原因的 deliberate exception 才能 `Waived`。 |
+| `dangling-wire` | 按 wire primitive 的 degree-1 自由端逐个核验；同一树上的其他引脚/标识不能掩盖空白/自动网名分支上的无落点自由端。`at` 指向真正悬空端，`count` 为该树自由端数量；真实网名标签端点保留为有意连接。删除残留短支路或接到明确目标。 |
 | `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏名称必须补显示；没有 Name 属性直接报错。 |
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |
 | `label-economy` | 同一线岛重复同名标签。覆盖信号标签和电源/地导线 Name；netflag/netport 的同岛重复由 `redundant-net-marker` 负责。电源/轨名仍不参与“信号直连机会”的数量统计。 |
+| `cross-kind-label-economy` | 同一线岛同名网络同时出现导线标签和 netflag/netport/netlabel。电源/地优先保留符号，信号优先保留导线标签；给出 keep/delete IDs，避免跨两套规则漏掉混合重复。拟保留表示自身不可见或名称为空时仍报 WARN，但不给删除建议；先恢复其可见名称再复核。 |
+| `label-distance` | 可见网络标签文字离所属导线/电源地符号超过 50 画布单位；隐藏或空名称不参与此规则（由 `label-visibility` 单独报）。 |
 | `direct-connect-opportunity` | 存在不交叉的正交短路径却用标签。当前实现只对**短 L 路径**给 INFO（器件/文字/导线/引脚阻挡即不报），多折点路径暂不提示；这是保守机会提示，不是硬门禁。 |
-| `power-cluster-candidate` | 消费电源脚与就近本地被动件（R/C/L/D）分属多个线岛、且每个线岛各有同名电源符号。先物理接入消费脚，再合并成一个符号；当前按 250 单位就近归簇，需用 zones/功能块确认。GND、跨功能区、10 器件以上通道不自动合并。有意保留的独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 登记为 INFO 例外。 |
+| `alignment-opportunity` | 端点/T 接的多个 wire primitive 先组成物理骨架，检测可整体平移消除的 `H-V-H`/`V-H-V` 偏轴折返。输出 `alignmentAxis`、`shiftX/shiftY`、`bendReduction`、`moveDesignators`、`moveWireIds`、`moveMarkerIds`、`moveLabelIds`、`sharedWireIds`、`blockers` 和 `independentBlockers`。锚点与移动侧按器件数、最大引脚数和局部拓扑确定，不绑定具体位号/型号/网络名；外围沿局部非电源网扩展，最多 16 件，遇到标准角色 `U`/`Q`/`IC` 且至少 4 脚的另一主动器件停止。共享边界线必须重连；独立阻塞组可列为前置移动依赖。INFO，折点为引脚/标识、网络不一致、移动出图或压器件时不当作可直接执行计划。 |
+| `power-cluster-candidate` | 消费电源脚与就近本地被动件（R/C/L/D）分属多个线岛、且每个线岛各有同名电源符号。先物理接入消费脚，再合并成一个符号；非 GND 按 250 单位 WARN，GND 按 150 单位 INFO（仍不自动落图）。跨功能区、10 器件以上通道不自动合并。独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 登记为 INFO 例外。 |
+| `signal-netflag-type` / `signal-netport-type` | 非电源/地网络使用 netflag（WARN）或 netport（INFO）。信号网优先用网络标签；netport 仅作为显式模块边界例外。 |
 | `designator-wire-overlap` | 导线进入可见文字 bbox。应扩展到 Value、网络名和自由文字；网络标签只排除自身挂载线，Designator/Value/自由文字的全部导线都参与碰撞。 |
-| `visible-text-overlap` | 可见文字压器件/标识/其他文字，或压在导线上；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
+| `visible-text-overlap` | 可见文字压器件/标识/其他文字/导线/引脚（含 body 外 lead）；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
+| `titleblock-overlap` | 器件、标记、导线或可见文字落入图签 keep-out；sheet 自身的图签字段豁免。 |
 | `out-of-sheet` | 包含可见属性文字；只包器件 body 不算入框或出图通过。 |
+| `zones-not-claimed` | 多器件页面未登记任何 zone 或虚拟组。INFO；功能框存在不代表已证明器件归属，`layout-score` 的 proximity 只是全页兜底。 |
 
 这些 finding 都不能用“电气已经连通”代替；`bridge-check` 只证明线树无桥接/孤儿，
 不证明标签经济性或文字避让。

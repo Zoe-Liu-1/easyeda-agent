@@ -101,6 +101,9 @@ type schPartitionEvidence struct {
 	// Zones 是本页登记的功能模块数(虚拟组优先,没有组才是认领表)。
 	// 它只决定**报文怎么写**,不决定报不报 —— 有组不等于画了框。
 	Zones int
+	// ClaimsKnown distinguishes a successful read with zero zones from a failed
+	// group-state read. Only the former permits the advisory zones-not-claimed.
+	ClaimsKnown bool
 }
 
 // Frames 是「这页有几个分区框」的最终口径:两个证人取大。
@@ -136,7 +139,11 @@ func schPartitionPageEvidence(cfg *appConfig, window string, texts []zoneMoveTex
 	for n := range zones {
 		names = append(names, n)
 	}
-	ev := schPartitionEvidence{Zones: len(zones), DrawnTitles: countDrawnZoneTitles(texts, names)}
+	ev := schPartitionEvidence{
+		Zones:       len(zones),
+		DrawnTitles: countDrawnZoneTitles(texts, names),
+		ClaimsKnown: true,
+	}
 	// recordedZoneFrames 是 zone-draw 自己查记账的那个函数 —— 记账这一侧也共用一把尺
 	// (旧的 schZoneFrameCounts 自己手写了一遍 page/legacy 两分支,legacy 的空记录
 	// 判定与 zone-draw 不同)。

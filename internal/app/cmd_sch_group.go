@@ -385,6 +385,7 @@ const schGroupPerpTol = 1.0
 // but drops the primitiveId, and group-move must name the wire to move it).
 type schGroupWire struct {
 	ID               string
+	Net              string       // native wire net; may be empty even when connected pins carry the compiled net
 	Points           []float64    // legacy continuous vertices x0,y0,x1,y1,…
 	ObservedSegments [][4]float64 // official flat-segments: each record is independent
 }
@@ -759,10 +760,11 @@ func fetchSchWirePolylines(cfg *appConfig, window, docUUID string) ([]schGroupWi
 const wires = await eda.sch_PrimitiveWire.getAll() ?? [];
 const out = [];
 for (const w of wires) {
-	let id = '', line = null;
+	let id = '', line = null, net = '';
 	try { id = String(w.getState_PrimitiveId?.() ?? ''); } catch {}
 	try { const l = w.getState_Line?.(); if (Array.isArray(l)) line = l; } catch {}
-	if (id && Array.isArray(line) && line.length >= 4) out.push({ id, line });
+	try { net = String(w.getState_Net?.() ?? ''); } catch {}
+	if (id && Array.isArray(line) && line.length >= 4) out.push({ id, line, net });
 }
 return { wires: out };`
 	res, err := requestAutolayoutActionTimed(cfg, "debug.exec_js", window,
@@ -797,7 +799,7 @@ return { wires: out };`
 			pts = append(pts, f)
 		}
 		if valid {
-			wire := schGroupWire{ID: id, Points: pts}
+			wire := schGroupWire{ID: id, Net: asString(m["net"]), Points: pts}
 			// The current official API encodes observed geometry as independent
 			// [x0,y0,x1,y1] records. Keep that provenance instead of later
 			// inventing a connector from one record's end to the next record's
