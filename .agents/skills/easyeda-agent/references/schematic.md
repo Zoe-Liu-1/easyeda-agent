@@ -345,7 +345,8 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 资源清单；`boundaryPlans[]` 给出共享线的正交重连草案和 `sharedLabelIds[]`，
 `independentBlockerPlans[]` 给出可前置移动的完整阻塞组及位移。边界草案须避开移动后
 器件本体、异网引脚/导线、可见文字、图签区和图纸边界；主组和独立阻塞组都复用整组碰撞
-检查，阻塞组自身带共享线时保持 blocked。`ready` 仅在无 blockers、无 sharedWireIds 时成立；有共享边界
+检查，阻塞组自身带共享线时保持 blocked。阻塞落点按 5 单位栅格二维搜索，只有局部预算内
+才为 ready，超预算为 review-required。主计划 `ready` 仅在无 blockers、无 sharedWireIds 时成立；有共享边界
 即使已有 proposed 草案仍为 `rewire-required`，`rewire-required` 和 `blocked` 都不得直接
 执行。planner 不调用 group.move/delete/wire/save。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`

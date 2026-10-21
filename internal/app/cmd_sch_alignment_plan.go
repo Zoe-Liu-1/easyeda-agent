@@ -82,7 +82,7 @@ type alignmentPlannedWire struct {
 
 type alignmentBlockerPlan struct {
 	InitialDesignators []string    `json:"initialDesignators"`
-	Status             string      `json:"status"` // ready | blocked
+	Status             string      `json:"status"` // ready | review-required | blocked
 	MoveDesignators    []string    `json:"moveDesignators,omitempty"`
 	MoveComponentIds   []string    `json:"moveComponentIds,omitempty"`
 	MoveWireIds        []string    `json:"moveWireIds,omitempty"`
@@ -378,6 +378,9 @@ func alignmentBuildBlockerPlans(c alignmentCandidate, comps []layoutComp, items 
 				plan.Blockers = appendUniqueString(plan.Blockers, blocker)
 			}
 			sort.Strings(plan.Blockers)
+		} else if !alignmentBlockerMoveIsLocal(dx, dy) {
+			plan.Status = "review-required"
+			plan.Blockers = []string{"blocker-move-exceeds-local-radius"}
 		} else {
 			plan.Status = "ready"
 		}
@@ -387,6 +390,15 @@ func alignmentBuildBlockerPlans(c alignmentCandidate, comps []layoutComp, items 
 		return strings.Join(plans[i].InitialDesignators, ",") < strings.Join(plans[j].InitialDesignators, ",")
 	})
 	return plans
+}
+
+func alignmentBlockerMoveIsLocal(dx, dy float64) bool {
+	const (
+		maxAxis = 50.0
+		maxL1   = 60.0
+	)
+	return math.Max(math.Abs(dx), math.Abs(dy)) <= maxAxis &&
+		math.Abs(dx)+math.Abs(dy) <= maxL1
 }
 
 func alignmentPartsBBox(comps []layoutComp, designators []string) (layoutBBox, bool) {
@@ -454,18 +466,8 @@ func alignmentFindBlockerShift(bbox, mainMoved layoutBBox, blockerGroup, mainGro
 			movedText[it.ID] = true
 		}
 	}
-	const maxMove = 100.0
-	type delta struct{ dx, dy float64 }
-	var candidates []delta
-	for step := 5.0; step <= maxMove; step += 5 {
-		if mainAxis == "y" {
-			candidates = append(candidates, delta{-step, 0}, delta{step, 0}, delta{0, -step}, delta{0, step})
-		} else {
-			candidates = append(candidates, delta{0, -step}, delta{0, step}, delta{-step, 0}, delta{step, 0})
-		}
-	}
 	lastBlockers := []string{"no-clear-blocker-move"}
-	for _, d := range candidates {
+	for _, d := range alignmentBlockerMoveDeltas(mainAxis) {
 		moved := translateLayoutBBox(bbox, [2]float64{d.dx, d.dy})
 		if boxesOverlap2(moved, mainMoved) {
 			continue
@@ -511,6 +513,75 @@ func alignmentFindBlockerShift(bbox, mainMoved layoutBBox, blockerGroup, mainGro
 		lastBlockers = blockers
 	}
 	return 0, 0, lastBlockers
+}
+
+type alignmentDelta struct {
+	dx, dy float64
+}
+
+func alignmentBlockerMoveDeltas(mainAxis string) []alignmentDelta {
+	const (
+		step    = 5.0
+		maxMove = 200.0
+	)
+	var out []alignmentDelta
+	seen := map[alignmentDelta]bool{}
+	add := func(dx, dy float64) {
+		key := alignmentDelta{dx: dx, dy: dy}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	for radius := step; radius <= maxMove; radius += step {
+		// Prefer leaving the main wire corridor on its perpendicular axis, then
+		// try the movement axis. Remaining same-distance diagonal/ring positions
+		// follow before any larger displacement.
+		if mainAxis == "y" {
+			add(-radius, 0)
+			add(radius, 0)
+			add(0, -radius)
+			add(0, radius)
+		} else {
+			add(0, -radius)
+			add(0, radius)
+			add(-radius, 0)
+			add(radius, 0)
+		}
+		type ringItem struct {
+			delta alignmentDelta
+			l1    float64
+		}
+		var ring []ringItem
+		for dx := -radius; dx <= radius; dx += step {
+			for dy := -radius; dy <= radius; dy += step {
+				if math.Max(math.Abs(dx), math.Abs(dy)) != radius {
+					continue
+				}
+				if dx == 0 || dy == 0 {
+					continue
+				}
+				ring = append(ring, ringItem{
+					delta: alignmentDelta{dx: dx, dy: dy},
+					l1:    math.Abs(dx) + math.Abs(dy),
+				})
+			}
+		}
+		sort.Slice(ring, func(i, j int) bool {
+			if ring[i].l1 != ring[j].l1 {
+				return ring[i].l1 < ring[j].l1
+			}
+			if ring[i].delta.dx != ring[j].delta.dx {
+				return ring[i].delta.dx < ring[j].delta.dx
+			}
+			return ring[i].delta.dy < ring[j].delta.dy
+		})
+		for _, item := range ring {
+			add(item.delta.dx, item.delta.dy)
+		}
+	}
+	return out
 }
 
 type alignmentBoundaryPin struct {

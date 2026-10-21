@@ -78,9 +78,10 @@ wire primitive 组成同一物理骨架，再对同网主干检查
 决定核心。不能只为了缩短长度移动，也不能拆开反馈、
 电源/GND 或连接器功能组。与移动组不共享局部网的阻塞件列入
 `independentBlockers`。主组和独立阻塞组都复用整组移动的器件、引脚、文字和导线碰撞检查；
-任何一层碰撞都会阻止 ready。planner 为阻塞件扩展局部功能组，在 5 单位栅格上给出
-`independentBlockerPlans[]` 位移；该前置组自身若仍触及固定引脚，列入其
-`sharedWireIds` 并保持 `blocked`，不能把“只移器件”标成 ready。
+任何一层碰撞都会阻止 ready。planner 为阻塞件扩展局部功能组，在 5 单位栅格上由近到远
+搜索二维安全落点，并给出 `independentBlockerPlans[]` 位移；单轴不超过 50、L1 不超过
+60 的局部位置才可为 `ready`，超出预算为 `review-required`。该前置组自身若仍触及固定
+引脚，列入其 `sharedWireIds` 并保持 `blocked`，不能把“只移器件”标成 ready。
 共享边界线必须删除后按移动后的真实端点重新布线。`boundaryPlans[]` 对每个边界网给出
 `fixedPins`、`movedPins`、正交 `wires`、`deleteWireIds`、`labelIds` 和阻塞原因；主网从目标
 轴线生成总线/分支，次网枚举正交 L 路由。草案要避开移动后的器件本体、异网引脚和导线、

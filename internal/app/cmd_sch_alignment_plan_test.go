@@ -170,6 +170,42 @@ func TestBuildAlignmentPlanMovesIndependentBlockerFirst(t *testing.T) {
 	}
 }
 
+func TestAlignmentBlockerMoveRequiresReviewOutsideLocalBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		dx, dy float64
+		want   bool
+	}{
+		{name: "local cardinal", dx: 45, dy: 0, want: true},
+		{name: "local diagonal", dx: 15, dy: 35, want: true},
+		{name: "axis too large", dx: 55, dy: 0, want: false},
+		{name: "l1 too large", dx: 35, dy: 35, want: false},
+		{name: "remote", dx: 165, dy: 65, want: false},
+	} {
+		if got := alignmentBlockerMoveIsLocal(tc.dx, tc.dy); got != tc.want {
+			t.Fatalf("%s: got local=%v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestAlignmentPlanReviewRequiredBlockerStaysNonExecutable(t *testing.T) {
+	item := alignmentPlanItem{
+		Status: "blocked",
+		IndependentBlockerPlans: []alignmentBlockerPlan{{
+			InitialDesignators: []string{"C9"},
+			Status:             "review-required",
+			MoveDesignators:    []string{"C9"},
+			MoveComponentIds:   []string{"c9"},
+			DX:                 100,
+			DY:                 50,
+		}},
+	}
+	steps := alignmentPlanSteps(item, alignmentCandidate{Axis: "y", Shift: -30})
+	if len(steps) == 0 || steps[0].Kind != "move-independent-blockers" || steps[0].ExecutableNow {
+		t.Fatalf("review-required blocker must stay non-executable: %+v", steps)
+	}
+}
+
 func TestBuildAlignmentPlanBlocksBoundaryWireCrossing(t *testing.T) {
 	sheet := &layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 100}
 	comps := []layoutComp{
