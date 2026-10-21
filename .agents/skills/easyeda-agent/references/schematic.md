@@ -385,6 +385,9 @@ Name/Designator/Value 走 `attribute.move`，自由文字走 `text.move`。应�
 `sch wire-reroute-fix` 汇总导线穿脚、穿 lead、穿器件与跨芯片直连。只有隔离的单 wire/单段、
 两端均命中明确 pin 或 marker 且存在正交避障路径时才替换；多段树、共享树和跨芯片直连
 保持 blocked。替换前后逐 pin 网表与 bridge 集必须一致，失败恢复原线。
+`sch signal-marker-fix` 把非电源/地 netflag/netport 的安全单桩替换为原生文字 `net_label`，
+首段沿引脚外向；共享树、分支树和方向未知保持 blocked。模块边界端口必须显式登记豁免，
+不能静默换型。
 
 
 ## 修改属性时保留供应商身份
