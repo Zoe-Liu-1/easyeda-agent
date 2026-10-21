@@ -80,6 +80,16 @@ func alignmentFinalizeCandidate(c alignmentCandidate, items []visibleTextItem, c
 
 func alignmentOpportunityFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
 	sheet, titleBlock *layoutBBox) []checkFinding {
+	candidates := alignmentOpportunityCandidates(items, comps, wires, sheet, titleBlock)
+	findings := make([]checkFinding, 0, len(candidates))
+	for _, candidate := range candidates {
+		findings = append(findings, alignmentFinding(candidate))
+	}
+	return findings
+}
+
+func alignmentOpportunityCandidates(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox) []alignmentCandidate {
 	best := map[string]alignmentCandidate{}
 	segs := alignmentSegments(wires)
 	if len(segs) < 3 {
@@ -124,17 +134,17 @@ func alignmentOpportunityFindings(items []visibleTextItem, comps []layoutComp, w
 			}
 		}
 	}
-	findings := make([]checkFinding, 0, len(best))
+	out := make([]alignmentCandidate, 0, len(best))
 	for _, candidate := range best {
-		findings = append(findings, alignmentFinding(candidate))
+		out = append(out, candidate)
 	}
-	sort.Slice(findings, func(i, j int) bool {
-		if findings[i].MarkerNet != findings[j].MarkerNet {
-			return findings[i].MarkerNet < findings[j].MarkerNet
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Net != out[j].Net {
+			return out[i].Net < out[j].Net
 		}
-		return findings[i].Message < findings[j].Message
+		return strings.Join(out[i].MoveDesignators, ",") < strings.Join(out[j].MoveDesignators, ",")
 	})
-	return findings
+	return out
 }
 
 func alignmentFinding(c alignmentCandidate) checkFinding {

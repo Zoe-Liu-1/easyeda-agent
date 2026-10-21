@@ -78,7 +78,9 @@ wire primitive 组成同一物理骨架，再对同网主干检查
 决定核心。不能只为了缩短长度移动，也不能拆开反馈、
 电源/GND 或连接器功能组。与移动组不共享局部网的阻塞件列入
 `independentBlockers`，可作为独立前置组处理；共享边界线必须重新布线，只有移动和
-边界重连后重新检查通过才可执行。
+边界重连后重新检查通过才可执行。`sch alignment-plan --doc <page> [--net <net>]
+[--json|--out]` 输出只读步骤和资源：`ready` 仅在无 blocking/shared 边界时成立；
+`rewire-required` 和 `blocked` 均不得直接执行，planner 不调用 group.move/delete/wire/save。
 
 **多段线树按自由端逐个复核。** 宿主会把同一网络的多段导线合并成一个 segment-array
 `Line`，不能因为树上任意一端已接引脚或标识，就把整根线判为已用尽。先按线段端点求度数，

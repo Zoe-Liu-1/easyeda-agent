@@ -341,6 +341,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 运动包络内的实体器件作为前置阻塞项。单器件仅在非 GND 本地电源簇带可见电源标识时参与。
 与移动组不共享局部网的阻塞件进入 `independentBlockers`，可作为独立前置组处理。
 该 finding 不自动改图，也不能把“线更短”单独当移动理由。
+`sch alignment-plan --doc <page> [--net <net>] [--json|--out]` 将 finding 转成只读步骤和
+资源清单；`ready` 仅在无 blockers、无 sharedWireIds 时成立，`rewire-required` 和
+`blocked` 都不得直接执行。planner 不调用 group.move/delete/wire/save。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 

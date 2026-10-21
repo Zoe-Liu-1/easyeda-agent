@@ -19,6 +19,7 @@
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
 | 直连机会/移动建议 | `sch direct-connect-plan --doc <page> [--json\|--out]`；只读。按风险从小到大给候选：①移 part Designator/Value 文字；②netflag/netport + 单段短桩带桩线做正交 L 迁移；③单器件连同相连线树/标识/标签刚体平移；④2–4 器件共享树功能块整体平移。共享/分支线树、疑似半移动、引脚直连、netlabel、多段桩、超大功能块一律跳过并给出原因，不落图 |
+| 直线化组移动计划 | `sch alignment-plan --doc <page> [--net <net>] [--json\|--out]`；只读。由 `alignment-opportunity` 生成完整移动组、`moveComponentIds`、专属导线/marker/标签、共享边界线、阻塞组和步骤顺序。`ready` 要求无阻塞且无共享边界；有共享边界为 `rewire-required`，有阻塞为 `blocked`。当前不执行 group.move、不猜阻塞组目标位置，也不生成不可验证的边界重连 |
 | 电源局部簇规划 | `sch power-cluster-plan --doc <page> [--json\|--out] [--playbook <file>] [--exempt '<NET>\|<DESIGNATOR>'] [--include-gnd]`；只读。输出消费脚、每个被动件的短线路径、保留/删除符号和“先接后删验证”顺序；ready 全可接，partial 只接 clear 的被动件并删其符号，blocked 不给删除建议并列出阻挡对象。GND 默认不规划；`--include-gnd` 才纳入。`--playbook` 生成受保护 `sch apply` 队列：先接线/图检/bridge-check，再删被动侧符号，最后保存 |
 | 执行计划 | `sch apply <playbook.json>` |
 
