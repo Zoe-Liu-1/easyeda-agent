@@ -111,6 +111,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | 批量标签显隐/横排修复 | `sch label-fix --doc <page> [--id <attributeIds>] [--apply] [--save] [--allow-partial]`；把隐藏 Name 设为可见，把 90/270 文字旋转改为 0；空 Name 只有在父 wire/netflag/netport 已有明确网名时才补齐。缺失原生 Name 或无法确定网名保持 blocked。应用前后比较 pin→net、bridge 与可见文字 finding，新增遮挡则逆序回滚 |
 | 电源/GND 朝向修复 | `sch power-orientation-fix --doc <page> [--id <netflagIds>] [--apply] [--save] [--allow-partial]`；电源旗配置到 body-up、GND 配置到 body-down。只处理单桩 netflag，首段沿实测引脚外向，可用本地 2–4 段正交路径；反向脚保持 blocked，要求显式 `orientationExempt`。应用逐标记比较完整 pin→net、bridge 和目标 finding，失败逆序回滚 |
 | 可见文字避让 | `sch visual-text-fix --doc <page> [--id <textIds>] [--apply] [--save] [--allow-partial]`；对每条 `visible-text-overlap` 在 60 单位内搜索 5 单位槽位。属性走 protected `attribute.move`，自由文字走 `text.move`；候选避开器件/引脚/marker/其他文字/异网导线/图签/纸张边界。应用后比较全部 visible-text finding、pin→net 和 bridge，新增问题或残留目标 finding 时逆序回滚 |
+| 隔离导线的通用重走 | `sch wire-reroute-fix --doc <page> [--wire <ids>] [--apply] [--save] [--allow-partial]`；汇总 wire-over-pin、wire-over-pin-lead、wire-through-body 与 cross-chip-direct-wire。只自动执行“单 wire 原语、单物理线段、两端均为明确 pin/marker、存在不碰障碍的正交路径”的情况；多段/分支树和跨芯片直连保持 blocked |
 | `sch place`，`schematic.component.place` | 使用库 UUID；自动回填可确定的 C 号与空属性是 best-effort，须检查警告。没有 place 自定义属性输入契约；V4 复数 symbol/device/footprint association 在 canonical selector 完成前写前拒绝，不能取第一项 |
 | `sch modify`，`schematic.component.modify` | `otherProperty`/`customAttributes` 二选一，合并保留原属性。`verified:false` 需要再回读，不能当已验证 |
 | `sch prim-delete/clear` | 删除后按 ID 或完整图元清单验证；默认保护 sheet。未知枚举或幸存图元不能报告清空 |
@@ -140,6 +141,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `wire-crossing` | `ERROR` 表示交叉点有引脚/标记或网络证据不完整；`INFO` 表示无接点交叉，电气安全但仍是可读性问题，不能直接当 Pass。只有记录坐标和原因的 deliberate exception 才能 `Waived`。 |
 | `wire-over-pin-lead` | 导线与测得的引脚 lead 区间发生非端点接触：包括沿 lead 共线进入符号、横穿 lead。正常桩线只能从 pin 外向端点离开，不能压进 lead；ERROR。 |
 | `cross-chip-direct-wire` | 同一物理信号线树直接触及两个不同主动芯片（多脚 `U/Q/IC`）。芯片之间改用同名网络标签或显式模块端口；电源/地轨不套用此信号规则。WARN。 |
+| `wire-over-pin` / `wire-through-body` | 导线穿过非目标引脚或器件本体。`wire-reroute-fix` 对隔离单段线搜索障碍感知正交替代；共享/分支树不自动拆。 |
 | `dangling-wire` | 按 wire primitive 的 degree-1 自由端逐个核验；同一树上的其他引脚/标识不能掩盖空白/自动网名分支上的无落点自由端。`at` 指向真正悬空端，`count` 为该树自由端数量；真实网名标签端点保留为有意连接。删除残留短支路或接到明确目标。 |
 | `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏项和空名称可由 `sch label-fix` 修复；空名称必须有父级明确网名，没有 Name 属性保持 blocked。 |
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。90/270 可由 `sch label-fix` 改为 0；符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |

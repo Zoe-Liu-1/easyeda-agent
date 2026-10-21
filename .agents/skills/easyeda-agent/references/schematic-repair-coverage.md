@@ -46,8 +46,9 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `geom-net-mismatch` / `net-marker-mismatch` | 语义选择或重排 | 先确定触脚但网表未认领的原因，再重连或修名称；不能靠重导网表掩盖 |
 | `dangling-wire` / `zero-length-wire` | 语义选择 | 先确认是否为有意命名端点；删除局部残支前核对共享树 |
 | `multi-net-wire` / `wire-bridge` / `wire-crossing` / `non-orthogonal-wire` | 重排重布 | 先找短路/并网来源，拆树或按正交通道重走；不得只删交叉点 |
-| `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 重排重布 | 从引脚外向首段重走；删除局部段可能切断共享树 |
-| `cross-chip-direct-wire` / `pin-exit-direction` | 重排重布 | 芯片间改同名网络标签；首段先沿引脚外向再正交折线 |
+| `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 直接执行或重排重布 | `wire-reroute-fix` 只替换单段隔离线并搜索障碍感知正交通道；多段/共享树、端点不明或无路径保持 blocked |
+| `cross-chip-direct-wire` | 语义重排 | `wire-reroute-fix` 明确 blocked；芯片间应改为同名网络标签/模块端口，不能自动重画成另一根长直连 |
+| `pin-exit-direction` | 重排重布 | 首段先沿引脚外向再正交折线；现有修复器只在完整单段替换可行时执行 |
 | `signal-netflag-type` / `signal-netport-type` | 语义选择 | 信号改文字网络标签；模块边界端口需显式豁免，不能静默换型 |
 | `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。共享树、无单桩和反向脚保持 blocked，反向脚登记 `orientationExempt` |
 | `label-visibility` / `label-orientation` | 直接执行或显式阻断 | `sch label-fix` 设置可见和水平；空名称只有父 wire/marker 已携带明确网名时补齐。缺原生 Name 或网名未知不猜 |

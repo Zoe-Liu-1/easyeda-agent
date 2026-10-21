@@ -150,6 +150,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchLabelFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchPowerOrientationFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchVisualTextFixCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchWireRerouteFixCmd(cfg, &window, stdout, stderr))
 	// `sch apply` is the schematic-domain entry point for the shared, ordered
 	// playbook executor. The executor itself remains shared so queue semantics
 	// and WebSocket response handling stay identical across domains.

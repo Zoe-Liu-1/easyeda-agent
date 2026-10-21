@@ -382,6 +382,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `sch visual-text-fix` 对 `visible-text-overlap` 在 60 单位内按 5 单位搜索局部空槽；
 Name/Designator/Value 走 `attribute.move`，自由文字走 `text.move`。应用后重读全部可见文字，
 任何移动目标仍重叠或新增文字/导线碰撞都回滚，同时保持 pin→net 与 bridge 不变。
+`sch wire-reroute-fix` 汇总导线穿脚、穿 lead、穿器件与跨芯片直连。只有隔离的单 wire/单段、
+两端均命中明确 pin 或 marker 且存在正交避障路径时才替换；多段树、共享树和跨芯片直连
+保持 blocked。替换前后逐 pin 网表与 bridge 集必须一致，失败恢复原线。
 
 
 ## 修改属性时保留供应商身份
