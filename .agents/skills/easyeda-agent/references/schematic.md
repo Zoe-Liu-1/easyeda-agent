@@ -362,6 +362,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 批量执行。`alignment-plan` 本身不调用 group.move/delete/wire/save；单计划执行使用
 `sch alignment-apply --apply --save`，由安全 move 内核显式替换计划共享树、按引脚外向
 首段重建边界并逐脚对账。
+`sch alignment-fix --plan <id> --apply --save` 用于独立阻塞组接力：预检拒绝任何
+`review-required`/`blocked` blocker；`ready` blocker 逐个移动后 fresh 重读并重新识别同一主组，
+全部阻塞消失后才执行 ready 主组或共享边界重连。每次移动都复核完整 pin→net 和 bridge 基线。
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 

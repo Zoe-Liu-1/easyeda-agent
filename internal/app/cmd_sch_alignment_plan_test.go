@@ -50,6 +50,28 @@ func TestBuildAlignmentPlanReport(t *testing.T) {
 	}
 }
 
+func TestAlignmentPlanIDsStayStableUnderNetFilter(t *testing.T) {
+	sheet := &layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}
+	comps := []layoutComp{
+		{ID: "c1", Designator: "C1", ComponentType: schLayoutPartType,
+			BBox: &layoutBBox{MinX: 50, MinY: 30, MaxX: 70, MaxY: 40}},
+		{ID: "c2", Designator: "C2", ComponentType: schLayoutPartType,
+			BBox: &layoutBBox{MinX: 100, MinY: 30, MaxX: 120, MaxY: 40}},
+	}
+	candidates := []alignmentCandidate{
+		{Axis: "x", Net: "FIRST", Shift: 25, MoveDesignators: []string{"C1"},
+			MoveWireIDs: []string{"w1"}, At: checkPoint{X: 60, Y: 35}, MovedBBox: layoutBBox{MinX: 75, MinY: 30, MaxX: 95, MaxY: 40}},
+		{Axis: "x", Net: "SECOND", Shift: 25, MoveDesignators: []string{"C2"},
+			MoveWireIDs: []string{"w2"}, At: checkPoint{X: 110, Y: 35}, MovedBBox: layoutBBox{MinX: 125, MinY: 30, MaxX: 145, MaxY: 40}},
+	}
+	all := buildAlignmentPlanReport("doc", "", candidates, comps, nil, nil, sheet, nil)
+	filtered := buildAlignmentPlanReport("doc", "SECOND", candidates, comps, nil, nil, sheet, nil)
+	if len(all.Plans) != 2 || len(filtered.Plans) != 1 ||
+		all.Plans[1].ID != filtered.Plans[0].ID || filtered.Plans[0].ID != "alignment-002" {
+		t.Fatalf("filter changed plan identity: all=%+v filtered=%+v", all.Plans, filtered.Plans)
+	}
+}
+
 func TestBuildAlignmentPlanReadyWithoutSharedBoundary(t *testing.T) {
 	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 100}
 	comps := []layoutComp{

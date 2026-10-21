@@ -145,6 +145,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchPowerClusterPlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchAlignmentPlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchAlignmentApplyCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchAlignmentFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchMarkerCleanCmd(cfg, &window, stdout, stderr))
 	// `sch apply` is the schematic-domain entry point for the shared, ordered
 	// playbook executor. The executor itself remains shared so queue semantics

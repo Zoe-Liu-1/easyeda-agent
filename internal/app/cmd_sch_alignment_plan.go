@@ -189,12 +189,15 @@ func buildAlignmentPlanReport(doc, netFilter string, candidates []alignmentCandi
 			partIDs[c.Designator] = c.ID
 		}
 	}
-	for _, c := range candidates {
+	for ci, c := range candidates {
+		// IDs are assigned from the unfiltered candidate order. A --net filter
+		// hides other plans; it must never renumber the selected plan.
+		planID := fmt.Sprintf("alignment-%03d", ci+1)
 		if netFilter != "" && c.Net != netFilter {
 			continue
 		}
 		item := alignmentPlanItem{
-			ID:  fmt.Sprintf("alignment-%03d", len(report.Plans)+1),
+			ID:  planID,
 			Net: c.Net, Axis: c.Axis, ShiftX: 0, ShiftY: 0, BendReduction: 2,
 			MoveDesignators:     append([]string(nil), c.MoveDesignators...),
 			MoveWireIds:         append([]string(nil), c.MoveWireIDs...),
