@@ -28,6 +28,7 @@ type alignmentCandidate struct {
 	Axis                  string
 	Net                   string
 	Shift                 float64
+	TargetCoord           float64
 	WireID                string
 	MoveDesignators       []string
 	StationaryDesignators []string
@@ -308,23 +309,27 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 			aPins := alignmentMaxPinCount(comps, partsA)
 			bPins := alignmentMaxPinCount(comps, partsB)
 			aCore, bCore := aPins >= 4, bPins >= 4
-			var shift float64
+			var shift, targetCoord float64
 			switch {
 			case aCore && !bCore && len(partsB) >= 1 && len(partsA) <= 3:
 				move, stationary = partsB, partsA
 				moveSegments = sideB
+				targetCoord = targetArmCoordinate(segs, first)
 				shift = targetArmCoordinate(segs, first) - targetArmCoordinate(segs, second)
 			case bCore && !aCore && len(partsA) >= 1 && len(partsB) <= 3:
 				move, stationary = partsA, partsB
 				moveSegments = sideA
+				targetCoord = targetArmCoordinate(segs, second)
 				shift = targetArmCoordinate(segs, second) - targetArmCoordinate(segs, first)
 			case aCore && bCore && aPins > bPins && len(partsA) < len(partsB):
 				move, stationary = partsB, partsA
 				moveSegments = sideB
+				targetCoord = targetArmCoordinate(segs, first)
 				shift = targetArmCoordinate(segs, first) - targetArmCoordinate(segs, second)
 			case aCore && bCore && bPins > aPins && len(partsB) < len(partsA):
 				move, stationary = partsA, partsB
 				moveSegments = sideA
+				targetCoord = targetArmCoordinate(segs, second)
 				shift = targetArmCoordinate(segs, second) - targetArmCoordinate(segs, first)
 			default:
 				continue
@@ -348,7 +353,8 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 				moved = translateLayoutBBox(moved, [2]float64{shift, 0})
 			}
 			out = append(out, alignmentCandidate{
-				Axis: axis, Net: net, Shift: shift, MoveDesignators: move, StationaryDesignators: stationary,
+				Axis: axis, Net: net, Shift: shift, TargetCoord: targetCoord,
+				MoveDesignators: move, StationaryDesignators: stationary,
 				AllSegments: segs, MoveSegments: moveSegments, OriginalBBox: bbox, MovedBBox: moved,
 				At: checkPoint{X: round2((ends[0].X + ends[1].X) / 2), Y: round2((ends[0].Y + ends[1].Y) / 2)},
 			})

@@ -77,10 +77,18 @@ wire primitive 组成同一物理骨架，再对同网主干检查
 器件（标准角色 `U`/`Q`/`IC` 且至少 4 脚）时停止，不靠具体实例位号、器件型号或网络名
 决定核心。不能只为了缩短长度移动，也不能拆开反馈、
 电源/GND 或连接器功能组。与移动组不共享局部网的阻塞件列入
-`independentBlockers`，可作为独立前置组处理；共享边界线必须重新布线，只有移动和
-边界重连后重新检查通过才可执行。`sch alignment-plan --doc <page> [--net <net>]
-[--json|--out]` 输出只读步骤和资源：`ready` 仅在无 blocking/shared 边界时成立；
-`rewire-required` 和 `blocked` 均不得直接执行，planner 不调用 group.move/delete/wire/save。
+`independentBlockers`。主组和独立阻塞组都复用整组移动的器件、引脚、文字和导线碰撞检查；
+任何一层碰撞都会阻止 ready。planner 为阻塞件扩展局部功能组，在 5 单位栅格上给出
+`independentBlockerPlans[]` 位移；该前置组自身若仍触及固定引脚，列入其
+`sharedWireIds` 并保持 `blocked`，不能把“只移器件”标成 ready。
+共享边界线必须删除后按移动后的真实端点重新布线。`boundaryPlans[]` 对每个边界网给出
+`fixedPins`、`movedPins`、正交 `wires`、`deleteWireIds`、`labelIds` 和阻塞原因；主网从目标
+轴线生成总线/分支，次网枚举正交 L 路由。草案要避开移动后的器件本体、异网引脚和导线、
+全部可见文字、图签区、图纸边界及其他网络交叉；同名共享线删除后由
+`restore-shared-labels` 恢复名称并重新查重和查重叠。`sch alignment-plan --doc <page>
+[--net <net>] [--json|--out]` 输出只读步骤和资源：`ready` 仅在无 blocking/shared 边界时
+成立；共享边界即使已有 `proposed` 草案也保持 `rewire-required`，`rewire-required` 与
+`blocked` 均不得批量执行，planner 不调用 group.move/delete/wire/save。
 
 **多段线树按自由端逐个复核。** 宿主会把同一网络的多段导线合并成一个 segment-array
 `Line`，不能因为树上任意一端已接引脚或标识，就把整根线判为已用尽。先按线段端点求度数，
