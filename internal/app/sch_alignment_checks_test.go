@@ -143,6 +143,18 @@ func TestAlignmentOpportunityVerticalAndBlocker(t *testing.T) {
 	}
 }
 
+func TestAlignmentTargetBlockersIgnoreFormerSweptCorridor(t *testing.T) {
+	comps := []layoutComp{{
+		ID: "b1", Designator: "B1", ComponentType: schLayoutPartType,
+		BBox: &layoutBBox{MinX: 45, MinY: 10, MaxX: 55, MaxY: 20},
+	}}
+	target := layoutBBox{MinX: 20, MinY: 10, MaxX: 40, MaxY: 20}
+	blockers, independent := alignmentTargetBlockers(comps, []string{"C1"}, nil, target)
+	if len(blockers) != 0 || len(independent) != 0 {
+		t.Fatalf("a part outside the final group envelope must not block an atomic move: %v/%v", blockers, independent)
+	}
+}
+
 func TestAlignmentOpportunitySinglePartPowerCluster(t *testing.T) {
 	wires := []schGroupWire{{
 		ID: "w1", Points: []float64{0, 0, 30, 0, 30, 0, 30, 40, 30, 40, 70, 40},

@@ -66,7 +66,7 @@ func alignmentFinalizeCandidate(c alignmentCandidate, items []visibleTextItem, c
 		alignmentOwnedResources(comps, wires, items, expanded)
 	exclude := append([]string(nil), expanded...)
 	exclude = append(exclude, c.StationaryDesignators...)
-	c.Blockers, c.IndependentBlockers = alignmentSweepBlockers(comps, expanded, exclude, c.OriginalBBox, c.MovedBBox)
+	c.Blockers, c.IndependentBlockers = alignmentTargetBlockers(comps, expanded, exclude, c.MovedBBox)
 	if len(expanded) > alignmentMaxGroup {
 		c.Blockers = append(c.Blockers, fmt.Sprintf("group-too-large:%d", len(expanded)))
 	}
@@ -724,21 +724,22 @@ func alignmentOwnedResources(comps []layoutComp, wires []schGroupWire, items []v
 	return
 }
 
-func alignmentSweepBlockers(comps []layoutComp, group, exclude []string, from, to layoutBBox) (blockers, independent []string) {
+func alignmentTargetBlockers(comps []layoutComp, group, exclude []string, target layoutBBox) (blockers, independent []string) {
 	excluded := map[string]bool{}
 	for _, d := range exclude {
 		excluded[d] = true
 	}
-	swept := from
-	swept.MinX, swept.MinY = math.Min(from.MinX, to.MinX), math.Min(from.MinY, to.MinY)
-	swept.MaxX, swept.MaxY = math.Max(from.MaxX, to.MaxX), math.Max(from.MaxY, to.MaxY)
 	groupNets := alignmentLocalNetSet(comps, group)
 	for _, c := range comps {
 		if c.BBox == nil || excluded[c.Designator] || c.ComponentType == "sheet" ||
 			(c.ComponentType != "" && c.ComponentType != schLayoutPartType) {
 			continue
 		}
-		if boxesOverlap2(*c.BBox, swept) {
+		// A rigid group move commits its final geometry atomically. The old
+		// swept-from/to rectangle made a nearby part look mandatory even when
+		// the final bodies and rebuilt wires were clear, forcing blockers to
+		// drift farther on every replan.
+		if boxesOverlap2(*c.BBox, target) {
 			label := c.Designator
 			if label == "" {
 				label = c.ID

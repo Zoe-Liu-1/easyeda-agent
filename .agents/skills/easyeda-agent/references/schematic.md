@@ -338,7 +338,8 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `sharedWireIds`、`blockers` 和 `independentBlockers`。外围组沿非 GND/非电源轨/非主干局部网扩展，最多 16 件，
 遇到标准角色 `U`/`Q`/`IC` 且至少 4 脚的另一主动器件停止；专属线树可随动，
 触及固定器件的共享线必须重连，
-运动包络内的实体器件作为前置阻塞项。单器件仅在非 GND 本地电源簇带可见电源标识时参与。
+最终落点包络内的实体器件作为前置阻塞项；刚体移动的中间扫过区不单独制造阻塞。
+单器件仅在非 GND 本地电源簇带可见电源标识时参与。
 与移动组不共享局部网的阻塞件进入 `independentBlockers`，可作为独立前置组处理。
 该 finding 不自动改图，也不能把“线更短”单独当移动理由。
 `sch alignment-plan --doc <page> [--net <net>] [--json|--out]` 将 finding 转成只读步骤和
