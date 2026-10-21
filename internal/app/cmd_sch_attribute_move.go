@@ -18,8 +18,8 @@ var schAttributeStateFields = []string{"primitiveId", "X", "Y", "Rotation", "Col
 func newSchAttributeMoveCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
-		Use: "attribute-move --from <move.json>", Short: "Move one bound Name/Designator attribute using x/y only",
-		Long: `Move one existing placed part's Name or Designator attribute. The JSON file
+		Use: "attribute-move --from <move.json>", Short: "Move one bound Name/Designator/Value attribute using x/y only",
+		Long: `Move one existing placed part's Name, Designator or Value attribute. The JSON file
 contains projectUuid, documentUuid, primitiveId, finite raw x/y (Y-up), and
 expected: the complete original pagePrimitives.attributes record. Preserve raw
 formula Value text; do not replace it with rendered SVG text.
@@ -91,8 +91,10 @@ func validateSchAttributeState(state map[string]any) error {
 			}
 		}
 	}
-	if strings.TrimSpace(strField(state, "primitiveId")) == "" || strings.TrimSpace(strField(state, "ParentPrimitiveId")) == "" || (state["Key"] != "Name" && state["Key"] != "Designator") {
-		return fmt.Errorf("attribute requires complete Name/Designator identity")
+	key, _ := state["Key"].(string)
+	if strings.TrimSpace(strField(state, "primitiveId")) == "" || strings.TrimSpace(strField(state, "ParentPrimitiveId")) == "" ||
+		(key != "Name" && key != "Designator" && key != "Value") {
+		return fmt.Errorf("attribute requires complete Name/Designator/Value identity")
 	}
 	return nil
 }

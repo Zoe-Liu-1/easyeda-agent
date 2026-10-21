@@ -39,7 +39,7 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `duplicate-net-marker` / `redundant-net-marker` | 显式计划 | `sch marker-clean`；保留对象需要基线或明确选择 |
 | `label-economy` / `cross-kind-label-economy` | 显式计划 | `sch marker-clean`；同一线岛至少留一个可见名称 |
 | `marker-overlap` | 直接执行 | `sch destagger --apply` 只处理可安全换向/改短桩的 marker；跳过项必须读出 |
-| `direct-connect-opportunity` | 直接执行或重排 | 仅 `already-clear` 可用 `sch direct-connect-apply --apply --save`；移动候选先计划 |
+| `direct-connect-opportunity` | 直接执行或显式移动执行 | `already-clear` 用 `sch direct-connect-apply`；文字、单桩 marker、part/group 候选用 `sch direct-connect-fix --allow-move`，移动后必须重新规划成唯一 clear 路径再建线删标签 |
 | `alignment-opportunity` | 显式计划 | `alignment-plan` 完整、无 blocker 且边界重连齐全后才可 `alignment-apply` |
 | `power-cluster-candidate` | 显式计划 | 先由 `power-cluster-plan` 生成接线与“先接后删”顺序；不能直接删符号 |
 | `floating-pin` | 语义选择 | 设计上使用则接线；明确不用才 `sch no-connect`；未知不等于 NC |

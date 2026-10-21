@@ -365,6 +365,11 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 
+`direct-connect-plan` 的文字、单桩 marker、单件及 2–4 件刚体移动提案可由
+`direct-connect-fix --allow-move` 执行。执行器只处理选中的一对；移动后重新读取页面，
+要求同一 net 的唯一 `already-clear` 路径后才能建线并删除标签。移动前后完整 pin→net
+与 bridge 集必须一致，移动本身新增重复网络名也会阻止判定完成。
+
 
 ## 修改属性时保留供应商身份
 

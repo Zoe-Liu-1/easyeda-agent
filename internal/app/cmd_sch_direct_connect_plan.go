@@ -309,6 +309,22 @@ func numberField(v any) (float64, bool) {
 
 func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
 	anchors map[string]checkPoint, sheet, titleBlock *layoutBBox, maxDistance, maxMove float64) []dcPairPlan {
+	return planDirectConnectTextMovesWithMaze(items, comps, wires, anchors,
+		sheet, titleBlock, maxDistance, maxMove, true)
+}
+
+// planDirectConnectTextMovesWithoutMaze isolates the text/marker/part/group
+// proposal layers in tests. Production always enables the obstacle-aware maze,
+// but a clear multi-bend route correctly wins over any invasive move.
+func planDirectConnectTextMovesWithoutMaze(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	anchors map[string]checkPoint, sheet, titleBlock *layoutBBox, maxDistance, maxMove float64) []dcPairPlan {
+	return planDirectConnectTextMovesWithMaze(items, comps, wires, anchors,
+		sheet, titleBlock, maxDistance, maxMove, false)
+}
+
+func planDirectConnectTextMovesWithMaze(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	anchors map[string]checkPoint, sheet, titleBlock *layoutBBox, maxDistance, maxMove float64,
+	allowMaze bool) []dcPairPlan {
 	find, wireIndex := wireTreeFinder(wires)
 	type label struct {
 		it     visibleTextItem
@@ -373,7 +389,7 @@ func planDirectConnectTextMoves(items []visibleTextItem, comps []layoutComp, wir
 					break
 				}
 			}
-			if clearIdx < 0 {
+			if clearIdx < 0 && allowMaze {
 				if maze, ok := dcMazePath([2]float64{a.ax, a.ay}, [2]float64{b.ax, b.ay},
 					a.root, b.root, a.it.ID, b.it.ID, items, comps, wires, find, wireIndex,
 					sheet, titleBlock, maxDistance*2); ok {

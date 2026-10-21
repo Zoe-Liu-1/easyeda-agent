@@ -39,6 +39,15 @@ test('attribute move sends only x/y and independently preserves formula, visibil
  } finally { f.restore(); }
 });
 
+test('attribute move accepts a bound Value attribute', async () => {
+ const f = fixture(); try {
+  f.state.Key = 'Value'; f.state.Value = '10k';
+  const p = f.payload(); p.expected.Key = 'Value'; p.expected.Value = '10k';
+  const r: any = (await runAction('schematic.attribute.move', p)).result;
+  assert.equal(r.verified, true); assert.equal(r.after.Key, 'Value'); assert.equal(r.after.Value, '10k');
+ } finally { f.restore(); }
+});
+
 test('attribute move no-op still rereads, without invoking modify', async () => {
  const f = fixture(); try {
   const r: any = (await runAction('schematic.attribute.move', { ...f.payload(), x: 10, y: 20 })).result;

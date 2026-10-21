@@ -19,7 +19,7 @@ export async function moveSchematicAttribute(payload: State, readState: (attribu
 	const expected = payload.expected as State;
 	if (!expected || typeof expected !== 'object' || Array.isArray(expected) || expected.primitiveId !== payload.primitiveId
 		|| typeof expected.ParentPrimitiveId !== 'string' || !expected.ParentPrimitiveId.trim()
-		|| !['Name', 'Designator'].includes(expected.Key as string)) refuse('Attribute move requires the complete original Name/Designator state.');
+		|| !['Name', 'Designator', 'Value'].includes(expected.Key as string)) refuse('Attribute move requires the complete original Name/Designator/Value state.');
 	const identityBefore = await readResponseContext();
 	if (identityBefore.projectUuid !== payload.projectUuid || identityBefore.documentUuid !== payload.documentUuid
 		|| identityBefore.documentType !== 'schematic' || !identityBefore.tabId) refuse('Attribute move requires the exact active schematic context.');
