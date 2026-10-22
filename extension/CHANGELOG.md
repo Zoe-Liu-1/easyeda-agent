@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-10-22
+
+- 新增 `schematic.attribute.modify` typed action：只允许修改绑定属性的 `rotation`、`valueVisible`、`keyVisible` 和 `value`，写后 fresh readback 逐字段验证。
+- 允许 `schematic.attribute.move` 移动绑定的 `Value` 属性；仍只发送 x/y，并保留其余原生字段。
+
 ## [1.14.0] - 2026-10-17
 
 - 原理图功能框（#43）：块数据新增 `schematic_layout.tiles`，多脚主控按参考原理图排法——核心芯片独占一框只挂引脚标签，外围按功能各成一框、框内直连，框间用同名标签。`blocks.Get("<id>#<框>")` 由块数据确定性派生出每个框；`sch block-apply` 逐框执行，核心落在 `--at`，其余框按阅读顺序找第一个连分区框都放得下的位置，也可用 `--tile-at 框名=x,y` 指定。每框可写 `title` 作分区框标题。ESP32-S3R8 芯片级块改为 5 框形态。
