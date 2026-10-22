@@ -40,24 +40,26 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `label-economy` / `cross-kind-label-economy` | 显式计划 | `sch marker-clean`；同一线岛至少留一个可见名称 |
 | `marker-overlap` | 直接执行 | `sch destagger --apply` 只处理可安全换向/改短桩的 marker；跳过项必须读出 |
 | `direct-connect-opportunity` | 直接执行或显式移动执行 | `already-clear` 用 `sch direct-connect-apply`；文字、单桩 marker、part/group 候选用 `sch direct-connect-fix --allow-move`，移动后必须重新规划成唯一 clear 路径再建线删标签 |
+| `cross-chip-direct-wire` | 直接执行或显式阻断 | `sch cross-chip-label-fix` 按物理线树把全部相关芯片引脚改成向外短线 + 同名 `net_label`；有现成 marker、混合网名、未解析引脚或没有安全标签槽时 blocked |
 | `alignment-opportunity` | 显式计划 | `alignment-plan` 完整后执行：无阻塞的 ready/边界方案可走 `alignment-fix` 或 `alignment-apply`；存在独立阻塞组时仅当全部为 `ready` 才由 `alignment-fix` 先移阻塞、逐步重算再移主组 |
-| `power-cluster-candidate` | 显式计划 | 先由 `power-cluster-plan` 生成接线与“先接后删”顺序；不能直接删符号 |
+| `power-cluster-candidate` | 显式计划 | 先由 `power-cluster-plan` 生成接线与“先接后删”顺序；路径必须无器件/文字/异网线和 90° 交叉，不能直接删符号。playbook 以目标网表和 bridge 增量验收，不被无关的既有整页 finding 阻断 |
 | `floating-pin` | 语义选择 | 设计上使用则接线；明确不用才 `sch no-connect`；未知不等于 NC |
 | `geom-net-mismatch` / `net-marker-mismatch` | 语义选择或重排 | 先确定触脚但网表未认领的原因，再重连或修名称；不能靠重导网表掩盖 |
 | `dangling-wire` / `zero-length-wire` | 语义选择 | 先确认是否为有意命名端点；删除局部残支前核对共享树 |
 | `multi-net-wire` / `wire-bridge` / `wire-crossing` / `non-orthogonal-wire` | 重排重布 | 先找短路/并网来源，拆树或按正交通道重走；不得只删交叉点 |
 | `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 直接执行或重排重布 | `wire-reroute-fix` 只替换单段隔离线并搜索障碍感知正交通道；多段/共享树、端点不明或无路径保持 blocked |
 | `cross-chip-direct-wire` | 语义重排 | `wire-reroute-fix` 明确 blocked；芯片间应改为同名网络标签/模块端口，不能自动重画成另一根长直连 |
-| `pin-exit-direction` | 重排重布 | 首段先沿引脚外向再正交折线；现有修复器只在完整单段替换可行时执行 |
+| `pin-exit-direction` | 重排重布 | 首段先沿引脚外向再正交折线；`wire-reroute-fix` 只在完整单段替换可行时执行，多段共享树由对应功能级执行器重建 |
 | `signal-netflag-type` / `signal-netport-type` | 直接执行或显式阻断 | `signal-marker-fix` 把安全单桩替换为文字 net_label；共享/分支树阻断。模块边界端口用 `signal-port-exempt` 保留并审计 |
-| `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。共享树、无单桩和反向脚保持 blocked，反向脚登记 `orientationExempt` |
+| `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。候选终点落在异网导线上时硬拒绝。共享树、无单桩和反向脚保持 blocked，反向脚登记 `orientationExempt` |
 | `label-visibility` / `label-orientation` | 直接执行或显式阻断 | `sch label-fix` 设置可见和水平；空名称只有父 wire/marker 已携带明确网名时补齐。缺原生 Name 或网名未知不猜 |
 | `label-distance` | 语义选择或重排 | 用 `attribute-move` 把可见名称移回挂载点附近，并复查文字/导线碰撞 |
 | `polarity-convention-outlier` | 语义选择 | 对照器件极性和同页多数派确认是否反装；编号约定本身不证明电气极性 |
 | `visible-text-overlap` | 直接执行或显式阻断 | `visual-text-fix` 在 60 单位内搜索无碰撞槽位，属性/自由文字分别走 typed move；无锚点或无可清槽位保持 blocked |
+| `designator-overlap` / `designator-wire-overlap` | 直接执行或显式阻断 | `designator-fix` 只移动 Designator 属性，5 单位网格避开本体、引脚、marker、文字、导线、图签与纸边；无安全槽保持 blocked |
 | `marker-wire-overlap` | 重排重布 | 移动 marker 或改走线，必须复查器件、引脚、导线和标题区 |
 | `titleblock-overlap` / `out-of-sheet` | 重排重布 | 移入图签外/图纸内；不缩小页面或隐藏文字来规避 |
-| `partition-overlap` / `designator-overlap` / `designator-wire-overlap` / `part-out-of-frame` / `part-frame-unresolved` / `designator-out-of-frame` | 重排重布 | 重新布局功能组、区框或文字槽位；不能删除位号或把未认领器件硬塞进框 |
+| `partition-overlap` / `part-out-of-frame` / `part-frame-unresolved` / `designator-out-of-frame` | 重排重布 | 重新布局功能组、区框或文字槽位；不能删除位号或把未认领器件硬塞进框 |
 | `missing-partition` / `missing-titleblock` / `missing-note` / `zones-not-claimed` / `titleblock-key-absent` | 显式计划或语义选择 | `zones` / `zone-draw` / `titleblock` 按已声明归属生成；字段内容无依据时保留待确认 |
 | `peripheral-not-direct` | 重排重布 | 把外围真实短线接到核心脚；标签只作证不清白时的兜底并继续报警 |
 | `*-unavailable` / `*-unverified` / `peripheral-direct-unverified` | 仅诊断 | 修复采集或写入数据源后重跑；不得把不可见范围当通过 |

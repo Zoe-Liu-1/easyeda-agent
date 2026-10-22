@@ -343,16 +343,14 @@ func powerClusterPlaybook(plans []powerClusterPlan, comps []layoutComp, project,
 		ExpectSchematic: expect,
 	})
 	pb.Steps = append(pb.Steps, wireSteps...)
-	checkAssert := map[string]string{
-		"$.summary.danglingWires":       "==0",
-		"$.summary.multiNetWires":       "==0",
-		"$.summary.netMarkerMismatches": "==0",
-		"$.summary.wireOverPins":        "==0",
-		"$.summary.nonOrthogonalWires":  "==0",
-		"$.summary.zeroLengthWires":     "==0",
+	connectivityStep := playbookStep{
+		ID: "verify-power-connectivity", Name: "verify target pin connectivity",
+		Action:          "schematic.components.list",
+		Payload:         map[string]any{"includeBBox": true, "includePins": true, "includePinNets": true},
+		ExpectSchematic: expect,
 	}
 	pb.Steps = append(pb.Steps,
-		playbookStep{ID: "verify-wiring-check", Run: "sch check", Flags: map[string]any{"json": true}, Assert: checkAssert},
+		connectivityStep,
 		playbookStep{ID: "verify-wiring-bridge", Run: "sch bridge-check", Flags: map[string]any{"json": true},
 			Assert: map[string]string{"$.summary.bridges": "==0", "$.summary.orphans": "==0"}},
 	)
@@ -372,7 +370,10 @@ func powerClusterPlaybook(plans []powerClusterPlan, comps []layoutComp, project,
 		})
 	}
 	pb.Steps = append(pb.Steps,
-		playbookStep{ID: "verify-cleanup-check", Run: "sch check", Flags: map[string]any{"json": true}, Assert: checkAssert},
+		playbookStep{ID: "verify-cleanup-connectivity", Name: "verify connectivity after flag cleanup",
+			Action:          "schematic.components.list",
+			Payload:         map[string]any{"includeBBox": true, "includePins": true, "includePinNets": true},
+			ExpectSchematic: expect},
 		playbookStep{ID: "verify-cleanup-bridge", Run: "sch bridge-check", Flags: map[string]any{"json": true},
 			Assert: map[string]string{"$.summary.bridges": "==0", "$.summary.orphans": "==0"}},
 		playbookStep{ID: "save-verified-power-clusters", Action: "schematic.save",
@@ -679,6 +680,13 @@ func powerRouteBlockers(path [][2]float64, passive, consumer layoutComp, cluster
 		for _, w := range wires {
 			idx, ok := wireIndex[w.ID]
 			if ok && (passiveRoots[find(idx)] || consumerRoots[find(idx)]) {
+				for _, ws := range labelWireSegments(w) {
+					if segmentsStrictCross2(path[i], path[i+1],
+						[2]float64{ws[0], ws[1]}, [2]float64{ws[2], ws[3]}) {
+						add(dcBlocker{Kind: "crossing", ID: w.ID, Label: "crossing:wire:" + w.ID})
+						break
+					}
+				}
 				continue
 			}
 			for _, ws := range labelWireSegments(w) {
@@ -690,6 +698,15 @@ func powerRouteBlockers(path [][2]float64, passive, consumer layoutComp, cluster
 		}
 	}
 	return out
+}
+
+func segmentsStrictCross2(a, b, c, d [2]float64) bool {
+	o := func(p, q, r [2]float64) float64 {
+		return (q[0]-p[0])*(r[1]-p[1]) - (q[1]-p[1])*(r[0]-p[0])
+	}
+	o1, o2, o3, o4 := o(a, b, c), o(a, b, d), o(c, d, a), o(c, d, b)
+	return ((o1 > 0.5 && o2 < -0.5) || (o1 < -0.5 && o2 > 0.5)) &&
+		((o3 > 0.5 && o4 < -0.5) || (o3 < -0.5 && o4 > 0.5))
 }
 
 func powerPathLength(path [][2]float64) float64 {

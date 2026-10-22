@@ -376,15 +376,21 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 90/270 文字改为 0；空 Name 仅在父 wire/marker 已有明确网名时补齐。每一写使用完整
 原生属性状态和严格 `schematic.attribute.modify` 字段集合，写后逐字段验证；新增
 `visible-text-overlap`、pin→net 或 bridge 变化时逆序回滚。
+`--allow-partial` 会先为写后发现的冲突文字搜索 60 单位内安全槽，成功项保留移动，
+无法安全放置的项恢复原属性并登记 blocked。
 `sch power-orientation-fix` 把电源 netflag 重接到 body-up、GND 重接到 body-down。
 仅接受单段可安全重建的 netflag 桩；首段沿实测引脚外向，再走本地正交折线。反向脚不改，
 必须已有 `orientationExempt`。每个替换都复核 pin→net、bridge 和目标 finding，失败逆序恢复。
 `sch visual-text-fix` 对 `visible-text-overlap` 在 60 单位内按 5 单位搜索局部空槽；
 Name/Designator/Value 走 `attribute.move`，自由文字走 `text.move`。应用后重读全部可见文字，
 任何移动目标仍重叠或新增文字/导线碰撞都回滚，同时保持 pin→net 与 bridge 不变。
+`sch designator-fix` 专门消费 `designator-overlap` / `designator-wire-overlap`：只移动
+Designator 属性，并避开器件本体、引脚、marker、其他可见文字、导线、图签和纸边。
 `sch wire-reroute-fix` 汇总导线穿脚、穿 lead、穿器件与跨芯片直连。只有隔离的单 wire/单段、
 两端均命中明确 pin 或 marker 且存在正交避障路径时才替换；多段树、共享树和跨芯片直连
 保持 blocked。替换前后逐 pin 网表与 bridge 集必须一致，失败恢复原线。
+`sch cross-chip-label-fix` 处理跨芯片多段树：从物理线岛提取全部相关引脚，整树删除后每脚
+向外建立短线和同名 `net_label`；现成 marker、混合网名、未解析引脚或无安全槽位保持 blocked。
 `sch signal-marker-fix` 把非电源/地 netflag/netport 的安全单桩替换为原生文字 `net_label`，
 首段沿引脚外向；共享树、分支树和方向未知保持 blocked。模块边界端口必须显式登记豁免，
 不能静默换型。

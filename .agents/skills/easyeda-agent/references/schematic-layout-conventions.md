@@ -234,6 +234,13 @@ buffer:
   均为 WARN；模块边界 netport 必须用 `--signal-port-exempt` 显式登记，并保留 INFO
   审计。直连规划先用短 L，再用 5 单位障碍感知 A* 搜索多折正交路径；只有
   `already-clear` 对进入直连 playbook。
+- **跨芯片边界**：两颗及以上多脚主动器件的同名非电源/地信号不得由同一物理长导线树
+  直接贯通。`sch cross-chip-label-fix` 对可证明的整树执行“删除旧树 + 每脚外向短桩 +
+  同名 `net_label`”，并保持完整 pin→net 和 bridge 不变；树上已有 marker、混合网名、
+  未解析引脚或没有安全标签槽时保持 blocked。
+- **位号文字纪律**：`designator-overlap` 与 `designator-wire-overlap` 由
+  `sch designator-fix` 在 5 单位栅格内移动 Designator 属性。候选必须避开全部器件本体、
+  引脚、marker、其他可见文字、导线、图签和纸张边界；不存在安全槽时不得隐藏或删除位号。
 - **局部电源簇（`power-cluster-candidate`）**：消费电源脚与就近本地被动件分属不同线树
   且各有符号时，先补物理短线，再删被动件侧符号；不能直接删符号制造未命名岛。当前检查
   按 250 单位就近归簇，GND 不自动报；独立去耦排/电源域用

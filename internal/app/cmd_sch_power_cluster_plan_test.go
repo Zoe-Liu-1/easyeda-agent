@@ -109,24 +109,49 @@ func TestPowerClusterPlaybookOrder(t *testing.T) {
 	if !pb.RequireFullExecution || len(pb.Steps) < 5 {
 		t.Fatalf("want a full guarded playbook, got %+v", pb)
 	}
-	var wireIdx, checkIdx, deleteIdx, saveIdx = -1, -1, -1, -1
+	var wireIdx, connectivityIdx, deleteIdx, saveIdx = -1, -1, -1, -1
 	for i, s := range pb.Steps {
 		switch s.Action {
 		case "schematic.wire.create":
 			if wireIdx < 0 {
 				wireIdx = i
 			}
+		case "schematic.components.list":
+			if s.ID == "verify-power-connectivity" {
+				connectivityIdx = i
+			}
 		case "schematic.primitives.delete":
 			deleteIdx = i
 		case "schematic.save":
 			saveIdx = i
 		}
-		if s.Run == "sch check" && checkIdx < 0 {
-			checkIdx = i
+	}
+	if wireIdx < 0 || connectivityIdx < 0 || deleteIdx < 0 || saveIdx < 0 ||
+		!((wireIdx < connectivityIdx) && (connectivityIdx < deleteIdx) && (deleteIdx < saveIdx)) {
+		t.Fatalf("wrong playbook order: %+v", pb.Steps)
+	}
+}
+
+func TestPowerRouteBlocksCrossingOnOwnPowerRoot(t *testing.T) {
+	find, wireIndex := wireTreeFinder([]schGroupWire{{
+		ID: "existing", Net: "+3V3", Points: []float64{5, -10, 5, 10},
+	}})
+	blockers := powerRouteBlockers(
+		[][2]float64{{0, 0}, {10, 0}},
+		layoutComp{}, layoutComp{},
+		nil,
+		map[int]bool{find(wireIndex["existing"]): true},
+		map[int]bool{find(wireIndex["existing"]): true},
+		nil, nil,
+		[]schGroupWire{{ID: "existing", Net: "+3V3", Points: []float64{5, -10, 5, 10}}},
+	)
+	found := false
+	for _, blocker := range blockers {
+		if blocker.Kind == "crossing" && blocker.ID == "existing" {
+			found = true
 		}
 	}
-	if wireIdx < 0 || checkIdx < 0 || deleteIdx < 0 || saveIdx < 0 ||
-		!((wireIdx < checkIdx) && (checkIdx < deleteIdx) && (deleteIdx < saveIdx)) {
-		t.Fatalf("wrong playbook order: %+v", pb.Steps)
+	if !found {
+		t.Fatalf("crossing on own power root was accepted: %+v", blockers)
 	}
 }

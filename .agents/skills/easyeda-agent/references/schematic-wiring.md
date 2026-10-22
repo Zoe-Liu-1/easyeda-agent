@@ -109,6 +109,11 @@ alignment-apply ... --apply --save`：安全内核只对计划列出的共享树
 `sch check` 报 `dangling-wire`；finding 的 `at` 必须指向真正悬空的端点，`count` 为该线树
 上的无落点自由端数量。只保留明确短支路，删除残留分支或把它接到明确目标。
 
+**跨芯片长线树直接标签化。** `sch cross-chip-label-fix` 按物理线树提取所有实际相连的
+芯片引脚。只有网名唯一且非电源/地、树上没有既有 marker、所有引脚方向可证明时才为
+`ready`。执行顺序是整树删除、逐脚外向短桩、同名原生 `net_label`、完整 pin→net 与
+bridge 对账；失败恢复原线。若树带模块端口或混合网名，仍保持 blocked，不能猜保留哪一个。
+
 **重画/复制已有布局时，不要回放宿主合并后的 `Line` 数组。** EasyEDA 会把多段线合并并
 重排顶点，直接回放可能产生斜线/回折；应从干净的正交模板生成，逐段 `sch wire`，完成后跑
 `sch bridge-check` + `sch read` 逐脚对账。
@@ -162,11 +167,12 @@ alignment-apply ... --apply --save`：安全内核只对计划列出的共享树
 `sch power-cluster-plan` 提供只读接线计划：`ready` 输出每个被动件到消费脚的短线、
 保留/删除符号和“先接后验证再删”的顺序；`partial` 只接已经 clear 的被动件并删除其
 对应符号，被挡的 passive 保留符号；`blocked` 不生成删除步骤，只列阻挡对象。路径仍须
-由 Apply 阶段回读验证，planner 本身不落图。
+由 Apply 阶段回读验证，planner 本身不落图。候选与任何既有导线发生 90° 交叉时直接
+blocked；“不交叉”优先于减少符号数量。
 加 `--playbook <file>` 会生成受保护 `sch apply` 队列：先验证目标引脚，再
-`schematic.wire.create`，随后跑 `sch check` + `sch bridge-check`，通过后才
+`schematic.wire.create`，随后核对目标完整 pin→net 与 `sch bridge-check`，通过后才
 `schematic.primitives.delete` 被动侧符号，再复验并保存。`requireFullExecution:true`
-禁止跳过前置门禁或断点续跑。
+禁止跳过前置门禁或断点续跑。写后门禁不要求无关的既有整页 geometry finding 归零。
 有意保留的独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'`
 登记为 INFO 例外；同一消费脚的本地被动件仍应先物理接入，不能借豁免逃避局部直连。
 
