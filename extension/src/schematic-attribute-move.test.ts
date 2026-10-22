@@ -12,10 +12,13 @@ function fixture(mode = '') {
  g.eda = {
   dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: project }) },
   dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: document, tabId: 'tab-1', documentType: mode === 'wrong-document-type' ? 3 : 1 }) },
-  sch_PrimitiveComponent: { get: async () => mode === 'wire-parent'
-   ? undefined
-   : { getState_PrimitiveId: () => mode === 'unsupported-parent' ? 'other-parent' : 'part-1', getState_ComponentType: () => mode === 'netflag-parent' ? 'netflag' : 'part' } },
-  sch_PrimitiveWire: { get: async () => mode === 'wire-parent'
+  sch_PrimitiveComponent: { get: async () => {
+   if (mode === 'wire-parent-throw') throw new Error('获取器件信息失败');
+   return mode === 'wire-parent'
+    ? undefined
+    : { getState_PrimitiveId: () => mode === 'unsupported-parent' ? 'other-parent' : 'part-1', getState_ComponentType: () => mode === 'netflag-parent' ? 'netflag' : 'part' };
+  } },
+  sch_PrimitiveWire: { get: async () => mode === 'wire-parent' || mode === 'wire-parent-throw'
    ? { getState_PrimitiveId: () => 'part-1' }
    : undefined },
   sch_PrimitiveAttribute: {
@@ -62,6 +65,13 @@ test('attribute move accepts a netflag Name attribute', async () => {
 
 test('attribute move accepts a native wire Name attribute', async () => {
  const f = fixture('wire-parent'); try {
+  const r: any = (await runAction('schematic.attribute.move', f.payload())).result;
+  assert.equal(r.verified, true); assert.equal(r.attempted, true);
+ } finally { f.restore(); }
+});
+
+test('attribute move falls back to the wire when component lookup throws', async () => {
+ const f = fixture('wire-parent-throw'); try {
   const r: any = (await runAction('schematic.attribute.move', f.payload())).result;
   assert.equal(r.verified, true); assert.equal(r.attempted, true);
  } finally { f.restore(); }

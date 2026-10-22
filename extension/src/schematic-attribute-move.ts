@@ -29,7 +29,16 @@ export async function moveSchematicAttribute(payload: State, readState: (attribu
 	const before = await readState(attribute!);
 	if (exactJSON(before) !== exactJSON(expected)) refuse('Attribute move original state changed or expected state is incomplete.');
 	const parentId = expected.ParentPrimitiveId as string;
-	const owner = await eda.sch_PrimitiveComponent.get(parentId);
+	let owner: { getState_PrimitiveId(): string; getState_ComponentType(): string } | undefined;
+	try {
+		owner = await eda.sch_PrimitiveComponent.get(parentId) as typeof owner;
+	}
+	catch {
+		// The component endpoint throws "获取器件信息失败" when the parent is a
+		// wire. That proves this probe did not find a component; the wire probe
+		// below is the authoritative fallback and any real host failure there is
+		// still surfaced.
+	}
 	let ownerValid = !!owner && owner.getState_PrimitiveId() === parentId
 		&& ['part', 'netflag', 'netport'].includes(String(owner.getState_ComponentType()));
 	if (!ownerValid) {
