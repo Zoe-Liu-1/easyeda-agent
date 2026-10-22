@@ -358,6 +358,9 @@ func powerOrientationRouteClear(c layoutComp, newBox layoutBBox, stub *destagger
 	if sheet == nil || len(path) < 2 {
 		return false
 	}
+	if !powerOrientationPathEndpointsClear(stub, path, wires) {
+		return false
+	}
 	if !powerOrientationMarkerBoxClear(c, newBox, items, comps, wires, stub.WireID, sheet, titleBlock) {
 		return false
 	}
@@ -404,6 +407,31 @@ func powerOrientationRouteClear(c layoutComp, newBox layoutBBox, stub *destagger
 				if segmentsCross2(
 					[2]float64{trimmed[0], trimmed[1]}, [2]float64{trimmed[2], trimmed[3]},
 					[2]float64{ws[0], ws[1]}, [2]float64{ws[2], ws[3]}) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// The host endpoint is intentionally shared with the original pin. Every
+// later vertex, including the final marker anchor, must be electrically clear
+// of foreign wire geometry. Segment-crossing checks trim both ends, so they
+// cannot catch a candidate that terminates exactly on another net's wire.
+func powerOrientationPathEndpointsClear(stub *destaggerStub, path [][2]float64,
+	wires []schGroupWire) bool {
+	if stub == nil || len(path) < 2 {
+		return false
+	}
+	for i := 1; i < len(path); i++ {
+		px, py := path[i][0], path[i][1]
+		for _, w := range wires {
+			if w.ID == stub.WireID {
+				continue
+			}
+			for _, s := range labelWireSegments(w) {
+				if pointOnSegment2(px, py, [2]float64{s[0], s[1]}, [2]float64{s[2], s[3]}) {
 					return false
 				}
 			}

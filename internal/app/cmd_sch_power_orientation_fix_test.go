@@ -47,3 +47,19 @@ func TestBuildPowerOrientationPlanTargetsGroundDown(t *testing.T) {
 		t.Fatalf("ground orientation proposal = %+v", got)
 	}
 }
+
+func TestPowerOrientationPathRejectsForeignWireAtEndpoint(t *testing.T) {
+	stub := &destaggerStub{WireID: "stub", HostX: 40, HostY: 70}
+	path := [][2]float64{{40, 70}, {20, 70}, {20, 60}}
+	wires := []schGroupWire{
+		{ID: "stub", Points: []float64{40, 70, 50, 70}},
+		{ID: "foreign", Points: []float64{10, 60, 30, 60}},
+	}
+	if powerOrientationPathEndpointsClear(stub, path, wires) {
+		t.Fatal("path endpoint on a foreign wire was accepted")
+	}
+	wires[1].Points = []float64{10, 55, 30, 55}
+	if !powerOrientationPathEndpointsClear(stub, path, wires) {
+		t.Fatal("clear path endpoint was rejected")
+	}
+}
