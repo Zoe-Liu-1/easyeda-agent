@@ -308,6 +308,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"verified", "partial", "preserved", "attempted", "moved", "before", "after", "requested", "identityBefore", "identityAfter", "errors"},
 		},
 		{
+			Name:        "schematic.attribute.modify",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Modify only the rotation, valueVisible, keyVisible, or value properties of one existing placed part Name/Designator/Value attribute through official sch_PrimitiveAttribute.modify. Bind exact project/document identity, primitive ID, and complete original native attribute state; refuse drift before writing. Independently reread the requested fields and preserve every unrequested field, including raw text, parent, visibility and style. Missing/partial/unverified readback fails with before/after evidence and never retries automatically. This is not visual-overlap or persistence acceptance.",
+			Inputs:      []string{"projectUuid", "documentUuid", "primitiveId", "expected (complete native attribute record from pagePrimitives.attributes)", "patch {rotation?, valueVisible?, keyVisible?, value?}"},
+			Outputs:     []string{"scope", "verified", "partial", "attempted", "before", "after", "requested", "notApplied", "identityBefore", "identityAfter", "errors"},
+		},
+		{
 			Name:        "schematic.designators.list",
 			Domain:      DomainSchematic,
 			Phase:       1,

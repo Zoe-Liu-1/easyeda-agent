@@ -21,6 +21,8 @@ func TestReadBudgetOnWire(t *testing.T) {
 		{"document.open", nil, 20 * time.Second, 32000},
 		{"schematic.attribute.move", nil, 20 * time.Second, 47000},
 		{"schematic.attribute.move", nil, 5 * time.Second, 5000},
+		{"schematic.attribute.modify", nil, 20 * time.Second, 47000},
+		{"schematic.attribute.modify", nil, 5 * time.Second, 5000},
 		{"schematic.page.open", nil, 20 * time.Second, 32000},
 		{"document.open", nil, 90 * time.Second, 90000},
 		{"document.open", nil, 5 * time.Second, 5000},
