@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.14.2] - 2026-10-22
+
+- 为侧载验证轮换扩展 UUID，避免宿主继续加载同 UUID 的旧扩展 bundle；设计动作与 1.14.1 一致。
+
 ## [1.14.1] - 2026-10-22
 
 - 新增 `schematic.attribute.modify` typed action：只允许修改绑定属性的 `rotation`、`valueVisible`、`keyVisible` 和 `value`，写后 fresh readback 逐字段验证。
