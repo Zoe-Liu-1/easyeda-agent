@@ -48,7 +48,6 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `dangling-wire` / `zero-length-wire` | 语义选择 | 先确认是否为有意命名端点；删除局部残支前核对共享树 |
 | `multi-net-wire` / `wire-bridge` / `wire-crossing` / `non-orthogonal-wire` | 重排重布 | 先找短路/并网来源，拆树或按正交通道重走；不得只删交叉点 |
 | `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 直接执行或重排重布 | `wire-reroute-fix` 只替换单段隔离线并搜索障碍感知正交通道；多段/共享树、端点不明或无路径保持 blocked |
-| `cross-chip-direct-wire` | 语义重排 | `wire-reroute-fix` 明确 blocked；芯片间应改为同名网络标签/模块端口，不能自动重画成另一根长直连 |
 | `pin-exit-direction` | 重排重布 | 首段先沿引脚外向再正交折线；`wire-reroute-fix` 只在完整单段替换可行时执行，多段共享树由对应功能级执行器重建 |
 | `signal-netflag-type` / `signal-netport-type` | 直接执行或显式阻断 | `signal-marker-fix` 把安全单桩替换为文字 net_label；共享/分支树阻断。模块边界端口用 `signal-port-exempt` 保留并审计 |
 | `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。候选终点落在异网导线上时硬拒绝。共享树、无单桩和反向脚保持 blocked，反向脚登记 `orientationExempt` |

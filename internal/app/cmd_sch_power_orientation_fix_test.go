@@ -63,3 +63,23 @@ func TestPowerOrientationPathRejectsForeignWireAtEndpoint(t *testing.T) {
 		t.Fatal("clear path endpoint was rejected")
 	}
 }
+
+func TestPowerOrientationAStarFallbackRespectsBodyDirections(t *testing.T) {
+	comps, wires := powerOrientationFixture("+3V3", flagBodyRotation["power"]["right"], 0)
+	flag := comps[0]
+	host := comps[1].Pins[0]
+	stub, reason := stubOfMarker(flag, wires)
+	if stub == nil || reason != "" {
+		t.Fatalf("fixture stub = %+v reason=%s", stub, reason)
+	}
+	got, ok := choosePowerOrientationPathAStar(
+		flag, stub, host, "right", "up", nil, comps, wires,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 300, MaxY: 300}, nil)
+	if !ok || got.NewAnchor == nil || len(got.NewStubPath) < 2 {
+		t.Fatalf("A* power proposal = %+v ok=%v", got, ok)
+	}
+	lastA, lastB := got.NewStubPath[len(got.NewStubPath)-2], got.NewStubPath[len(got.NewStubPath)-1]
+	if directionBetween(lastA, lastB) != "up" {
+		t.Fatalf("power marker must be entered upward: %+v", got.NewStubPath)
+	}
+}

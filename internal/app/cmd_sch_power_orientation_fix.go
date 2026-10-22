@@ -233,6 +233,9 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 		}
 		best, ok := choosePowerOrientationPath(c, stub, hostPin, outward, want, items, comps, wires, sheet, titleBlock)
 		if !ok {
+			best, ok = choosePowerOrientationPathAStar(c, stub, hostPin, outward, want, items, comps, wires, sheet, titleBlock)
+		}
+		if !ok {
 			base.Reason = "no-clear-vertical-marker-route"
 			out = append(out, base)
 			continue
@@ -350,6 +353,148 @@ func choosePowerOrientationPath(c layoutComp, stub *destaggerStub, host layoutPi
 		return powerOrientationProposal{}, false
 	}
 	return *best, true
+}
+
+// choosePowerOrientationPathAStar is the fallback used after the bounded
+// straight/elbow candidates fail. It searches the same 5-raw routing lattice
+// for a nearby vertical anchor and uses the shared obstacle-aware A* core.
+// The final segment must enter the marker from below for power-up and from
+// above for ground-down, so the visible connection point matches the body.
+func choosePowerOrientationPathAStar(c layoutComp, stub *destaggerStub, host layoutPin,
+	outward, want string, items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox) (powerOrientationProposal, bool) {
+	if sheet == nil || stub == nil {
+		return powerOrientationProposal{}, false
+	}
+	vertical := 1.0
+	if want == "down" {
+		vertical = -1
+	}
+	type anchorCandidate struct {
+		x, y float64
+		cost float64
+	}
+	var anchors []anchorCandidate
+	// The fast straight/elbow pass already covers short local offsets. This
+	// fallback deliberately searches a bounded set of wider lanes; expanding the
+	// full Cartesian grid here multiplies A* cost by every blocked marker.
+	for _, dx := range []float64{-120, -60, 0, 60, 120} {
+		for _, length := range []float64{40, 80, 120, 160, 200} {
+			x := host.X + dx
+			y := host.Y + vertical*length
+			anchors = append(anchors, anchorCandidate{
+				x: x, y: y, cost: math.Abs(dx) + length,
+			})
+		}
+	}
+	sort.Slice(anchors, func(i, j int) bool {
+		if anchors[i].cost != anchors[j].cost {
+			return anchors[i].cost < anchors[j].cost
+		}
+		if anchors[i].x != anchors[j].x {
+			return anchors[i].x < anchors[j].x
+		}
+		return anchors[i].y < anchors[j].y
+	})
+	start := [2]float64{host.X, host.Y}
+	for _, anchor := range anchors {
+		end := [2]float64{anchor.x, anchor.y}
+		newBox := predictedMarkerBBox(end[0], end[1], map[bool]string{true: "ground", false: "power"}[want == "down"], want, c.Net)
+		if !powerOrientationMarkerBoxClear(c, newBox, items, comps, wires, stub.WireID, sheet, titleBlock) {
+			continue
+		}
+		clear := func(p, q [2]float64) bool {
+			if pointEquals2(p[0], p[1], start) && !firstSegmentMatchesDir([][2]float64{p, q}, outward) {
+				return false
+			}
+			return powerOrientationSegmentClear(c, stub, host, p, q, items, comps, wires, sheet)
+		}
+		path, ok := dcFindOrthogonalPath(start, end, sheet, titleBlock, clear, 500)
+		if !ok || !firstSegmentMatchesDir(path, outward) {
+			continue
+		}
+		lastA, lastB := path[len(path)-2], path[len(path)-1]
+		if directionBetween(lastA, lastB) != want {
+			continue
+		}
+		if !powerOrientationRouteClear(c, newBox, stub, path, items, comps, wires, sheet, titleBlock) {
+			continue
+		}
+		h := checkPoint{X: host.X, Y: host.Y}
+		a := checkPoint{X: end[0], Y: end[1]}
+		return powerOrientationProposal{
+			Host: &h, NewAnchor: &a, NewStubPath: append([][2]float64(nil), path...),
+			Status: "ready",
+		}, true
+	}
+	return powerOrientationProposal{}, false
+}
+
+func powerOrientationSegmentClear(c layoutComp, stub *destaggerStub, host layoutPin,
+	p, q [2]float64, items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet *layoutBBox) bool {
+	trimPtr := trimSegmentAtPoints(
+		[4]float64{p[0], p[1], q[0], q[1]},
+		[]checkPoint{{X: host.X, Y: host.Y}},
+		0.5,
+	)
+	var trimmed [4]float64
+	if trimPtr == nil {
+		trimmed = [4]float64{p[0], p[1], q[0], q[1]}
+	} else {
+		trimmed = *trimPtr
+	}
+	const clearance = 2.0
+	if sheet != nil {
+		usable := schUsableArea(*sheet)
+		if !pointInBox2(trimmed[0], trimmed[1], usable, clearance) ||
+			!pointInBox2(trimmed[2], trimmed[3], usable, clearance) {
+			return false
+		}
+	}
+	for _, comp := range comps {
+		if comp.ID == c.ID || comp.BBox == nil || comp.ComponentType == "sheet" {
+			continue
+		}
+		if schSegmentCrossesBox(trimmed[0], trimmed[1], trimmed[2], trimmed[3],
+			inflateLayoutBBox(*comp.BBox, clearance)) {
+			return false
+		}
+		for _, pin := range comp.Pins {
+			if math.Abs(pin.X-host.X) <= 0.5 && math.Abs(pin.Y-host.Y) <= 0.5 {
+				continue
+			}
+			if pointNearSegment2(pin.X, pin.Y,
+				[2]float64{trimmed[0], trimmed[1]},
+				[2]float64{trimmed[2], trimmed[3]}, clearance) {
+				return false
+			}
+		}
+	}
+	for _, item := range items {
+		if item.ParentID == c.ID || item.BBox == nil {
+			continue
+		}
+		if schSegmentCrossesBox(trimmed[0], trimmed[1], trimmed[2], trimmed[3],
+			inflateLayoutBBox(*item.BBox, clearance)) {
+			return false
+		}
+	}
+	for _, wire := range wires {
+		if wire.ID == stub.WireID {
+			continue
+		}
+		for _, seg := range labelWireSegments(wire) {
+			if segmentsCross2(
+				[2]float64{trimmed[0], trimmed[1]},
+				[2]float64{trimmed[2], trimmed[3]},
+				[2]float64{seg[0], seg[1]},
+				[2]float64{seg[2], seg[3]}) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func powerOrientationRouteClear(c layoutComp, newBox layoutBBox, stub *destaggerStub,
