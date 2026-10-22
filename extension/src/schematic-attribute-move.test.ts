@@ -12,7 +12,12 @@ function fixture(mode = '') {
  g.eda = {
   dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: project }) },
   dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: document, tabId: 'tab-1', documentType: mode === 'wrong-document-type' ? 3 : 1 }) },
-  sch_PrimitiveComponent: { get: async () => ({ getState_PrimitiveId: () => 'part-1', getState_ComponentType: () => mode === 'parent-netflag' ? 'netflag' : 'part' }) },
+  sch_PrimitiveComponent: { get: async () => mode === 'wire-parent'
+   ? undefined
+   : { getState_PrimitiveId: () => mode === 'unsupported-parent' ? 'other-parent' : 'part-1', getState_ComponentType: () => mode === 'netflag-parent' ? 'netflag' : 'part' } },
+  sch_PrimitiveWire: { get: async () => mode === 'wire-parent'
+   ? { getState_PrimitiveId: () => 'part-1' }
+   : undefined },
   sch_PrimitiveAttribute: {
    get: async () => { reads++; if (mode === 'before-context-drift') document = 'other-page'; if (mode === 'fresh-missing' && reads > 1) return undefined; return attribute(); },
    modify: async (id: string, patch: any) => {
@@ -48,6 +53,20 @@ test('attribute move accepts a bound Value attribute', async () => {
  } finally { f.restore(); }
 });
 
+test('attribute move accepts a netflag Name attribute', async () => {
+ const f = fixture('netflag-parent'); try {
+  const r: any = (await runAction('schematic.attribute.move', f.payload())).result;
+  assert.equal(r.verified, true); assert.equal(r.attempted, true);
+ } finally { f.restore(); }
+});
+
+test('attribute move accepts a native wire Name attribute', async () => {
+ const f = fixture('wire-parent'); try {
+  const r: any = (await runAction('schematic.attribute.move', f.payload())).result;
+  assert.equal(r.verified, true); assert.equal(r.attempted, true);
+ } finally { f.restore(); }
+});
+
 test('attribute move no-op still rereads, without invoking modify', async () => {
  const f = fixture(); try {
   const r: any = (await runAction('schematic.attribute.move', { ...f.payload(), x: 10, y: 20 })).result;
@@ -55,7 +74,7 @@ test('attribute move no-op still rereads, without invoking modify', async () => 
  } finally { f.restore(); }
 });
 
-for (const mode of ['wrong-document-type', 'before-context-drift', 'parent-netflag', 'missing-getter-value']) {
+for (const mode of ['wrong-document-type', 'before-context-drift', 'unsupported-parent', 'missing-getter-value']) {
  test(`attribute move fails closed before write: ${mode}`, async () => {
   const f = fixture(mode); try { await assert.rejects(() => runAction('schematic.attribute.move', f.payload())); assert.equal(f.writes(), 0); } finally { f.restore(); }
  });

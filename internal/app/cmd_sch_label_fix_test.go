@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildLabelFixProposalsVisibilityAndOrientation(t *testing.T) {
 	hidden := false
@@ -42,5 +45,34 @@ func TestBuildLabelFixProposalsBlocksMissingNativeName(t *testing.T) {
 	if len(got) != 1 || got[0].Status != "blocked" ||
 		got[0].Reason != "missing-native-name-attribute" {
 		t.Fatalf("missing-name blocker = %+v", got)
+	}
+}
+
+func TestNewAttributedVisibleTextConflictsOnlyClaimsChangedText(t *testing.T) {
+	before := map[string]bool{"visible-text-overlap|old|[]|wire-old|": true}
+	after := []checkFinding{
+		{Type: "visible-text-overlap", PrimitiveId: "old", WirePrimitiveId: "wire-old"},
+		{Type: "visible-text-overlap", PrimitiveId: "label-a", WirePrimitiveId: "wire-a"},
+		{Type: "visible-text-overlap", PrimitiveId: "foreign", WirePrimitiveId: "wire-b"},
+	}
+	conflicts, unattributed := newAttributedVisibleTextConflicts(
+		before, after, map[string]bool{"label-a": true})
+	if len(conflicts) != 1 || !strings.Contains(conflicts["label-a"], "wire-a") {
+		t.Fatalf("conflicts = %+v", conflicts)
+	}
+	if len(unattributed) != 1 || unattributed[0].PrimitiveId != "foreign" {
+		t.Fatalf("unattributed = %+v", unattributed)
+	}
+}
+
+func TestPartitionLabelFixProposalsSeparatesPostWriteConflicts(t *testing.T) {
+	applied := []labelFixProposal{
+		{AttributeID: "a1"},
+		{AttributeID: "a2"},
+	}
+	conflicts := map[string]string{"a2": "visible-text-overlap|a2|[]|w2|"}
+	rejected, kept := partitionLabelFixProposals(applied, conflicts)
+	if len(rejected) != 1 || rejected[0].AttributeID != "a2" || len(kept) != 1 {
+		t.Fatalf("partition rejected=%+v kept=%+v", rejected, kept)
 	}
 }

@@ -20,6 +20,8 @@ type labelFixProposal struct {
 	Patch       map[string]any `json:"patch"`
 	Status      string         `json:"status"` // ready | blocked
 	Reason      string         `json:"reason,omitempty"`
+	MovedFrom   *checkPoint    `json:"movedFrom,omitempty"`
+	MovedTo     *checkPoint    `json:"movedTo,omitempty"`
 	Original    map[string]any `json:"-"`
 }
 
@@ -97,7 +99,7 @@ Without --apply this command is read-only.`,
 			if report.Blocked > 0 && !allowPartial {
 				return fmt.Errorf("label-fix: %d proposal(s) are blocked; pass --allow-partial to apply only ready items", report.Blocked)
 			}
-			if err := executeLabelFix(pinned, win, doc, scene, &report, save, stderr); err != nil {
+			if err := executeLabelFix(pinned, win, doc, scene, &report, save, allowPartial, stderr); err != nil {
 				return err
 			}
 			return writeLabelFixReport(stdout, out, report)
@@ -279,7 +281,7 @@ func filterLabelFixProposals(in []labelFixProposal, wanted map[string]bool) []la
 }
 
 func executeLabelFix(pinned *appConfig, win, doc string, scene labelFixScene,
-	report *labelFixReport, save bool, stderr io.Writer) error {
+	report *labelFixReport, save, allowPartial bool, stderr io.Writer) error {
 	beforeNets, _, err := readLiveNets(pinned, win)
 	if err != nil {
 		return fmt.Errorf("label-fix: baseline netlist: %w", err)
@@ -346,9 +348,50 @@ func executeLabelFix(pinned *appConfig, win, doc string, scene labelFixScene,
 			return rollback(fmt.Errorf("label-fix: target finding remains after write: %s %s", find.Type, find.PrimitiveId))
 		}
 	}
-	for sig := range findingSignatureSet(afterScene.extra) {
-		if !beforeExtras[sig] {
-			return rollback(fmt.Errorf("label-fix: repair introduced visible-text finding: %s", sig))
+	conflicts, unattributed := newAttributedVisibleTextConflicts(beforeExtras, afterScene.extra, changed)
+	if len(unattributed) > 0 || (len(conflicts) > 0 && !allowPartial) {
+		added := findingSignatureSet(unattributed)
+		for _, sig := range conflicts {
+			added[sig] = true
+		}
+		return rollback(fmt.Errorf("label-fix: repair introduced visible-text finding: %s", strings.Join(sortedSet(added), ",")))
+	}
+	if len(conflicts) > 0 {
+		moved, unresolved, err := relocateLabelFixConflicts(
+			pinned, win, doc, beforeExtras, changed, conflicts, report)
+		if err != nil {
+			return rollback(fmt.Errorf("label-fix: relocate conflicting proposals: %w", err))
+		}
+		if len(unresolved) > 0 {
+			applied, err = rollbackConflictingLabelFixes(pinned, win, doc, applied, unresolved, report)
+			if err != nil {
+				return rollback(fmt.Errorf("label-fix: rollback conflicting proposals: %w", err))
+			}
+		}
+		if moved > 0 {
+			report.Notes = append(report.Notes,
+				fmt.Sprintf("relocated %d conflicting label(s) to clear local slots", moved))
+		}
+		afterScene, err = readLabelFixScene(pinned, win, doc, io.Discard)
+		if err != nil {
+			return rollback(err)
+		}
+		changed = map[string]bool{}
+		for _, proposal := range applied {
+			changed[proposal.AttributeID] = true
+		}
+		for _, find := range append(netLabelVisibilityFindings(afterScene.items), netLabelOrientationFindings(afterScene.items)...) {
+			if changed[find.PrimitiveId] {
+				return rollback(fmt.Errorf("label-fix: target finding remains after partial rollback: %s %s", find.Type, find.PrimitiveId))
+			}
+		}
+		lateConflicts, lateUnattributed := newAttributedVisibleTextConflicts(beforeExtras, afterScene.extra, changed)
+		if len(lateConflicts) > 0 || len(lateUnattributed) > 0 {
+			added := findingSignatureSet(lateUnattributed)
+			for _, sig := range lateConflicts {
+				added[sig] = true
+			}
+			return rollback(fmt.Errorf("label-fix: visible-text conflict remains after partial rollback: %s", strings.Join(sortedSet(added), ",")))
 		}
 	}
 	afterNets, _, err := readLiveNets(pinned, win)
@@ -374,8 +417,173 @@ func executeLabelFix(pinned *appConfig, win, doc string, scene labelFixScene,
 		report.Saved = true
 	}
 	report.Applied = true
-	fmt.Fprintf(stderr, "✓ label-fix applied %d attribute patch(es)\n", len(report.AppliedIDs))
+	fmt.Fprintf(stderr, "✓ label-fix applied %d attribute patch(es), blocked %d post-write conflict(s)\n",
+		len(report.AppliedIDs), len(conflicts))
 	return nil
+}
+
+// newAttributedVisibleTextConflicts separates new layout findings caused by
+// attributes changed in this run from findings that cannot be attributed to a
+// label patch. Only visible-text overlaps whose text-side primitiveId belongs
+// to this batch may be isolated by --allow-partial.
+func newAttributedVisibleTextConflicts(before map[string]bool, after []checkFinding,
+	changed map[string]bool) (map[string]string, []checkFinding) {
+	conflicts := map[string]string{}
+	var unattributed []checkFinding
+	for _, find := range after {
+		sig := findingSignature(find)
+		if before[sig] {
+			continue
+		}
+		if find.Type == "visible-text-overlap" && changed[find.PrimitiveId] {
+			conflicts[find.PrimitiveId] = sig
+			continue
+		}
+		unattributed = append(unattributed, find)
+	}
+	return conflicts, unattributed
+}
+
+func rollbackConflictingLabelFixes(pinned *appConfig, win, doc string,
+	applied []labelFixProposal, conflicts map[string]string, report *labelFixReport) ([]labelFixProposal, error) {
+	rejected, kept := partitionLabelFixProposals(applied, conflicts)
+	if len(rejected) == 0 {
+		return applied, nil
+	}
+	if err := rollbackLabelFixes(pinned, win, doc, rejected); err != nil {
+		return nil, err
+	}
+	for i := range report.Proposals {
+		sig, blocked := conflicts[report.Proposals[i].AttributeID]
+		if !blocked {
+			continue
+		}
+		reason := strings.TrimSpace(sig)
+		if !strings.HasPrefix(reason, "post-write visible-text-overlap:") {
+			reason = "post-write visible-text-overlap: " + reason
+		}
+		report.Proposals[i].Status = "blocked"
+		report.Proposals[i].Reason = reason
+	}
+	report.Blocked += len(rejected)
+	report.AppliedIDs = report.AppliedIDs[:0]
+	for _, proposal := range kept {
+		report.AppliedIDs = append(report.AppliedIDs, proposal.AttributeID)
+	}
+	report.Notes = append(report.Notes,
+		fmt.Sprintf("isolated %d post-write visible-text conflict(s) and restored their original attributes", len(rejected)))
+	return kept, nil
+}
+
+// relocateLabelFixConflicts keeps the requested visibility/orientation patch
+// when the same visible-text planner can move that label to a nearby safe slot.
+// A proposal is left visible only when the moved geometry clears the complete
+// conflict set; otherwise its move is reversed and the caller restores the
+// original attribute visibility/orientation.
+func relocateLabelFixConflicts(pinned *appConfig, win, doc string, before map[string]bool,
+	changed map[string]bool, conflicts map[string]string, report *labelFixReport) (
+	movedCount int, unresolved map[string]string, err error) {
+	unresolved = map[string]string{}
+	scene, err := readVisualTextFixScene(pinned, win, doc, io.Discard)
+	if err != nil {
+		return 0, unresolved, err
+	}
+	wanted := map[string]bool{}
+	for id := range conflicts {
+		wanted[id] = true
+	}
+	proposals := filterVisualTextProposals(scene.proposals, wanted)
+	byID := map[string]visualTextFixProposal{}
+	for _, proposal := range proposals {
+		byID[proposal.PrimitiveID] = proposal
+	}
+	var moved []visualTextFixProposal
+	for id, sig := range conflicts {
+		proposal, ok := byID[id]
+		if !ok {
+			unresolved[id] = "no visual-text relocation proposal: " + sig
+			continue
+		}
+		if proposal.Status != "ready" || proposal.ToAnchor == nil {
+			unresolved[id] = "no-clear-local-text-slot: " + sig
+			continue
+		}
+		if err := executeVisualTextProposal(pinned, win, doc, proposal); err != nil {
+			if rollbackErr := rollbackVisualTextFixes(pinned, win, doc, moved); rollbackErr != nil {
+				return 0, unresolved, fmt.Errorf("move failed (%v); move rollback failed: %w", err, rollbackErr)
+			}
+			return 0, unresolved, err
+		}
+		moved = append(moved, proposal)
+		for i := range report.Proposals {
+			if report.Proposals[i].AttributeID != id {
+				continue
+			}
+			report.Proposals[i].MovedFrom = proposal.FromAnchor
+			report.Proposals[i].MovedTo = proposal.ToAnchor
+			break
+		}
+	}
+	if len(moved) == 0 {
+		return 0, unresolved, nil
+	}
+
+	after, err := readLabelFixScene(pinned, win, doc, io.Discard)
+	if err != nil {
+		_ = rollbackVisualTextFixes(pinned, win, doc, moved)
+		return 0, unresolved, err
+	}
+	lateConflicts, unattributed := newAttributedVisibleTextConflicts(before, after.extra, changed)
+	if len(unattributed) > 0 {
+		added := findingSignatureSet(unattributed)
+		for _, sig := range lateConflicts {
+			added[sig] = true
+		}
+		if rollbackErr := rollbackVisualTextFixes(pinned, win, doc, moved); rollbackErr != nil {
+			return 0, unresolved, fmt.Errorf("new unattributed conflict; move rollback failed: %w", rollbackErr)
+		}
+		for id, sig := range conflicts {
+			unresolved[id] = "relocation introduced an unattributed conflict: " + sig +
+				"; " + strings.Join(sortedSet(added), ",")
+		}
+		return 0, unresolved, nil
+	}
+	for id := range lateConflicts {
+		if _, wasConflict := conflicts[id]; !wasConflict {
+			if rollbackErr := rollbackVisualTextFixes(pinned, win, doc, moved); rollbackErr != nil {
+				return 0, unresolved, fmt.Errorf("move introduced a new label conflict; move rollback failed: %w", rollbackErr)
+			}
+			for blockedID, sig := range conflicts {
+				unresolved[blockedID] = "relocation introduced another visible-text conflict: " + sig
+			}
+			return 0, unresolved, nil
+		}
+	}
+	var failedMoves []visualTextFixProposal
+	for _, proposal := range moved {
+		if sig, remains := lateConflicts[proposal.PrimitiveID]; remains {
+			unresolved[proposal.PrimitiveID] = sig
+			failedMoves = append(failedMoves, proposal)
+		}
+	}
+	if len(failedMoves) > 0 {
+		if err := rollbackVisualTextFixes(pinned, win, doc, failedMoves); err != nil {
+			return 0, unresolved, err
+		}
+	}
+	return len(moved) - len(failedMoves), unresolved, nil
+}
+
+func partitionLabelFixProposals(applied []labelFixProposal, conflicts map[string]string) (
+	rejected, kept []labelFixProposal) {
+	for _, proposal := range applied {
+		if _, blocked := conflicts[proposal.AttributeID]; blocked {
+			rejected = append(rejected, proposal)
+		} else {
+			kept = append(kept, proposal)
+		}
+	}
+	return rejected, kept
 }
 
 func rollbackLabelFixes(pinned *appConfig, win, doc string, applied []labelFixProposal) error {
@@ -430,8 +638,21 @@ func rollbackLabelFixes(pinned *appConfig, win, doc string, applied []labelFixPr
 func findingSignatureSet(findings []checkFinding) map[string]bool {
 	out := map[string]bool{}
 	for _, f := range findings {
-		out[fmt.Sprintf("%s|%s|%v|%s|%s", f.Type, f.PrimitiveId, f.PrimitiveIds,
-			f.WirePrimitiveId, f.MarkerPrimitiveId)] = true
+		out[findingSignature(f)] = true
 	}
+	return out
+}
+
+func findingSignature(f checkFinding) string {
+	return fmt.Sprintf("%s|%s|%v|%s|%s", f.Type, f.PrimitiveId, f.PrimitiveIds,
+		f.WirePrimitiveId, f.MarkerPrimitiveId)
+}
+
+func sortedSet(in map[string]bool) []string {
+	out := make([]string, 0, len(in))
+	for item := range in {
+		out = append(out, item)
+	}
+	sort.Strings(out)
 	return out
 }

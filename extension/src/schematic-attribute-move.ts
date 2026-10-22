@@ -28,8 +28,15 @@ export async function moveSchematicAttribute(payload: State, readState: (attribu
 	if (!attribute || attribute.getState_PrimitiveId() !== id) refuse('Attribute move target is missing or has a different ID.');
 	const before = await readState(attribute!);
 	if (exactJSON(before) !== exactJSON(expected)) refuse('Attribute move original state changed or expected state is incomplete.');
-	const parent = await eda.sch_PrimitiveComponent.get(expected.ParentPrimitiveId as string);
-	if (!parent || parent.getState_PrimitiveId() !== expected.ParentPrimitiveId || String(parent.getState_ComponentType()) !== 'part') refuse('Attribute move supports only an existing placed part attribute.');
+	const parentId = expected.ParentPrimitiveId as string;
+	const owner = await eda.sch_PrimitiveComponent.get(parentId);
+	let ownerValid = !!owner && owner.getState_PrimitiveId() === parentId
+		&& ['part', 'netflag', 'netport'].includes(String(owner.getState_ComponentType()));
+	if (!ownerValid) {
+		const wire = await eda.sch_PrimitiveWire.get(parentId);
+		ownerValid = !!wire && wire.getState_PrimitiveId() === parentId;
+	}
+	if (!ownerValid) refuse('Attribute move target parent must be an existing placed part, wire, netflag or netport.');
 	const prewrite = await readResponseContext();
 	if (mutationContextError(identityBefore, prewrite) || !prewrite.tabId) refuse('Attribute move context changed before write.');
 	const requested = { x: payload.x as number, y: payload.y as number };
