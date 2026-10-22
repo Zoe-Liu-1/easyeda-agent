@@ -464,6 +464,9 @@ func powerOrientationSegmentClear(c layoutComp, stub *destaggerStub, host layout
 			if math.Abs(pin.X-host.X) <= 0.5 && math.Abs(pin.Y-host.Y) <= 0.5 {
 				continue
 			}
+			if powerOrientationPinLeadTouchesSegment(comp, pin, p, q) {
+				return false
+			}
 			if pointNearSegment2(pin.X, pin.Y,
 				[2]float64{trimmed[0], trimmed[1]},
 				[2]float64{trimmed[2], trimmed[3]}, clearance) {
@@ -528,6 +531,11 @@ func powerOrientationRouteClear(c layoutComp, newBox layoutBBox, stub *destagger
 			for _, pin := range o.Pins {
 				if math.Abs(pin.X-stub.HostX) <= 0.5 && math.Abs(pin.Y-stub.HostY) <= 0.5 {
 					continue
+				}
+				if powerOrientationPinLeadTouchesSegment(o, pin,
+					[2]float64{trimmed[0], trimmed[1]},
+					[2]float64{trimmed[2], trimmed[3]}) {
+					return false
 				}
 				if pointNearSegment2(pin.X, pin.Y, [2]float64{trimmed[0], trimmed[1]},
 					[2]float64{trimmed[2], trimmed[3]}, clearance) {
@@ -606,6 +614,11 @@ func powerOrientationMarkerBoxClear(c layoutComp, newBox layoutBBox, items []vis
 		if anyOverlap(newBoxGrown, *o.BBox) {
 			return false
 		}
+		for _, pin := range o.Pins {
+			if powerOrientationPinLeadCrossesBox(o, pin, newBoxGrown) {
+				return false
+			}
+		}
 	}
 	for _, it := range items {
 		if it.ParentID == c.ID || it.BBox == nil {
@@ -626,6 +639,39 @@ func powerOrientationMarkerBoxClear(c layoutComp, newBox layoutBBox, items []vis
 		}
 	}
 	return true
+}
+
+func powerOrientationPinLeadTouchesSegment(comp layoutComp, pin layoutPin, p, q [2]float64) bool {
+	leadStart, leadEnd, ok := powerOrientationPinLead(comp, pin)
+	if !ok {
+		return false
+	}
+	return schguard.SegmentTouchesPinLead(
+		schguard.Point{X: p[0], Y: p[1]},
+		schguard.Point{X: q[0], Y: q[1]},
+		leadStart, leadEnd, schguard.Point{X: pin.X, Y: pin.Y},
+	)
+}
+
+func powerOrientationPinLeadCrossesBox(comp layoutComp, pin layoutPin, box layoutBBox) bool {
+	leadStart, leadEnd, ok := powerOrientationPinLead(comp, pin)
+	if !ok {
+		return false
+	}
+	return schSegmentCrossesBox(leadStart.X, leadStart.Y, leadEnd.X, leadEnd.Y, box)
+}
+
+func powerOrientationPinLead(comp layoutComp, pin layoutPin) (schguard.Point, schguard.Point, bool) {
+	if comp.BBox == nil || !pin.RotationKnown {
+		return schguard.Point{}, schguard.Point{}, false
+	}
+	return schguard.PinLeadInterval(
+		schguard.Point{X: pin.X, Y: pin.Y}, pin.Rotation,
+		schguard.BBox{
+			MinX: comp.BBox.MinX, MinY: comp.BBox.MinY,
+			MaxX: comp.BBox.MaxX, MaxY: comp.BBox.MaxY,
+		},
+	)
 }
 
 func filterPowerOrientationProposals(in []powerOrientationProposal, wanted map[string]bool) []powerOrientationProposal {
@@ -797,27 +843,17 @@ func rollbackPowerOrientation(pinned *appConfig, win, doc string, applied []appl
 		if app.Proposal.Original == nil || app.Proposal.OriginalStub == nil || app.Proposal.Host == nil {
 			return fmt.Errorf("rollback proposal %s missing original geometry", app.Proposal.MarkerID)
 		}
-		if len(app.NewWireIDs) == 0 {
-			return fmt.Errorf("rollback %s has no new wire id", app.Proposal.MarkerID)
+		if app.NewMarkerID == "" || len(app.NewWireIDs) == 0 {
+			return fmt.Errorf("rollback %s has incomplete new marker/wire identities", app.Proposal.MarkerID)
 		}
-		finalWireID := app.NewWireIDs[len(app.NewWireIDs)-1]
-		connectX := float64(app.Proposal.NewStubPath[len(app.Proposal.NewStubPath)-2][0])
-		connectY := float64(app.Proposal.NewStubPath[len(app.Proposal.NewStubPath)-2][1])
-		disc, err := requestAutolayoutAction(pinned, "schematic.pin.disconnect", win, map[string]any{
-			"wirePrimitiveId": finalWireID, "pinX": connectX, "pinY": connectY,
-		}, doc, "power-orientation-fix 回滚新支路")
+		artifactIDs := append([]string{app.NewMarkerID}, app.NewWireIDs...)
+		deleted, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
+			map[string]any{"primitiveIds": artifactIDs}, doc, "power-orientation-fix 回滚新支路")
 		if err != nil {
 			return err
 		}
-		if disc.Result["disconnected"] != true || disc.Result["partial"] == true {
-			return fmt.Errorf("new marker branch disconnect not proven during rollback")
-		}
-		if len(app.NewWireIDs) > 1 {
-			if _, derr := requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
-				map[string]any{"primitiveIds": app.NewWireIDs[:len(app.NewWireIDs)-1]},
-				doc, "power-orientation-fix 回滚前置路径"); derr != nil {
-				return derr
-			}
+		if err := verifyPowerOrientationArtifactDeletion(deleted, artifactIDs); err != nil {
+			return err
 		}
 		old := app.Proposal.Original
 		stub := app.Proposal.OriginalStub
@@ -831,6 +867,40 @@ func rollbackPowerOrientation(pinned *appConfig, win, doc string, applied []appl
 		}, doc, "power-orientation-fix 恢复原支路"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func verifyPowerOrientationArtifactDeletion(res *actionResult, wantIDs []string) error {
+	if res == nil || res.Result == nil {
+		return fmt.Errorf("rollback delete returned no verification result")
+	}
+	if res.Result["verified"] == false {
+		return fmt.Errorf("rollback delete result is unverified")
+	}
+	if partial, _ := res.Result["partial"].(bool); partial {
+		return fmt.Errorf("rollback delete is partial")
+	}
+	removed := confirmedDeletedIDSet(res.Result)
+	if absent, ok := res.Result["notFound"].(map[string]any); ok {
+		for id := range survivedIDSet(map[string]any{"survived": absent}) {
+			removed[id] = true
+		}
+	}
+	var missing []string
+	seen := map[string]bool{}
+	for _, id := range wantIDs {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if !removed[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("rollback delete did not prove removal of %s", strings.Join(missing, ","))
 	}
 	return nil
 }
