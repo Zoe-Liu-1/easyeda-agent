@@ -3162,6 +3162,60 @@ test('net_label.delete validates wire parents and proves deletion through typed 
 	assert.equal(wires.length, 1, 'deleting a name attribute must preserve its parent wire');
 });
 
+test('wire_tree.rebuild_without_labels deletes exact wires and recreates geometry without Net', async t => {
+	let wires = new Map<string, any>([
+		['wire-a', {
+			getState_PrimitiveId: () => 'wire-a', getState_Line: () => [0, 0, 10, 0],
+			getState_Net: () => 'GND', getState_Color: () => '#00AA00', getState_LineWidth: () => 1, getState_LineType: () => 0,
+		}],
+		['wire-b', {
+			getState_PrimitiveId: () => 'wire-b', getState_Line: () => [20, 0, 30, 0],
+			getState_Net: () => 'GND', getState_Color: () => null, getState_LineWidth: () => null, getState_LineType: () => null,
+		}],
+	]);
+	const createCalls: Array<any[]> = [];
+	let nextId = 1;
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => [...wires.values()],
+			delete: async (ids: string[]) => {
+				for (const id of ids) wires.delete(id);
+				return true;
+			},
+			create: async (...args: any[]) => {
+				createCalls.push(args);
+				const id = `new-${nextId++}`;
+				const wire = {
+					getState_PrimitiveId: () => id, getState_Line: () => args[0],
+					getState_Net: () => args[1], getState_Color: () => args[2],
+					getState_LineWidth: () => args[3], getState_LineType: () => args[4],
+				};
+				wires.set(id, wire);
+				return wire;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.rebuild_without_labels', { items: [
+		{ primitiveId: 'wire-a', points: [0, 0, 10, 0] },
+		{ primitiveId: 'wire-b', points: [20, 0, 30, 0] },
+	] });
+	assert.equal(res.result.verified, true);
+	assert.deepEqual(res.result.deletedIds, ['wire-a', 'wire-b']);
+	assert.deepEqual(res.result.createdIds, ['new-1', 'new-2']);
+	assert.equal(createCalls.length, 2);
+	assert.equal(createCalls[0][1], undefined, 'rebuilt wires must omit the Net property to drop attached Name labels');
+	assert.equal(wires.size, 2);
+});
+
 // ─── schematic.component.delete cascade (ADR-0004 Decision 5) ────────────────
 // Deleting a part must also remove its EXCLUSIVE stub-wire trees + the netflags
 // riding them (the residue is a ghost-connection boobytrap: the next part placed

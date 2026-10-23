@@ -7,19 +7,21 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 type markerCleanReport struct {
-	SchemaVersion int                `json:"schemaVersion"`
-	DocumentID    string             `json:"documentId"`
-	Candidates    []markerCleanGroup `json:"candidates"`
-	DeleteIds     []string           `json:"deleteIds,omitempty"`
-	Applied       bool               `json:"applied"`
-	Saved         bool               `json:"saved,omitempty"`
-	Blockers      []string           `json:"blockers,omitempty"`
-	Notes         []string           `json:"notes,omitempty"`
+	SchemaVersion int                       `json:"schemaVersion"`
+	DocumentID    string                    `json:"documentId"`
+	Candidates    []markerCleanGroup        `json:"candidates"`
+	WireTreePlans []markerCleanWireTreePlan `json:"wireTreePlans,omitempty"`
+	DeleteIds     []string                  `json:"deleteIds,omitempty"`
+	Applied       bool                      `json:"applied"`
+	Saved         bool                      `json:"saved,omitempty"`
+	Blockers      []string                  `json:"blockers,omitempty"`
+	Notes         []string                  `json:"notes,omitempty"`
 }
 
 type markerCleanGroup struct {
@@ -30,9 +32,25 @@ type markerCleanGroup struct {
 	VisibleIds    []string `json:"visibleIds,omitempty"`
 }
 
+type markerCleanWireReplay struct {
+	PrimitiveID string         `json:"primitiveId"`
+	Points      []float64      `json:"points"`
+	Net         string         `json:"net,omitempty"`
+	Style       map[string]any `json:"style,omitempty"`
+}
+
+type markerCleanWireTreePlan struct {
+	RootID    string                  `json:"rootId"`
+	Net       string                  `json:"net"`
+	WireIDs   []string                `json:"wireIds"`
+	LabelIDs  []string                `json:"labelIds"`
+	MarkerIDs []string                `json:"markerIds"`
+	Replays   []markerCleanWireReplay `json:"replays"`
+}
+
 func newSchMarkerCleanCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var deleteRaw, out string
-	var apply, save bool
+	var apply, save, rebuildWireTrees bool
 	cmd := &cobra.Command{
 		Use:   "marker-clean",
 		Short: "Safely remove explicitly selected duplicate or redundant net names",
@@ -49,7 +67,7 @@ after deletion. Without --apply it is read-only.`,
 			if err != nil {
 				return err
 			}
-			report, restore, err := freshMarkerCleanReport(pinned, win, doc, deleteRaw, apply, save)
+			report, restore, err := freshMarkerCleanReport(pinned, win, doc, deleteRaw, apply, save, rebuildWireTrees)
 			if err != nil {
 				return err
 			}
@@ -68,7 +86,7 @@ after deletion. Without --apply it is read-only.`,
 				fmt.Fprintln(stderr, "marker-clean: dry-run only; pass --delete <ids> --apply to remove selected names")
 				return nil
 			}
-			if err := executeMarkerClean(pinned, win, doc, &report, restore, save, stdout, stderr); err != nil {
+			if err := executeMarkerClean(pinned, win, doc, &report, restore, rebuildWireTrees, save, stdout, stderr); err != nil {
 				return err
 			}
 			raw, err := json.MarshalIndent(report, "", "  ")
@@ -85,6 +103,8 @@ after deletion. Without --apply it is read-only.`,
 	cmd.Flags().StringVar(&deleteRaw, "delete", "", "explicit primitive IDs to delete after reviewing candidates")
 	cmd.Flags().BoolVar(&apply, "apply", false, "execute the explicit deletion")
 	cmd.Flags().BoolVar(&save, "save", false, "save after netlist-preserving verification")
+	cmd.Flags().BoolVar(&rebuildWireTrees, "rebuild-wire-trees", false,
+		"rebuild proof-safe parent wire trees without wire Name attributes when the host has no attribute delete")
 	cmd.Flags().StringVar(&out, "out", "", "write structured report to JSON")
 	return cmd
 }
@@ -95,7 +115,7 @@ type markerRestore struct {
 	anchor    checkPoint
 }
 
-func freshMarkerCleanReport(pinned *appConfig, win, doc, deleteRaw string, apply, save bool) (markerCleanReport, map[string]markerRestore, error) {
+func freshMarkerCleanReport(pinned *appConfig, win, doc, deleteRaw string, apply, save, rebuildWireTrees bool) (markerCleanReport, map[string]markerRestore, error) {
 	geom, err := requestAction(pinned, "schematic.components.list", win, map[string]any{
 		"includeBBox": true, "includePins": true, "includePinNets": true, "includePagePrimitives": true,
 	})
@@ -168,8 +188,13 @@ func freshMarkerCleanReport(pinned *appConfig, win, doc, deleteRaw string, apply
 		report.DeleteIds = mapKeys(requested)
 		report.Blockers = markerCleanBlockers(report.Candidates, requested, visible)
 	}
-	report.Blockers = uniqueSorted(report.Blockers)
 	restore := markerRestoreMap(comps, vision.Items, anchors, requested)
+	if rebuildWireTrees && len(requested) > 0 {
+		plans, planBlockers := markerCleanWireTreePlans(geom.Result, comps, wires, vision.Items, requested, restore)
+		report.WireTreePlans = plans
+		report.Blockers = append(report.Blockers, planBlockers...)
+	}
+	report.Blockers = uniqueSorted(report.Blockers)
 	if apply && len(report.DeleteIds) == 0 {
 		return report, restore, fmt.Errorf("marker-clean: --apply requires --delete with explicit candidate IDs")
 	}
@@ -177,6 +202,170 @@ func freshMarkerCleanReport(pinned *appConfig, win, doc, deleteRaw string, apply
 		return report, restore, fmt.Errorf("marker-clean refused: %s", strings.Join(report.Blockers, "; "))
 	}
 	return report, restore, nil
+}
+
+func markerCleanWireTreePlans(geomResult map[string]any, comps []layoutComp, wires []schGroupWire,
+	items []visibleTextItem, requested map[string]bool, restore map[string]markerRestore) ([]markerCleanWireTreePlan, []string) {
+	find, wireIndex := wireTreeFinder(wires)
+	type pendingPlan struct {
+		root     int
+		net      string
+		labelIDs []string
+	}
+	plansByRoot := map[int]*pendingPlan{}
+	var blockers []string
+	for id := range requested {
+		item, ok := restore[id]
+		if !ok || item.component != nil {
+			continue
+		}
+		if item.label == nil || item.label.ParentID == "" {
+			blockers = append(blockers, "wire-tree-rebuild:name-parent-unresolved:"+id)
+			continue
+		}
+		idx, ok := wireIndex[item.label.ParentID]
+		if !ok {
+			blockers = append(blockers, "wire-tree-rebuild:parent-wire-not-found:"+id)
+			continue
+		}
+		root := find(idx)
+		plan := plansByRoot[root]
+		if plan == nil {
+			plan = &pendingPlan{root: root, net: item.label.Value}
+			plansByRoot[root] = plan
+		}
+		if plan.net == "" || plan.net != item.label.Value {
+			blockers = append(blockers, "wire-tree-rebuild:mixed-or-unknown-net:"+item.label.ParentID)
+			continue
+		}
+		plan.labelIDs = append(plan.labelIDs, id)
+	}
+	styles := markerCleanWireStyles(geomResult)
+	visibleMarkerNames := map[string]bool{}
+	for _, item := range items {
+		if item.Key == "Name" && item.ParentID != "" && strings.TrimSpace(item.Value) != "" &&
+			(item.Visible == nil || *item.Visible) {
+			visibleMarkerNames[item.ParentID] = true
+		}
+	}
+	var plans []markerCleanWireTreePlan
+	for _, pending := range plansByRoot {
+		var tree []schGroupWire
+		for i, wire := range wires {
+			if find(i) == pending.root {
+				tree = append(tree, wire)
+			}
+		}
+		sort.Slice(tree, func(i, j int) bool { return tree[i].ID < tree[j].ID })
+		if len(tree) == 0 {
+			blockers = append(blockers, "wire-tree-rebuild:empty-tree")
+			continue
+		}
+		wireSet := map[string]bool{}
+		for _, wire := range tree {
+			wireSet[wire.ID] = true
+		}
+		var markerIDs []string
+		for _, comp := range comps {
+			if !isSchMarker(comp.ComponentType) || comp.Net != pending.net || requested[comp.ID] ||
+				!visibleMarkerNames[comp.ID] {
+				continue
+			}
+			for _, wire := range tree {
+				if wireTouchesPoint(wire, comp.X, comp.Y) {
+					markerIDs = append(markerIDs, comp.ID)
+					break
+				}
+			}
+		}
+		sort.Strings(markerIDs)
+		if len(markerIDs) == 0 {
+			blockers = append(blockers, "wire-tree-rebuild:no-surviving-visible-marker:"+pending.net)
+			continue
+		}
+		mixed := ""
+		for _, item := range items {
+			if !wireSet[item.ParentID] || strings.TrimSpace(item.Value) == "" {
+				continue
+			}
+			if item.Visible != nil && !*item.Visible {
+				continue
+			}
+			if item.Value != pending.net {
+				mixed = item.Value
+				break
+			}
+		}
+		if mixed != "" {
+			blockers = append(blockers, "wire-tree-rebuild:mixed-label-net:"+pending.net+":"+mixed)
+			continue
+		}
+		replays := make([]markerCleanWireReplay, 0, len(tree))
+		invalid := false
+		for _, wire := range tree {
+			points := append([]float64(nil), wire.Points...)
+			if len(points) < 4 && len(wire.ObservedSegments) > 0 {
+				for _, seg := range wire.ObservedSegments {
+					if len(points) == 0 {
+						points = append(points, seg[0], seg[1])
+					}
+					points = append(points, seg[2], seg[3])
+				}
+			}
+			if len(points) < 4 || len(points)%2 != 0 {
+				blockers = append(blockers, "wire-tree-rebuild:invalid-wire-geometry:"+wire.ID)
+				invalid = true
+				break
+			}
+			replays = append(replays, markerCleanWireReplay{
+				PrimitiveID: wire.ID, Points: points, Net: wire.Net, Style: styles[wire.ID],
+			})
+		}
+		if invalid {
+			continue
+		}
+		labelIDs := append([]string(nil), pending.labelIDs...)
+		sort.Strings(labelIDs)
+		plans = append(plans, markerCleanWireTreePlan{
+			RootID: tree[0].ID, Net: pending.net, WireIDs: append([]string(nil), func() []string {
+				ids := make([]string, len(tree))
+				for i, wire := range tree {
+					ids[i] = wire.ID
+				}
+				return ids
+			}()...), LabelIDs: labelIDs, MarkerIDs: markerIDs, Replays: replays,
+		})
+	}
+	sort.Slice(plans, func(i, j int) bool {
+		if plans[i].Net != plans[j].Net {
+			return plans[i].Net < plans[j].Net
+		}
+		return plans[i].RootID < plans[j].RootID
+	})
+	return plans, uniqueSorted(blockers)
+}
+
+func markerCleanWireStyles(geomResult map[string]any) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	page, _ := geomResult["pagePrimitives"].(map[string]any)
+	rows, _ := page["wires"].([]any)
+	for _, raw := range rows {
+		row, _ := raw.(map[string]any)
+		id := asString(row["primitiveId"])
+		if id == "" {
+			continue
+		}
+		style := map[string]any{}
+		for _, key := range []string{"Color", "LineWidth", "LineType"} {
+			if value := row[key]; value != nil {
+				style[key] = value
+			}
+		}
+		if len(style) > 0 {
+			out[id] = style
+		}
+	}
+	return out
 }
 
 func markerCleanBlockers(candidates []markerCleanGroup, requested, visible map[string]bool) []string {
@@ -294,7 +483,7 @@ func markerRestoreMap(comps []layoutComp, items []visibleTextItem, anchors map[s
 }
 
 func executeMarkerClean(pinned *appConfig, win, doc string, report *markerCleanReport,
-	restore map[string]markerRestore, save bool, stdout, stderr io.Writer) error {
+	restore map[string]markerRestore, rebuildWireTrees, save bool, stdout, stderr io.Writer) error {
 	before, _, err := readLiveNets(pinned, win)
 	if err != nil {
 		return fmt.Errorf("marker-clean: baseline netlist: %w", err)
@@ -325,7 +514,50 @@ func executeMarkerClean(pinned *appConfig, win, doc string, report *markerCleanR
 	}
 	var deleteErrors []string
 	notFound := 0
-	if len(labelItems) > 0 {
+	if rebuildWireTrees && len(labelItems) > 0 {
+		plannedLabels := map[string]bool{}
+		var items []map[string]any
+		for _, plan := range report.WireTreePlans {
+			for _, id := range plan.LabelIDs {
+				plannedLabels[id] = true
+			}
+			for _, replay := range plan.Replays {
+				item := map[string]any{
+					"primitiveId": replay.PrimitiveID,
+					"points":      replay.Points,
+				}
+				for key, value := range replay.Style {
+					switch key {
+					case "Color":
+						item["color"] = value
+					case "LineWidth":
+						item["lineWidth"] = value
+					case "LineType":
+						item["lineType"] = value
+					}
+				}
+				items = append(items, item)
+			}
+		}
+		var uncovered []string
+		for _, item := range labelItems {
+			if id := asString(item["primitiveId"]); !plannedLabels[id] {
+				uncovered = append(uncovered, id)
+			}
+		}
+		if len(uncovered) > 0 {
+			sort.Strings(uncovered)
+			return fmt.Errorf("marker-clean: rebuild plan does not cover requested names: %s", strings.Join(uncovered, ","))
+		}
+		res, err := requestAutolayoutActionTimed(pinned, "schematic.wire_tree.rebuild_without_labels", win,
+			map[string]any{"items": items}, 90*time.Second, doc, "marker-clean 无标签重建父线树")
+		if err != nil {
+			return fmt.Errorf("marker-clean: wire-tree rebuild failed; inspect fresh geometry and netlist before retrying: %w", err)
+		}
+		if res == nil || res.Result["verified"] != true {
+			return fmt.Errorf("marker-clean: wire-tree rebuild was not verified")
+		}
+	} else if len(labelItems) > 0 {
 		res, err := requestAutolayoutAction(pinned, "schematic.net_label.delete", win, map[string]any{
 			"items": labelItems,
 		}, doc, "marker-clean 删除导线网络名称")

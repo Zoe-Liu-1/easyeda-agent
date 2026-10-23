@@ -394,6 +394,16 @@ func AllActions() []ActionSpec {
 			VerifyWith:  []string{"schematic.primitive.get"},
 		},
 		{
+			Name:        "schematic.wire_tree.rebuild_without_labels",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Transactional fallback for hosts without sch_PrimitiveAttribute.delete: verify complete wire primitive states, batch-delete them, and recreate each at identical geometry/style with no Net property so attached wire Name attributes disappear. Markers/components are untouched. Any creation failure deletes new wires and recreates originals with original Net/style; rollback is read back and verified. Callers must still compare full pin-to-net and bridge state.",
+			Inputs:      []string{"items[{primitiveId,points,color?,lineWidth?,lineType?}] (1..100 unique IDs; points must exactly match current Line)"},
+			Outputs:     []string{"verified", "deleted", "deleteReturned", "deletedIds", "createdIds", "identityBefore", "identityAfter"},
+		},
+		{
 			Name:        "schematic.group.move",
 			Domain:      DomainSchematic,
 			Phase:       1,

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.14.7] - 2026-10-23
+
+- 新增 `schematic.wire_tree.rebuild_without_labels` typed fallback：核对完整 wire Line/style 后批量删除，并按原几何、无 Net 属性重建，从而移除宿主无法直接删除的导线 Name；任一步失败时删除新线并恢复旧线。
+- `sch marker-clean --rebuild-wire-trees` 只对单网名、几何完整且仍有可见 Power/GND 符号的父线树生成计划；默认仍为 dry-run。
+- 轮换扩展 UUID 以侧载 1.14.7。
+
 ## [1.14.6] - 2026-10-23
 
 - 修复 `schematic.net_label.delete` 的可见性判定：EasyEDA 的导线 Name 属性通常 `KeyVisible=false`、`ValueVisible=true`，字段名隐藏不代表网络名不可见。现只拒绝 `ValueVisible=false`。

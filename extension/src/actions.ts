@@ -3762,6 +3762,120 @@ const schematicGroupMove: Handler = async (payload) => {
 	};
 };
 
+function sameWireLine(actual: unknown, expected: Array<number>): boolean {
+	if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+	return actual.every((value, index) => {
+		const n = Number(value);
+		return Number.isFinite(n) && Math.abs(n - expected[index]!) <= 1e-6;
+	});
+}
+
+async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<ActionResult> {
+	const rawItems = payload.items;
+	if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > 100) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'items must contain 1..100 wire rebuild records.');
+	}
+	const identityBefore = await readResponseContext();
+	if (!identityBefore.projectUuid || !identityBefore.documentUuid || identityBefore.documentType !== 'schematic') {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Current schematic document identity is unavailable.');
+	}
+	const beforeWires = await eda.sch_PrimitiveWire.getAll();
+	if (!Array.isArray(beforeWires)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Wire inventory is unavailable.');
+	const byId = new Map(beforeWires.map(wire => [wire.getState_PrimitiveId(), wire]));
+	const items = rawItems.map((raw, index) => {
+		if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `items[${index}] must be an object.`);
+		}
+		const item = raw as Record<string, unknown>;
+		const primitiveId = optionalString(item, 'primitiveId');
+		if (!primitiveId) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `items[${index}].primitiveId is required.`);
+		const points = normalizeWirePoints(item.points);
+		const wire = byId.get(primitiveId);
+		if (!wire) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Wire ${primitiveId} is unavailable before rebuild.`);
+		const line = wire.getState_Line?.();
+		if (!sameWireLine(line, points)) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Wire ${primitiveId} geometry differs from the planned rebuild.`);
+		}
+		return {
+			primitiveId,
+			points,
+			net: String(wire.getState_Net?.() ?? ''),
+			color: wire.getState_Color?.(),
+			lineWidth: wire.getState_LineWidth?.(),
+			lineType: wire.getState_LineType?.(),
+		};
+	});
+	if (new Set(items.map(item => item.primitiveId)).size !== items.length) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Wire rebuild items contain duplicate primitiveId values.');
+	}
+	const deletedIds = items.map(item => item.primitiveId);
+	let deleted = false;
+	try { deleted = await eda.sch_PrimitiveWire.delete(deletedIds); }
+	catch (err) { throw edaError(err, 'wire-tree rebuild: failed to delete original wires.'); }
+	const afterDelete = await eda.sch_PrimitiveWire.getAll();
+	if (!Array.isArray(afterDelete)) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'wire-tree rebuild: post-delete wire inventory is unavailable.');
+	}
+	const afterDeleteIds = new Set(afterDelete.map(wire => wire.getState_PrimitiveId()));
+	const survived = deletedIds.filter(id => afterDeleteIds.has(id));
+	if (survived.length) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `wire-tree rebuild: original wire(s) survived delete: ${survived.join(', ')}.`);
+	}
+	const createdIds: string[] = [];
+	try {
+		for (const item of items) {
+			const created = await eda.sch_PrimitiveWire.create(
+				item.points, undefined, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
+			);
+			if (!created) throw new Error(`recreate ${item.primitiveId} returned no primitive`);
+			createdIds.push(created.getState_PrimitiveId());
+		}
+		const afterCreate = await eda.sch_PrimitiveWire.getAll();
+		if (!Array.isArray(afterCreate)) throw new Error('post-create wire inventory is unavailable');
+		const afterCreateIds = new Set(afterCreate.map(wire => wire.getState_PrimitiveId()));
+		const missing = createdIds.filter(id => !afterCreateIds.has(id));
+		if (missing.length) throw new Error(`created wire(s) missing on readback: ${missing.join(', ')}`);
+	}
+	catch (err) {
+		let rollbackVerified = false;
+		try {
+			if (createdIds.length) await eda.sch_PrimitiveWire.delete(createdIds);
+			for (const item of items) {
+				await eda.sch_PrimitiveWire.create(
+					item.points, item.net, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
+				);
+			}
+			const restored = await eda.sch_PrimitiveWire.getAll();
+			rollbackVerified = Array.isArray(restored) && items.every(item =>
+				restored.some(wire => sameWireLine(wire.getState_Line?.(), item.points)));
+		}
+		catch (rollbackError) {
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+				`wire-tree rebuild failed (${describeThrown(err)}); rollback also failed (${describeThrown(rollbackError)}); read the page before any retry.`);
+		}
+		if (!rollbackVerified) {
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+				`wire-tree rebuild failed (${describeThrown(err)}); original geometry rollback was not verified; read the page before any retry.`);
+		}
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+			`wire-tree rebuild failed (${describeThrown(err)}); original geometry was restored and verified.`);
+	}
+	const identityAfter = await readResponseContext();
+	if (identityAfter.projectUuid !== identityBefore.projectUuid || identityAfter.documentUuid !== identityBefore.documentUuid
+		|| identityAfter.documentType !== identityBefore.documentType || identityAfter.tabId !== identityBefore.tabId) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Current document identity changed during wire-tree rebuild.');
+	}
+	return { result: {
+		verified: true,
+		deleted: true,
+		deleteReturned: deleted,
+		deletedIds,
+		createdIds,
+		identityBefore,
+		identityAfter,
+	} };
+}
+
 // ─── Net flags ────────────────────────────────────────────────────────
 
 type NetFlagIdentification = 'Power' | 'Ground' | 'AnalogGround' | 'ProtectGround';
@@ -15852,6 +15966,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.modify': schematicComponentModify,
 	'schematic.component.delete': schematicComponentDelete,
 	'schematic.wire.create': schematicWireCreate,
+	'schematic.wire_tree.rebuild_without_labels': schematicWireTreeRebuildWithoutLabels,
 	'schematic.image.create': schematicImageCreate,
 	'schematic.image.list': schematicImageList,
 	'schematic.image.modify': schematicImageModify,
