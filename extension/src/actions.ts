@@ -35,6 +35,7 @@ import {
 	WIRE_CONTACT_EPS,
 	wirePointOnSegment,
 	type ObservedWireSegment,
+	type WireSegment,
 } from './schematic-wire-topology';
 import {
 	ActionError,
@@ -3910,7 +3911,41 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 			lineType: (item.lineType as ESCH_PrimitiveLineType | undefined) ?? null,
 		};
 	});
-	const createdIds: string[] = [];
+	const requestedEdges = (points: number[]): WireSegment[] => {
+		const edges: WireSegment[] = [];
+		for (let i = 0; i + 3 < points.length; i += 2) {
+			edges.push([points[i]!, points[i + 1]!, points[i + 2]!, points[i + 3]!]);
+		}
+		return edges;
+	};
+	const coveredBy = (edge: WireSegment, observed: ObservedWireSegment[]): string[] => {
+		const axis = classifyWireSegment(edge);
+		if (axis !== 'horizontal' && axis !== 'vertical') return [];
+		return [...new Set(observed.filter(s => {
+			const actual = s.seg;
+			if (classifyWireSegment(actual) !== axis) return false;
+			if (axis === 'horizontal') {
+				return Math.abs(actual[1] - edge[1]) <= WIRE_CONTACT_EPS
+					&& Math.abs(actual[3] - edge[3]) <= WIRE_CONTACT_EPS
+					&& Math.min(actual[0], actual[2]) <= Math.min(edge[0], edge[2]) + WIRE_CONTACT_EPS
+					&& Math.max(actual[0], actual[2]) >= Math.max(edge[0], edge[2]) - WIRE_CONTACT_EPS;
+			}
+			return Math.abs(actual[0] - edge[0]) <= WIRE_CONTACT_EPS
+				&& Math.abs(actual[2] - edge[2]) <= WIRE_CONTACT_EPS
+				&& Math.min(actual[1], actual[3]) <= Math.min(edge[1], edge[3]) + WIRE_CONTACT_EPS
+				&& Math.max(actual[1], actual[3]) >= Math.max(edge[1], edge[3]) - WIRE_CONTACT_EPS;
+		}).map(s => s.wirePrimitiveId))];
+	};
+	const beforeObserved = collectWireSegments(beforeWires);
+	const alreadyCovered = items.flatMap((item, index) => requestedEdges(item.points)
+		.filter(edge => coveredBy(edge, beforeObserved).length > 0)
+		.map(edge => ({ index, edge })));
+	if (alreadyCovered.length) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			`Restore geometry is already covered before create: item(s) ${alreadyCovered.map(v => v.index).join(', ')}.`);
+	}
+	const createReturnIds: string[] = [];
+	const createErrors = new Map<number, string>();
 	const failures: Array<{ index: number; points: Array<number>; error: string }> = [];
 	for (let index = 0; index < items.length; index++) {
 		const item = items[index]!;
@@ -3919,21 +3954,40 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 				item.points, undefined, item.color, item.lineWidth, item.lineType,
 			);
 			if (!created) throw new Error('create returned no primitive');
-			createdIds.push(created.getState_PrimitiveId());
+			createReturnIds.push(created.getState_PrimitiveId());
 		}
 		catch (err) {
-			failures.push({ index, points: item.points, error: describeThrown(err) });
+			createErrors.set(index, describeThrown(err));
 		}
 	}
 	const afterWires = await eda.sch_PrimitiveWire.getAll();
 	if (!Array.isArray(afterWires)) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Wire restore is unverified because post-create inventory is unavailable.');
 	}
-	const afterIds = new Set(afterWires.map(wire => wire.getState_PrimitiveId()));
-	const missingCreated = createdIds.filter(id => !afterIds.has(id));
-	if (missingCreated.length) {
+	const afterObserved = collectWireSegments(afterWires);
+	const resolvedIds = new Set<string>();
+	const recoveredIndexes: number[] = [];
+	const missingSuccessful: Array<{ index: number; edge: WireSegment }> = [];
+	for (let index = 0; index < items.length; index++) {
+		const item = items[index]!;
+		const uncovered = requestedEdges(item.points).filter(edge => coveredBy(edge, afterObserved).length === 0);
+		if (uncovered.length === 0) {
+			recoveredIndexes.push(index);
+			for (const edge of requestedEdges(item.points)) {
+				for (const id of coveredBy(edge, afterObserved)) resolvedIds.add(id);
+			}
+		}
+		else if (createErrors.has(index)) {
+			failures.push({ index, points: item.points, error: createErrors.get(index)! });
+		}
+		else {
+			missingSuccessful.push({ index, edge: uncovered[0]! });
+		}
+	}
+	if (missingSuccessful.length) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
-			`Created restore segment(s) are absent on readback: ${missingCreated.join(', ')}.`);
+			`Created restore geometry is absent on readback: ${missingSuccessful
+				.map(v => `item ${v.index} [${v.edge.join(', ')}]`).join('; ')}.`);
 	}
 	const identityAfter = await readResponseContext();
 	if (identityAfter.projectUuid !== identityBefore.projectUuid || identityAfter.documentUuid !== identityBefore.documentUuid
@@ -3944,7 +3998,9 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 		verified: true,
 		complete: failures.length === 0,
 		...(failures.length ? { partial: true } : {}),
-		createdIds,
+		createdIds: [...resolvedIds],
+		createReturnIds: [...new Set(createReturnIds)],
+		recoveredIndexes,
 		failures,
 		identityBefore,
 		identityAfter,

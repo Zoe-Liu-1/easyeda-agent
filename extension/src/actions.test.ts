@@ -3230,7 +3230,12 @@ test('wire_tree.restore_segments recreates missing no-Net geometry and reports f
 				createCalls.push(args);
 				if (createCalls.length === 2) throw new Error('create failed');
 				const id = `restored-${createCalls.length}`;
-				const wire = { getState_PrimitiveId: () => id };
+				const line = args[0];
+				const wire = {
+					getState_PrimitiveId: () => id,
+					getState_Line: () => line,
+					getState_Net: () => '',
+				};
 				wires.set(id, wire);
 				return wire;
 			},
@@ -3253,6 +3258,57 @@ test('wire_tree.restore_segments recreates missing no-Net geometry and reports f
 	assert.deepEqual(res.result.createdIds, ['restored-1']);
 	assert.equal(res.result.failures.length, 1);
 	assert.equal(createCalls[0][1], undefined);
+});
+
+test('wire_tree.restore_segments verifies geometry after host merges created IDs', async t => {
+	let wires = new Map<string, any>();
+	let createCount = 0;
+	const createCalls: Array<any[]> = [];
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => [...wires.values()],
+			create: async (...args: any[]) => {
+				createCalls.push(args);
+				createCount++;
+				// The host may return transient IDs and immediately merge the geometry.
+				const transient = {
+					getState_PrimitiveId: () => `transient-${createCount}`,
+					getState_Line: () => args[0],
+					getState_Net: () => '',
+				};
+				const mergedLine = [0, 0, 10, 0, 10, 0, 10, 10];
+				wires.clear();
+				wires.set('merged-1', {
+					getState_PrimitiveId: () => 'merged-1',
+					getState_Line: () => mergedLine,
+					getState_Net: () => '',
+				});
+				return transient;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.restore_segments', {
+		expectedMissingIds: ['old-merged'],
+		items: [
+			{ points: [0, 0, 10, 0] },
+			{ points: [10, 0, 10, 10] },
+		],
+	});
+	assert.equal(res.result.verified, true);
+	assert.equal(res.result.complete, true);
+	assert.deepEqual(res.result.createdIds, ['merged-1']);
+	assert.deepEqual(res.result.createReturnIds, ['transient-1', 'transient-2']);
+	assert.deepEqual(res.result.recoveredIndexes, [0, 1]);
+	assert.equal(res.result.failures.length, 0);
 });
 
 // ─── schematic.component.delete cascade (ADR-0004 Decision 5) ────────────────

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.14.9] - 2026-10-23
+
+- 修复 `restore_segments` 假失败：宿主合并共线新建段后会替换 primitive ID；现在按目标线段几何回读验收，并返回最终 `createdIds`、原始 `createReturnIds` 与 `recoveredIndexes`。
+- 恢复前拒绝已被现有几何覆盖的目标段，避免重复提交；单段 create 报错但几何实际落地时以新鲜回读为准，不重复创建。
+
 ## [1.14.8] - 2026-10-23
 
 - 新增 `schematic.wire_tree.restore_segments` 有界恢复入口：在明确 expectedMissingIds 均不存在时，按快照逐段创建无 Net 导线，跨单段失败继续并返回 createdIds/failures。

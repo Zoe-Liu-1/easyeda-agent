@@ -409,9 +409,9 @@ func AllActions() []ActionSpec {
 			Phase:       1,
 			Mutates:     true,
 			NeedsWindow: true,
-			Description: "Bounded recovery action for a partially failed wire-tree rebuild. Requires expectedMissingIds to be absent, then creates every supplied orthogonal polyline as an independent no-Net segment. Continues across individual failures, returns createdIds and failures, and rereads every created ID. It does not delete existing primitives; callers must compare pin-to-net and bridge. Intended only for exact pre-deletion snapshot recovery.",
+			Description: "Bounded recovery action for a partially failed wire-tree rebuild. Requires expectedMissingIds and every supplied target edge to be absent, then creates each orthogonal polyline as a no-Net wire. It rereads the complete inventory and verifies every requested edge by geometry, because EasyEDA may merge newly created collinear wires and replace the transient primitive ID. It does not delete existing primitives; callers must compare pin-to-net and bridge. Intended only for exact pre-deletion snapshot recovery.",
 			Inputs:      []string{"items[{points,color?,lineWidth?,lineType?}] (1..500)", "expectedMissingIds[]"},
-			Outputs:     []string{"verified", "complete", "partial", "createdIds", "failures", "identityBefore", "identityAfter"},
+			Outputs:     []string{"verified", "complete", "partial", "createdIds (readback primitive IDs; may differ from create returns after host merges)", "createReturnIds", "recoveredIndexes", "failures", "identityBefore", "identityAfter"},
 		},
 		{
 			Name:        "schematic.group.move",

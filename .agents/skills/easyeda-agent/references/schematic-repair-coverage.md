@@ -32,6 +32,12 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 若在同树同名上形成重复，报告 `NewNameDuplicates` 并拒绝把操作判成完成，避免完整网表
 通过却把视觉重复留在页面上。
 
+若线树重建在删除成功后中断，只能从删除前的完整 `Line/style + marker/label ID` 快照恢复。
+恢复入口必须先用新鲜回读证明旧 ID 仍缺失，再按小批次创建无 `Net` 属性几何。EasyEDA 会把
+共线相接的新段合并并替换 primitive ID，因此验收口径是“每个目标线段都被回读几何完整覆盖”，
+不能要求创建调用返回的临时 ID 继续存在。恢复后仍须比较逐脚网表与 bridge，并清除因名称
+删除失去落点而留下的零散短枝；不能用一个新标签掩盖 `dangling-wire`。
+
 ## Finding 覆盖表
 
 | Finding | 等级 | 执行边界 |
