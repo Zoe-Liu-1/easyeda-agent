@@ -2425,6 +2425,119 @@ async function schematicAttributeInspect(payload: Payload): Promise<ActionResult
 	} };
 }
 
+async function schematicNetLabelDelete(payload: Payload): Promise<ActionResult> {
+	const rawItems = payload.items;
+	if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > 100) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'items must contain 1..100 net-label deletion records.');
+	}
+	const items = rawItems.map((raw, index) => {
+		if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `items[${index}] must be an object.`);
+		}
+		const item = raw as Record<string, unknown>;
+		const primitiveId = optionalString(item, 'primitiveId');
+		const parentWireId = optionalString(item, 'parentWireId');
+		const net = optionalString(item, 'net');
+		if (!primitiveId || !parentWireId || net === undefined) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+				`items[${index}] requires primitiveId, parentWireId and net.`);
+		}
+		return { primitiveId, parentWireId, net };
+	});
+	const uniqueIds = new Set(items.map(item => item.primitiveId));
+	if (uniqueIds.size !== items.length) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Net-label deletion items contain duplicate primitiveId values.');
+	}
+	const identityBefore = await readResponseContext();
+	if (!identityBefore.projectUuid || !identityBefore.documentUuid || identityBefore.documentType !== 'schematic') {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Current schematic document identity is unavailable.');
+	}
+	const beforeAll = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(beforeAll)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Attribute inventory is unavailable.');
+	const wiresBefore = await eda.sch_PrimitiveWire.getAll();
+	if (!Array.isArray(wiresBefore)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Wire inventory is unavailable.');
+	const wireIds = new Set(wiresBefore.map(wire => wire.getState_PrimitiveId()));
+	const attributes = items.map((item, index) => {
+		const matches = beforeAll.filter(attribute => attribute.getState_PrimitiveId() === item.primitiveId);
+		if (matches.length !== 1) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+				`items[${index}] attribute ${item.primitiveId} must appear exactly once (found ${matches.length}).`);
+		}
+		const attribute = matches[0];
+		if (attribute.getState_Key() !== 'Name') {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Attribute ${item.primitiveId} is not a Name attribute.`);
+		}
+		if (attribute.getState_ParentPrimitiveId() !== item.parentWireId) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+				`Attribute ${item.primitiveId} parent is ${String(attribute.getState_ParentPrimitiveId())}, expected wire ${item.parentWireId}.`);
+		}
+		if (attribute.getState_Value() !== item.net) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+				`Attribute ${item.primitiveId} value is ${String(attribute.getState_Value())}, expected net ${item.net}.`);
+		}
+		if (attribute.getState_KeyVisible?.() === false) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+				`Attribute ${item.primitiveId} is hidden; marker-clean must not use deletion to make a hidden-name finding disappear.`);
+		}
+		if (!wireIds.has(item.parentWireId)) {
+			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Parent wire ${item.parentWireId} is unavailable before deletion.`);
+		}
+		const deleteAttribute = (attribute as unknown as { delete?: () => boolean | Promise<boolean> }).delete;
+		if (typeof deleteAttribute !== 'function') {
+			throw new ActionError(ErrorCodes.EDA_API_UNAVAILABLE, 'Official sch_PrimitiveAttribute.delete instance method is unavailable.');
+		}
+		return { item, attribute, deleteAttribute };
+	});
+	const calls: Array<{ primitiveId: string; returned: boolean | null; error?: string }> = [];
+	for (const entry of attributes) {
+		let returned: boolean | null = null;
+		let callError: unknown = null;
+		try {
+			returned = await entry.deleteAttribute.call(entry.attribute);
+		} catch (err) {
+			callError = err;
+		}
+		calls.push({
+			primitiveId: entry.item.primitiveId,
+			returned,
+			...(callError ? { error: describeThrown(callError) } : {}),
+		});
+	}
+	const afterAll = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(afterAll)) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+			`Net-label deletion is unverified because the post-delete attribute inventory is unavailable.`);
+	}
+	const afterIds = new Set(afterAll.map(candidate => candidate.getState_PrimitiveId()));
+	const stillPresent = items.map(item => item.primitiveId).filter(id => afterIds.has(id));
+	if (stillPresent.length) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+			`Net-label deletion left ${stillPresent.length} attribute(s) present: ${stillPresent.join(', ')}.`);
+	}
+	const wiresAfter = await eda.sch_PrimitiveWire.getAll();
+	if (!Array.isArray(wiresAfter)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Post-delete wire inventory is unavailable.');
+	const afterWireIds = new Set(wiresAfter.map(wire => wire.getState_PrimitiveId()));
+	const missingParents = [...new Set(items.map(item => item.parentWireId))].filter(id => !afterWireIds.has(id));
+	if (missingParents.length) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+			`Parent wire(s) disappeared during net-label deletion: ${missingParents.join(', ')}.`);
+	}
+	const identityAfter = await readResponseContext();
+	if (identityAfter.projectUuid !== identityBefore.projectUuid || identityAfter.documentUuid !== identityBefore.documentUuid
+		|| identityAfter.documentType !== identityBefore.documentType || identityAfter.tabId !== identityBefore.tabId) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			'Current document identity changed while deleting net-label attributes.');
+	}
+	return { result: {
+		deleted: true,
+		verified: true,
+		deletedIds: items.map(item => item.primitiveId),
+		calls,
+		identityBefore,
+		identityAfter,
+	} };
+}
+
 /**
  * Pins of each schematic part through the official per-component enumeration.
  * Pin-owned attributes (Name/Number/Type) have the PIN as parent, so a parent
@@ -15731,6 +15844,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.titleblock.modify': schematicTitleBlockModify,
 	'schematic.components.list': schematicComponentsList,
 	'schematic.attribute.inspect': schematicAttributeInspect,
+	'schematic.net_label.delete': schematicNetLabelDelete,
 	'schematic.attribute.move': payload => moveSchematicAttribute(payload, attribute => schAttributeStateRecord(attribute, readCurrentNativePageAttributes)),
 	'schematic.attribute.modify': payload => modifySchematicAttributeProperties(payload, attribute => schAttributeStateRecord(attribute, readCurrentNativePageAttributes)),
 	'schematic.designators.list': schematicDesignatorsList,

@@ -3119,6 +3119,49 @@ test('page primitive attribute state uses typed get(id) when bulk getter is inco
 	finally { delete (globalThis as any).eda; }
 });
 
+test('net_label.delete validates wire parents and proves deletion through typed attribute inventory', async t => {
+	const attributes = new Map<string, any>([
+		['label-a', {
+			getState_PrimitiveId: () => 'label-a', getState_ParentPrimitiveId: () => 'wire-a',
+			getState_Key: () => 'Name', getState_Value: () => 'GND', getState_KeyVisible: () => true,
+			delete: async () => { attributes.delete('label-a'); return true; },
+		}],
+		['label-b', {
+			getState_PrimitiveId: () => 'label-b', getState_ParentPrimitiveId: () => 'wire-a',
+			getState_Key: () => 'Name', getState_Value: () => 'GND', getState_KeyVisible: () => true,
+			delete: async () => { attributes.delete('label-b'); return true; },
+		}],
+	]);
+	const wires = [{ getState_PrimitiveId: () => 'wire-a' }];
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveAttribute: { getAll: async () => [...attributes.values()] },
+		sch_PrimitiveWire: { getAll: async () => wires },
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	await assert.rejects(
+		() => runAction('schematic.net_label.delete', { items: [{
+			primitiveId: 'label-a', parentWireId: 'wrong-wire', net: 'GND',
+		}] }),
+		(err: any) => err.code === 'PRECONDITION_REFUSED' && /parent/.test(err.message),
+	);
+	const res: any = await runAction('schematic.net_label.delete', { items: [
+		{ primitiveId: 'label-a', parentWireId: 'wire-a', net: 'GND' },
+		{ primitiveId: 'label-b', parentWireId: 'wire-a', net: 'GND' },
+	] });
+	assert.equal(res.result.verified, true);
+	assert.deepEqual(res.result.deletedIds, ['label-a', 'label-b']);
+	assert.equal(attributes.size, 0);
+	assert.equal(wires.length, 1, 'deleting a name attribute must preserve its parent wire');
+});
+
 // ─── schematic.component.delete cascade (ADR-0004 Decision 5) ────────────────
 // Deleting a part must also remove its EXCLUSIVE stub-wire trees + the netflags
 // riding them (the residue is a ghost-connection boobytrap: the next part placed

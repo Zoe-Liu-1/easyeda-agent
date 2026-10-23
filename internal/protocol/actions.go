@@ -318,6 +318,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"scope", "verified", "partial", "attempted", "before", "after", "requested", "notApplied", "identityBefore", "identityAfter", "errors"},
 		},
 		{
+			Name:        "schematic.net_label.delete",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Delete 1..100 visible wire Name attributes through the official sch_PrimitiveAttribute.delete instance method. Preflight binds the current schematic identity and requires each exact Name attribute to have the supplied still-existing wire parent and matching net value. Re-read the attribute and wire inventories to prove every requested ID disappeared and every parent remains. This is the typed execution path for marker-clean; parts, pins, Designators, netflag/netport components and hidden attributes are refused.",
+			Inputs:      []string{"items[{primitiveId,parentWireId,net}] (1..100 unique primitive IDs)"},
+			Outputs:     []string{"deleted", "verified", "deletedIds", "calls", "identityBefore", "identityAfter"},
+		},
+		{
 			Name:        "schematic.designators.list",
 			Domain:      DomainSchematic,
 			Phase:       1,

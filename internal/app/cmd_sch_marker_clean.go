@@ -180,13 +180,15 @@ func freshMarkerCleanReport(pinned *appConfig, win, doc, deleteRaw string, apply
 }
 
 func markerCleanBlockers(candidates []markerCleanGroup, requested, visible map[string]bool) []string {
+	componentOf, groupsByComponent := markerCleanCandidateComponents(candidates)
 	var blockers []string
+	checkedComponents := map[int]bool{}
 	for id := range requested {
 		if !visible[id] {
 			blockers = append(blockers, "not-visible-name:"+id)
 		}
 		found := false
-		for _, group := range candidates {
+		for groupIndex, group := range candidates {
 			if !stringInSlice(id, group.PrimitiveIds) {
 				continue
 			}
@@ -194,10 +196,20 @@ func markerCleanBlockers(candidates []markerCleanGroup, requested, visible map[s
 			if !visible[id] {
 				continue
 			}
+			component := componentOf[groupIndex]
+			if checkedComponents[component] {
+				continue
+			}
+			checkedComponents[component] = true
 			remaining := false
-			for _, candidate := range group.VisibleIds {
-				if !requested[candidate] {
-					remaining = true
+			for _, candidateIndex := range groupsByComponent[component] {
+				for _, candidate := range candidates[candidateIndex].VisibleIds {
+					if visible[candidate] && !requested[candidate] {
+						remaining = true
+						break
+					}
+				}
+				if remaining {
 					break
 				}
 			}
@@ -210,6 +222,56 @@ func markerCleanBlockers(candidates []markerCleanGroup, requested, visible map[s
 		}
 	}
 	return uniqueSorted(blockers)
+}
+
+// markerCleanCandidateComponents groups candidate rows that describe the same
+// physical wire island. Different rules can cover overlapping subsets of one
+// island: cross-kind-label-economy may include a netflag plus two wire labels,
+// while label-economy contains only those two wire labels. Treating the second
+// row in isolation would falsely claim that deleting both labels removes the
+// island's last visible name, even though the retained netflag is the intended
+// survivor. Rows are linked when they share any primitive ID; unrelated islands
+// sharing only a net name remain separate.
+func markerCleanCandidateComponents(candidates []markerCleanGroup) ([]int, map[int][]int) {
+	parent := make([]int, len(candidates))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(i int) int {
+		if parent[i] != i {
+			parent[i] = find(parent[i])
+		}
+		return parent[i]
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[rb] = ra
+		}
+	}
+	owners := map[string][]int{}
+	for i, group := range candidates {
+		for _, id := range group.PrimitiveIds {
+			owners[id] = append(owners[id], i)
+		}
+	}
+	for _, indexes := range owners {
+		if len(indexes) < 2 {
+			continue
+		}
+		for _, index := range indexes[1:] {
+			union(indexes[0], index)
+		}
+	}
+	componentOf := make([]int, len(candidates))
+	groupsByComponent := map[int][]int{}
+	for i := range candidates {
+		root := find(i)
+		componentOf[i] = root
+		groupsByComponent[root] = append(groupsByComponent[root], i)
+	}
+	return componentOf, groupsByComponent
 }
 
 func markerRestoreMap(comps []layoutComp, items []visibleTextItem, anchors map[string]checkPoint,
@@ -237,12 +299,52 @@ func executeMarkerClean(pinned *appConfig, win, doc string, report *markerCleanR
 	if err != nil {
 		return fmt.Errorf("marker-clean: baseline netlist: %w", err)
 	}
-	res, deleteErr := requestAutolayoutAction(pinned, "schematic.primitives.delete", win, map[string]any{
-		"primitiveIds": report.DeleteIds,
-	}, doc, "marker-clean 删除显式网络名称")
+	var componentIDs []string
+	var labelItems []map[string]any
+	var unclassified []string
+	for _, id := range report.DeleteIds {
+		item, ok := restore[id]
+		switch {
+		case !ok:
+			unclassified = append(unclassified, id)
+		case item.component != nil:
+			componentIDs = append(componentIDs, id)
+		case item.label != nil && item.label.ParentID != "":
+			labelItems = append(labelItems, map[string]any{
+				"primitiveId":  id,
+				"parentWireId": item.label.ParentID,
+				"net":          item.label.Value,
+			})
+		default:
+			unclassified = append(unclassified, id)
+		}
+	}
+	if len(unclassified) > 0 {
+		sort.Strings(unclassified)
+		return fmt.Errorf("marker-clean: requested IDs have no exact deletable component/name classification: %s", strings.Join(unclassified, ","))
+	}
+	var deleteErrors []string
 	notFound := 0
-	if res != nil {
-		notFound = countDeleteNotFound(res.Result["notFound"])
+	if len(labelItems) > 0 {
+		res, err := requestAutolayoutAction(pinned, "schematic.net_label.delete", win, map[string]any{
+			"items": labelItems,
+		}, doc, "marker-clean 删除导线网络名称")
+		if err != nil {
+			deleteErrors = append(deleteErrors, "net-label: "+err.Error())
+		} else if res == nil || res.Result["verified"] != true {
+			deleteErrors = append(deleteErrors, "net-label: write not verified")
+		}
+	}
+	if len(componentIDs) > 0 {
+		res, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win, map[string]any{
+			"primitiveIds": componentIDs,
+		}, doc, "marker-clean 删除符号名称")
+		if err != nil {
+			deleteErrors = append(deleteErrors, "component: "+err.Error())
+		}
+		if res != nil {
+			notFound += countDeleteNotFound(res.Result["notFound"])
+		}
 	}
 	present, presentErr := markerCleanPresentIDs(pinned, win, doc)
 	if presentErr != nil {
@@ -254,14 +356,14 @@ func executeMarkerClean(pinned *appConfig, win, doc string, report *markerCleanR
 			missing = append(missing, id)
 		}
 	}
-	if deleteErr != nil || notFound > 0 {
+	if len(deleteErrors) > 0 || notFound > 0 {
 		if len(missing) == 0 {
-			return fmt.Errorf("marker-clean: delete reported an error/no-op (error=%v, notFound=%d), and fresh readback shows every requested name still present; no mutation was accepted",
-				deleteErr, notFound)
+			return fmt.Errorf("marker-clean: delete reported an error/no-op (errors=%s, notFound=%d), and fresh readback shows every requested name still present; no mutation was accepted",
+				strings.Join(deleteErrors, "; "), notFound)
 		}
 		report.Notes = append(report.Notes,
-			fmt.Sprintf("delete reply was not clean (error=%v, notFound=%d), but fresh readback proves %d/%d explicit names were removed",
-				deleteErr, notFound, len(missing), len(report.DeleteIds)))
+			fmt.Sprintf("delete reply was not clean (errors=%s, notFound=%d), but fresh readback proves %d/%d explicit names were removed",
+				strings.Join(deleteErrors, "; "), notFound, len(missing), len(report.DeleteIds)))
 	}
 	report.Applied = true
 	after, _, nerr := readLiveNets(pinned, win)

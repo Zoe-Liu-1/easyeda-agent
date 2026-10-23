@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.14.5] - 2026-10-23
+
+- 新增 `schematic.net_label.delete` typed action：批量删除 1..100 个仍可见的导线 Name 属性，逐项绑定 `primitiveId + parentWireId + net`；删除前要求父 wire 存在，删除后回读证明属性全部消失且父 wire 保留。
+- `marker-clean` 现在把导线名称属性交给官方 `sch_PrimitiveAttribute.delete()`，不再错误地交给 `schematic.primitives.delete`；组件符号仍走原删除路径。
+- 跨类型候选按共享候选 ID 聚成同一线岛组，允许“保留 Power/GND 符号、删除同岛导线名称”，同时仍拒绝删除最后一个可见名称。
+- 轮换扩展 UUID，确保宿主侧载新的 typed 删除入口。
+
 ## [1.14.4] - 2026-10-22
 
 - 修复 `schematic.attribute.move` 查询导线父级时，宿主的组件探针抛出“获取器件信息失败”会中断动作的问题；现在继续用 wire 主键验证父级，真实 wire 查询失败仍会报错。

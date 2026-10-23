@@ -41,3 +41,24 @@ func TestMarkerCleanBlockersRejectHiddenSource(t *testing.T) {
 		t.Fatalf("hidden delete blockers = %v", got)
 	}
 }
+
+func TestMarkerCleanBlockersUnionsOverlappingCandidateRowsOnOneIsland(t *testing.T) {
+	candidates := []markerCleanGroup{
+		{
+			Type: "cross-kind-label-economy", Net: "GND",
+			PrimitiveIds: []string{"flag", "label-a", "label-b"},
+			VisibleIds:   []string{"flag", "label-a", "label-b"},
+		},
+		{
+			Type: "label-economy", Net: "GND",
+			PrimitiveIds: []string{"label-a", "label-b"},
+			VisibleIds:   []string{"label-a", "label-b"},
+		},
+	}
+	visible := map[string]bool{"flag": true, "label-a": true, "label-b": true}
+	got := markerCleanBlockers(candidates,
+		map[string]bool{"label-a": true, "label-b": true}, visible)
+	if len(got) != 0 {
+		t.Fatalf("retained netflag on the same island must satisfy every overlapping label group: %v", got)
+	}
+}
