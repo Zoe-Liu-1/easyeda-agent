@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [1.14.12] - 2026-10-23
+
+- 修复重建/恢复几何验收把宿主在 T 接点拆开的同轴线段误判为缺失：现在合并同轴覆盖区间后再判定完整覆盖。
+
+## [1.14.11] - 2026-10-23
+
+- 修复线树重建/恢复在宿主延迟发布新导线时的假失败：创建后按 250ms 间隔做最多 5 次完整回读，直到目标线段几何出现或 2 秒预算耗尽，并在结果中返回 `readbackAttempts`。
+
+## [1.14.10] - 2026-10-23
+
+- 修复 `wire_tree.rebuild_without_labels` 的同类假失败：宿主合并后会替换创建时返回的 primitive ID；现在以回读线段几何验收，并返回最终 `createdIds`、原始 `createReturnIds` 与 `createErrors`。
+- 失败回滚仍只在实际目标几何缺失或回读不可用时启动，不再因为临时 ID 消失而删除并重建成功结果。
+
 ## [1.14.9] - 2026-10-23
 
 - 修复 `restore_segments` 假失败：宿主合并共线新建段后会替换 primitive ID；现在按目标线段几何回读验收，并返回最终 `createdIds`、原始 `createReturnIds` 与 `recoveredIndexes`。

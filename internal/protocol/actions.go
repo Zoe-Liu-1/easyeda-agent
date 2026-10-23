@@ -399,9 +399,9 @@ func AllActions() []ActionSpec {
 			Phase:       1,
 			Mutates:     true,
 			NeedsWindow: true,
-			Description: "Transactional fallback for hosts without sch_PrimitiveAttribute.delete: verify complete wire primitive states, batch-delete them, and recreate each at identical geometry/style with no Net property so attached wire Name attributes disappear. Markers/components are untouched. Any creation failure deletes new wires and recreates originals with original Net/style; rollback is read back and verified. Callers must still compare full pin-to-net and bridge state.",
+			Description: "Transactional fallback for hosts without sch_PrimitiveAttribute.delete: verify complete wire primitive states, batch-delete them, and recreate each at identical geometry/style with no Net property so attached wire Name attributes disappear. Markers/components are untouched. Success is verified against the reread line geometry because EasyEDA may replace transient create IDs after consolidation. Any missing geometry triggers rollback to original Net/style and is read back. Callers must still compare full pin-to-net and bridge state.",
 			Inputs:      []string{"items[{primitiveId,points,color?,lineWidth?,lineType?}] (1..100 unique IDs; points must exactly match current Line)"},
-			Outputs:     []string{"verified", "deleted", "deleteReturned", "deletedIds", "createdIds", "identityBefore", "identityAfter"},
+			Outputs:     []string{"verified", "deleted", "deleteReturned", "deletedIds", "createdIds (readback IDs; may differ from create returns after host consolidation)", "createReturnIds", "createErrors", "readbackAttempts", "identityBefore", "identityAfter"},
 		},
 		{
 			Name:        "schematic.wire_tree.restore_segments",
@@ -411,7 +411,7 @@ func AllActions() []ActionSpec {
 			NeedsWindow: true,
 			Description: "Bounded recovery action for a partially failed wire-tree rebuild. Requires expectedMissingIds and every supplied target edge to be absent, then creates each orthogonal polyline as a no-Net wire. It rereads the complete inventory and verifies every requested edge by geometry, because EasyEDA may merge newly created collinear wires and replace the transient primitive ID. It does not delete existing primitives; callers must compare pin-to-net and bridge. Intended only for exact pre-deletion snapshot recovery.",
 			Inputs:      []string{"items[{points,color?,lineWidth?,lineType?}] (1..500)", "expectedMissingIds[]"},
-			Outputs:     []string{"verified", "complete", "partial", "createdIds (readback primitive IDs; may differ from create returns after host merges)", "createReturnIds", "recoveredIndexes", "failures", "identityBefore", "identityAfter"},
+			Outputs:     []string{"verified", "complete", "partial", "createdIds (readback primitive IDs; may differ from create returns after host merges)", "createReturnIds", "recoveredIndexes", "readbackAttempts", "failures", "identityBefore", "identityAfter"},
 		},
 		{
 			Name:        "schematic.group.move",

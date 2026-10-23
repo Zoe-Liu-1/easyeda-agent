@@ -3216,6 +3216,148 @@ test('wire_tree.rebuild_without_labels deletes exact wires and recreates geometr
 	assert.equal(wires.size, 2);
 });
 
+test('wire_tree.rebuild_without_labels verifies geometry after host replaces created IDs', async t => {
+	let wires = new Map<string, any>([
+		['wire-a', {
+			getState_PrimitiveId: () => 'wire-a', getState_Line: () => [0, 0, 10, 0],
+			getState_Net: () => 'GND', getState_Color: () => '#00AA00', getState_LineWidth: () => 1, getState_LineType: () => 0,
+		}],
+	]);
+	let createCount = 0;
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => [...wires.values()],
+			delete: async (ids: string[]) => {
+				for (const id of ids) wires.delete(id);
+				return true;
+			},
+			create: async (...args: any[]) => {
+				createCount++;
+				const transient = {
+					getState_PrimitiveId: () => `transient-${createCount}`,
+					getState_Line: () => args[0],
+					getState_Net: () => args[1],
+				};
+				wires.clear();
+				wires.set('merged-new', {
+					getState_PrimitiveId: () => 'merged-new',
+					getState_Line: () => args[0],
+					getState_Net: () => args[1],
+				});
+				return transient;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.rebuild_without_labels', {
+		items: [{ primitiveId: 'wire-a', points: [0, 0, 10, 0] }],
+	});
+	assert.equal(res.result.verified, true);
+	assert.deepEqual(res.result.createdIds, ['merged-new']);
+	assert.deepEqual(res.result.createReturnIds, ['transient-1']);
+});
+
+test('wire_tree.rebuild_without_labels waits for delayed wire publication', async t => {
+	let wires = new Map<string, any>([
+		['wire-a', {
+			getState_PrimitiveId: () => 'wire-a', getState_Line: () => [0, 0, 10, 0],
+			getState_Net: () => 'GND', getState_Color: () => '#00AA00', getState_LineWidth: () => 1, getState_LineType: () => 0,
+		}],
+	]);
+	let created = false;
+	let staleAfterCreateRead = false;
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => {
+				if (created && !staleAfterCreateRead) {
+					staleAfterCreateRead = true;
+					return [];
+				}
+				return [...wires.values()];
+			},
+			delete: async (ids: string[]) => {
+				for (const id of ids) wires.delete(id);
+				return true;
+			},
+			create: async (...args: any[]) => {
+				const wire = {
+					getState_PrimitiveId: () => 'new-delayed',
+					getState_Line: () => args[0],
+					getState_Net: () => args[1],
+				};
+				wires.set('new-delayed', wire);
+				created = true;
+				return wire;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.rebuild_without_labels', {
+		items: [{ primitiveId: 'wire-a', points: [0, 0, 10, 0] }],
+	});
+	assert.equal(res.result.verified, true);
+	assert.deepEqual(res.result.createdIds, ['new-delayed']);
+	assert.equal(res.result.readbackAttempts, 2);
+});
+
+test('wire_tree.rebuild_without_labels accepts a target edge split at a T junction', async t => {
+	let wires = new Map<string, any>([
+		['wire-a', {
+			getState_PrimitiveId: () => 'wire-a', getState_Line: () => [0, 0, 20, 0],
+			getState_Net: () => 'GND', getState_Color: () => null, getState_LineWidth: () => null, getState_LineType: () => null,
+		}],
+	]);
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => [...wires.values()],
+			delete: async (ids: string[]) => {
+				for (const id of ids) wires.delete(id);
+				return true;
+			},
+			create: async (...args: any[]) => {
+				const wire = {
+					getState_PrimitiveId: () => 'split-wire',
+					getState_Line: () => [0, 0, 10, 0, 10, 0, 20, 0],
+					getState_Net: () => args[1],
+				};
+				wires.clear();
+				wires.set('split-wire', wire);
+				return wire;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.rebuild_without_labels', {
+		items: [{ primitiveId: 'wire-a', points: [0, 0, 20, 0] }],
+	});
+	assert.equal(res.result.verified, true);
+	assert.deepEqual(res.result.createdIds, ['split-wire']);
+});
+
 test('wire_tree.restore_segments recreates missing no-Net geometry and reports failures', async t => {
 	let wires = new Map<string, any>();
 	const createCalls: Array<any[]> = [];

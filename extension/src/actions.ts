@@ -3771,6 +3771,75 @@ function sameWireLine(actual: unknown, expected: Array<number>): boolean {
 	});
 }
 
+function wireEdges(points: number[]): WireSegment[] {
+	const edges: WireSegment[] = [];
+	for (let i = 0; i + 3 < points.length; i += 2) {
+		edges.push([points[i]!, points[i + 1]!, points[i + 2]!, points[i + 3]!]);
+	}
+	return edges;
+}
+
+function observedCoveringIds(edge: WireSegment, observed: ObservedWireSegment[]): string[] {
+	const axis = classifyWireSegment(edge);
+	if (axis !== 'horizontal' && axis !== 'vertical') return [];
+	const targetMin = axis === 'horizontal' ? Math.min(edge[0], edge[2]) : Math.min(edge[1], edge[3]);
+	const targetMax = axis === 'horizontal' ? Math.max(edge[0], edge[2]) : Math.max(edge[1], edge[3]);
+	const waiting = observed.filter(s => {
+		const actual = s.seg;
+		if (classifyWireSegment(actual) !== axis) return false;
+		if (axis === 'horizontal') {
+			return Math.abs(actual[1] - edge[1]) <= WIRE_CONTACT_EPS
+				&& Math.abs(actual[3] - edge[3]) <= WIRE_CONTACT_EPS
+				&& Math.max(actual[0], actual[2]) >= targetMin - WIRE_CONTACT_EPS
+				&& Math.min(actual[0], actual[2]) <= targetMax + WIRE_CONTACT_EPS;
+		}
+		return Math.abs(actual[0] - edge[0]) <= WIRE_CONTACT_EPS
+			&& Math.abs(actual[2] - edge[2]) <= WIRE_CONTACT_EPS
+			&& Math.max(actual[1], actual[3]) >= targetMin - WIRE_CONTACT_EPS
+			&& Math.min(actual[1], actual[3]) <= targetMax + WIRE_CONTACT_EPS;
+	}).map(s => {
+		const actual = s.seg;
+		return {
+			id: s.wirePrimitiveId,
+			min: axis === 'horizontal' ? Math.min(actual[0], actual[2]) : Math.min(actual[1], actual[3]),
+			max: axis === 'horizontal' ? Math.max(actual[0], actual[2]) : Math.max(actual[1], actual[3]),
+		};
+	}).sort((a, b) => a.min - b.min || a.max - b.max);
+	let cursor = targetMin;
+	const ids = new Set<string>();
+	for (const part of waiting) {
+		if (part.max < cursor - WIRE_CONTACT_EPS) continue;
+		if (part.min > cursor + WIRE_CONTACT_EPS) break;
+		ids.add(part.id);
+		cursor = Math.max(cursor, part.max);
+		if (cursor >= targetMax - WIRE_CONTACT_EPS) return [...ids];
+	}
+	return [];
+}
+
+async function readWireInventoryUntilCovered(expectedEdges: WireSegment[], attempts = 5): Promise<{
+	wires: Array<any>;
+	observed: ObservedWireSegment[];
+	missing: WireSegment[];
+	attempts: number;
+}> {
+	let wires: Array<any> = [];
+	let observed: ObservedWireSegment[] = [];
+	let missing: WireSegment[] = expectedEdges;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		const inventory = await eda.sch_PrimitiveWire.getAll();
+		if (!Array.isArray(inventory)) {
+			throw new Error('Wire inventory is unavailable during readback.');
+		}
+		wires = inventory;
+		observed = collectWireSegments(wires);
+		missing = expectedEdges.filter(edge => observedCoveringIds(edge, observed).length === 0);
+		if (missing.length === 0) return { wires, observed, missing, attempts: attempt };
+		if (attempt < attempts) await sleep(250);
+	}
+	return { wires, observed, missing, attempts };
+}
+
 async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<ActionResult> {
 	const rawItems = payload.items;
 	if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > 100) {
@@ -3822,25 +3891,57 @@ async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<
 	if (survived.length) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `wire-tree rebuild: original wire(s) survived delete: ${survived.join(', ')}.`);
 	}
-	const createdIds: string[] = [];
+	const createReturnIds: string[] = [];
+	const createErrors: string[] = [];
 	try {
 		for (const item of items) {
-			const created = await eda.sch_PrimitiveWire.create(
-				item.points, undefined, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
-			);
-			if (!created) throw new Error(`recreate ${item.primitiveId} returned no primitive`);
-			createdIds.push(created.getState_PrimitiveId());
+			try {
+				const created = await eda.sch_PrimitiveWire.create(
+					item.points, undefined, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
+				);
+				if (!created) throw new Error(`recreate ${item.primitiveId} returned no primitive`);
+				createReturnIds.push(created.getState_PrimitiveId());
+			}
+			catch (err) {
+				createErrors.push(describeThrown(err));
+			}
 		}
-		const afterCreate = await eda.sch_PrimitiveWire.getAll();
-		if (!Array.isArray(afterCreate)) throw new Error('post-create wire inventory is unavailable');
-		const afterCreateIds = new Set(afterCreate.map(wire => wire.getState_PrimitiveId()));
-		const missing = createdIds.filter(id => !afterCreateIds.has(id));
-		if (missing.length) throw new Error(`created wire(s) missing on readback: ${missing.join(', ')}`);
+		const expectedEdges = items.flatMap(item => wireEdges(item.points));
+		const afterCreate = await readWireInventoryUntilCovered(expectedEdges);
+		const afterObserved = afterCreate.observed;
+		if (afterCreate.missing.length) {
+			throw new Error(`recreated wire geometry missing after ${afterCreate.attempts} readback attempt(s): ${afterCreate.missing
+				.map(edge => `[${edge.join(', ')}]`).join('; ')}`
+				+ (createErrors.length ? `; create errors: ${createErrors.join('; ')}` : ''));
+		}
+		const resolvedIds = new Set<string>();
+		for (const item of items) {
+			for (const edge of wireEdges(item.points)) {
+				for (const id of observedCoveringIds(edge, afterObserved)) resolvedIds.add(id);
+			}
+		}
+		const identityAfter = await readResponseContext();
+		if (identityAfter.projectUuid !== identityBefore.projectUuid || identityAfter.documentUuid !== identityBefore.documentUuid
+			|| identityAfter.documentType !== identityBefore.documentType || identityAfter.tabId !== identityBefore.tabId) {
+			throw new Error('Current document identity changed during wire-tree rebuild.');
+		}
+		return { result: {
+			verified: true,
+			deleted: true,
+			deleteReturned: deleted,
+			deletedIds,
+			createdIds: [...resolvedIds],
+			createReturnIds: [...new Set(createReturnIds)],
+			readbackAttempts: afterCreate.attempts,
+			...(createErrors.length ? { createErrors } : {}),
+			identityBefore,
+			identityAfter,
+		} };
 	}
 	catch (err) {
 		let rollbackVerified = false;
 		try {
-			if (createdIds.length) await eda.sch_PrimitiveWire.delete(createdIds);
+			if (createReturnIds.length) await eda.sch_PrimitiveWire.delete([...new Set(createReturnIds)]);
 			for (const item of items) {
 				await eda.sch_PrimitiveWire.create(
 					item.points, item.net, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
@@ -3861,20 +3962,6 @@ async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
 			`wire-tree rebuild failed (${describeThrown(err)}); original geometry was restored and verified.`);
 	}
-	const identityAfter = await readResponseContext();
-	if (identityAfter.projectUuid !== identityBefore.projectUuid || identityAfter.documentUuid !== identityBefore.documentUuid
-		|| identityAfter.documentType !== identityBefore.documentType || identityAfter.tabId !== identityBefore.tabId) {
-		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Current document identity changed during wire-tree rebuild.');
-	}
-	return { result: {
-		verified: true,
-		deleted: true,
-		deleteReturned: deleted,
-		deletedIds,
-		createdIds,
-		identityBefore,
-		identityAfter,
-	} };
 }
 
 async function schematicWireTreeRestoreSegments(payload: Payload): Promise<ActionResult> {
@@ -3911,34 +3998,9 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 			lineType: (item.lineType as ESCH_PrimitiveLineType | undefined) ?? null,
 		};
 	});
-	const requestedEdges = (points: number[]): WireSegment[] => {
-		const edges: WireSegment[] = [];
-		for (let i = 0; i + 3 < points.length; i += 2) {
-			edges.push([points[i]!, points[i + 1]!, points[i + 2]!, points[i + 3]!]);
-		}
-		return edges;
-	};
-	const coveredBy = (edge: WireSegment, observed: ObservedWireSegment[]): string[] => {
-		const axis = classifyWireSegment(edge);
-		if (axis !== 'horizontal' && axis !== 'vertical') return [];
-		return [...new Set(observed.filter(s => {
-			const actual = s.seg;
-			if (classifyWireSegment(actual) !== axis) return false;
-			if (axis === 'horizontal') {
-				return Math.abs(actual[1] - edge[1]) <= WIRE_CONTACT_EPS
-					&& Math.abs(actual[3] - edge[3]) <= WIRE_CONTACT_EPS
-					&& Math.min(actual[0], actual[2]) <= Math.min(edge[0], edge[2]) + WIRE_CONTACT_EPS
-					&& Math.max(actual[0], actual[2]) >= Math.max(edge[0], edge[2]) - WIRE_CONTACT_EPS;
-			}
-			return Math.abs(actual[0] - edge[0]) <= WIRE_CONTACT_EPS
-				&& Math.abs(actual[2] - edge[2]) <= WIRE_CONTACT_EPS
-				&& Math.min(actual[1], actual[3]) <= Math.min(edge[1], edge[3]) + WIRE_CONTACT_EPS
-				&& Math.max(actual[1], actual[3]) >= Math.max(edge[1], edge[3]) - WIRE_CONTACT_EPS;
-		}).map(s => s.wirePrimitiveId))];
-	};
 	const beforeObserved = collectWireSegments(beforeWires);
-	const alreadyCovered = items.flatMap((item, index) => requestedEdges(item.points)
-		.filter(edge => coveredBy(edge, beforeObserved).length > 0)
+	const alreadyCovered = items.flatMap((item, index) => wireEdges(item.points)
+		.filter(edge => observedCoveringIds(edge, beforeObserved).length > 0)
 		.map(edge => ({ index, edge })));
 	if (alreadyCovered.length) {
 		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
@@ -3960,21 +4022,19 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 			createErrors.set(index, describeThrown(err));
 		}
 	}
-	const afterWires = await eda.sch_PrimitiveWire.getAll();
-	if (!Array.isArray(afterWires)) {
-		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Wire restore is unverified because post-create inventory is unavailable.');
-	}
-	const afterObserved = collectWireSegments(afterWires);
+	const expectedEdges = items.flatMap(item => wireEdges(item.points));
+	const afterCreate = await readWireInventoryUntilCovered(expectedEdges);
+	const afterObserved = afterCreate.observed;
 	const resolvedIds = new Set<string>();
 	const recoveredIndexes: number[] = [];
 	const missingSuccessful: Array<{ index: number; edge: WireSegment }> = [];
 	for (let index = 0; index < items.length; index++) {
 		const item = items[index]!;
-		const uncovered = requestedEdges(item.points).filter(edge => coveredBy(edge, afterObserved).length === 0);
+		const uncovered = wireEdges(item.points).filter(edge => observedCoveringIds(edge, afterObserved).length === 0);
 		if (uncovered.length === 0) {
 			recoveredIndexes.push(index);
-			for (const edge of requestedEdges(item.points)) {
-				for (const id of coveredBy(edge, afterObserved)) resolvedIds.add(id);
+			for (const edge of wireEdges(item.points)) {
+				for (const id of observedCoveringIds(edge, afterObserved)) resolvedIds.add(id);
 			}
 		}
 		else if (createErrors.has(index)) {
@@ -4001,6 +4061,7 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 		createdIds: [...resolvedIds],
 		createReturnIds: [...new Set(createReturnIds)],
 		recoveredIndexes,
+		readbackAttempts: afterCreate.attempts,
 		failures,
 		identityBefore,
 		identityAfter,
