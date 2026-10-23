@@ -2475,7 +2475,7 @@ async function schematicNetLabelDelete(payload: Payload): Promise<ActionResult> 
 			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
 				`Attribute ${item.primitiveId} value is ${String(attribute.getState_Value())}, expected net ${item.net}.`);
 		}
-		if (attribute.getState_KeyVisible?.() === false) {
+		if (attribute.getState_ValueVisible?.() === false) {
 			throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
 				`Attribute ${item.primitiveId} is hidden; marker-clean must not use deletion to make a hidden-name finding disappear.`);
 		}

@@ -3123,12 +3123,12 @@ test('net_label.delete validates wire parents and proves deletion through typed 
 	const attributes = new Map<string, any>([
 		['label-a', {
 			getState_PrimitiveId: () => 'label-a', getState_ParentPrimitiveId: () => 'wire-a',
-			getState_Key: () => 'Name', getState_Value: () => 'GND', getState_KeyVisible: () => true,
+			getState_Key: () => 'Name', getState_Value: () => 'GND', getState_KeyVisible: () => false, getState_ValueVisible: () => true,
 			delete: async () => { attributes.delete('label-a'); return true; },
 		}],
 		['label-b', {
 			getState_PrimitiveId: () => 'label-b', getState_ParentPrimitiveId: () => 'wire-a',
-			getState_Key: () => 'Name', getState_Value: () => 'GND', getState_KeyVisible: () => true,
+			getState_Key: () => 'Name', getState_Value: () => 'GND', getState_KeyVisible: () => false, getState_ValueVisible: () => true,
 			delete: async () => { attributes.delete('label-b'); return true; },
 		}],
 	]);
