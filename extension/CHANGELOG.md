@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.14.8] - 2026-10-23
+
+- 新增 `schematic.wire_tree.restore_segments` 有界恢复入口：在明确 expectedMissingIds 均不存在时，按快照逐段创建无 Net 导线，跨单段失败继续并返回 createdIds/failures。
+- 用于恢复 1.14.7 批量无标签重建在创建阶段失败后的缺失线树；不会删除现有图元，调用方必须重新对账 pin→net、bridge 和几何。
+- 轮换扩展 UUID 以侧载 1.14.8。
+
 ## [1.14.7] - 2026-10-23
 
 - 新增 `schematic.wire_tree.rebuild_without_labels` typed fallback：核对完整 wire Line/style 后批量删除，并按原几何、无 Net 属性重建，从而移除宿主无法直接删除的导线 Name；任一步失败时删除新线并恢复旧线。

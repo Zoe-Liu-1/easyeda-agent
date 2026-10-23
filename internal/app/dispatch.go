@@ -198,7 +198,7 @@ func dispatchTimed(cfg *appConfig, action, window string, payload any, timeout t
 			parsed.Result.Verified == nil || !*parsed.Result.Verified {
 			return fmt.Errorf("%s: page rename not verified; preserve this response and read the current page name before any retry", action)
 		}
-	case "schematic.netflag.create", "schematic.power.connect_pin", "schematic.net_label.delete", "schematic.wire_tree.rebuild_without_labels", "pcb.region.create", "pcb.add_component",
+	case "schematic.netflag.create", "schematic.power.connect_pin", "schematic.net_label.delete", "schematic.wire_tree.rebuild_without_labels", "schematic.wire_tree.restore_segments", "pcb.region.create", "pcb.add_component",
 		"schematic.primitives.delete", "schematic.component.delete", "schematic.pin.disconnect":
 		if parsed.Result.Partial || (parsed.Result.Verified != nil && !*parsed.Result.Verified) {
 			return fmt.Errorf("%s: write not fully verified; inspect returned IDs and fresh state before retrying", action)

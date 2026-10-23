@@ -3216,6 +3216,45 @@ test('wire_tree.rebuild_without_labels deletes exact wires and recreates geometr
 	assert.equal(wires.size, 2);
 });
 
+test('wire_tree.restore_segments recreates missing no-Net geometry and reports failures', async t => {
+	let wires = new Map<string, any>();
+	const createCalls: Array<any[]> = [];
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => [...wires.values()],
+			create: async (...args: any[]) => {
+				createCalls.push(args);
+				if (createCalls.length === 2) throw new Error('create failed');
+				const id = `restored-${createCalls.length}`;
+				const wire = { getState_PrimitiveId: () => id };
+				wires.set(id, wire);
+				return wire;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.restore_segments', {
+		expectedMissingIds: ['old-1', 'old-2'],
+		items: [
+			{ points: [0, 0, 10, 0] },
+			{ points: [10, 0, 10, 10] },
+		],
+	});
+	assert.equal(res.result.verified, true);
+	assert.equal(res.result.complete, false);
+	assert.deepEqual(res.result.createdIds, ['restored-1']);
+	assert.equal(res.result.failures.length, 1);
+	assert.equal(createCalls[0][1], undefined);
+});
+
 // ─── schematic.component.delete cascade (ADR-0004 Decision 5) ────────────────
 // Deleting a part must also remove its EXCLUSIVE stub-wire trees + the netflags
 // riding them (the residue is a ghost-connection boobytrap: the next part placed

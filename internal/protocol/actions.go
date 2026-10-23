@@ -404,6 +404,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"verified", "deleted", "deleteReturned", "deletedIds", "createdIds", "identityBefore", "identityAfter"},
 		},
 		{
+			Name:        "schematic.wire_tree.restore_segments",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     true,
+			NeedsWindow: true,
+			Description: "Bounded recovery action for a partially failed wire-tree rebuild. Requires expectedMissingIds to be absent, then creates every supplied orthogonal polyline as an independent no-Net segment. Continues across individual failures, returns createdIds and failures, and rereads every created ID. It does not delete existing primitives; callers must compare pin-to-net and bridge. Intended only for exact pre-deletion snapshot recovery.",
+			Inputs:      []string{"items[{points,color?,lineWidth?,lineType?}] (1..500)", "expectedMissingIds[]"},
+			Outputs:     []string{"verified", "complete", "partial", "createdIds", "failures", "identityBefore", "identityAfter"},
+		},
+		{
 			Name:        "schematic.group.move",
 			Domain:      DomainSchematic,
 			Phase:       1,
