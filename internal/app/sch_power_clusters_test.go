@@ -104,6 +104,34 @@ func TestPowerClusterGroundIsAdvisory(t *testing.T) {
 	}
 }
 
+func TestPowerClusterOnlyJudgesPassiveAgainstItsNearestConsumerPin(t *testing.T) {
+	comps := []layoutComp{
+		{
+			ID: "u1", Designator: "U1", ComponentType: "part",
+			Pins: []layoutPin{
+				{Number: "1", X: 0, Y: 0, Net: "GND"},
+				{Number: "2", X: 0, Y: 200, Net: "GND"},
+			},
+		},
+		{
+			ID: "c1", Designator: "C1", ComponentType: "part",
+			Pins: []layoutPin{{Number: "1", X: 100, Y: 0, Net: "GND"}},
+		},
+		{ID: "g1", ComponentType: "netflag", Net: "GND", X: 0, Y: 10, AnchorAvailable: true},
+		{ID: "g2", ComponentType: "netflag", Net: "GND", X: 0, Y: 210, AnchorAvailable: true},
+		{ID: "g3", ComponentType: "netflag", Net: "GND", X: 100, Y: 10, AnchorAvailable: true},
+	}
+	wires := []schGroupWire{
+		{ID: "u-pin1", Points: []float64{0, -10, 0, 10}},
+		{ID: "u-pin2", Points: []float64{0, 190, 0, 210}},
+		{ID: "c1", Points: []float64{100, -10, 100, 10}},
+		{ID: "consumer-local", Points: []float64{0, 0, 100, 0}},
+	}
+	if got := powerClusterFindings(comps, wires, nil); len(got) != 0 {
+		t.Fatalf("a passive connected to its nearest consumer pin is locally complete; other GND pins are separate local islands: %+v", got)
+	}
+}
+
 func TestPowerClusterExempt(t *testing.T) {
 	comps := []layoutComp{
 		{ID: "u1", Designator: "U1", ComponentType: "part",

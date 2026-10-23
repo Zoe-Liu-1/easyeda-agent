@@ -146,10 +146,16 @@ type powerClusterPassive struct {
 	dist float64
 }
 
+type powerClusterPin struct {
+	c layoutComp
+	p layoutPin
+}
+
 type powerClusterGroup struct {
-	consumer layoutComp
-	rail     string
-	passives []powerClusterPassive
+	consumer    layoutComp
+	consumerPin layoutPin
+	rail        string
+	passives    []powerClusterPassive
 }
 
 // powerClusterFindings flags local power clusters where a consumer pin and
@@ -166,12 +172,8 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 			flags = append(flags, c)
 		}
 	}
-	type consumerPin struct {
-		c layoutComp
-		p layoutPin
-	}
-	consumersByRail := map[string][]consumerPin{}
-	passivesByRail := map[string][]consumerPin{}
+	consumersByRail := map[string][]powerClusterPin{}
+	passivesByRail := map[string][]powerClusterPin{}
 	for _, c := range comps {
 		if c.ComponentType != "" && c.ComponentType != schLayoutPartType {
 			continue
@@ -182,9 +184,9 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 				continue
 			}
 			if isPowerClusterActive(c.Designator) {
-				consumersByRail[net] = append(consumersByRail[net], consumerPin{c: c, p: p})
+				consumersByRail[net] = append(consumersByRail[net], powerClusterPin{c: c, p: p})
 			} else if isPowerClusterPassive(c.Designator) {
-				passivesByRail[net] = append(passivesByRail[net], consumerPin{c: c, p: p})
+				passivesByRail[net] = append(passivesByRail[net], powerClusterPin{c: c, p: p})
 			}
 		}
 	}
@@ -211,10 +213,10 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 			if bestDist > radius {
 				continue
 			}
-			key := rail + "|" + best.c.ID
+			key := rail + "|" + best.c.ID + "|" + best.p.Number
 			g := groups[key]
 			if g == nil {
-				g = &powerClusterGroup{consumer: best.c, rail: rail}
+				g = &powerClusterGroup{consumer: best.c, consumerPin: best.p, rail: rail}
 				groups[key] = g
 			}
 			g.passives = append(g.passives, powerClusterPassive{c: passive.c, p: passive.p, dist: bestDist})
@@ -227,18 +229,13 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 		consumerRoots := map[int]bool{}
 		pins := []string{}
 		var at *checkPoint
-		for _, p := range consumersByRail[g.rail] {
-			if p.c.ID != g.consumer.ID {
-				continue
-			}
-			if r, ok := pinRoot[powerPinKey(p.c, p.p)]; ok {
-				roots[r] = true
-				consumerRoots[r] = true
-			}
-			pins = append(pins, fmt.Sprintf("%s.%s", p.c.Designator, p.p.Number))
-			if at == nil {
-				at = &checkPoint{X: round2(p.p.X), Y: round2(p.p.Y)}
-			}
+		if r, ok := pinRoot[powerPinKey(g.consumer, g.consumerPin)]; ok {
+			roots[r] = true
+			consumerRoots[r] = true
+		}
+		pins = append(pins, fmt.Sprintf("%s.%s", g.consumer.Designator, g.consumerPin.Number))
+		if at == nil {
+			at = &checkPoint{X: round2(g.consumerPin.X), Y: round2(g.consumerPin.Y)}
 		}
 		for _, p := range g.passives {
 			if r, ok := pinRoot[powerPinKey(p.c, p.p)]; ok {
