@@ -294,6 +294,24 @@ for w in wires:
                 problems['titleblock_overlap'].append(
                     f"导线 {w['pid']} 进入图签/禁放区 {a}->{b}")
 
+# Long-wire is a compactness/readability advisory over physical segments, not
+# the overall bounding span of a compact L-shaped or branched polyline. Length
+# alone never authorizes moving a functional group or replacing a real
+# connection with labels.
+LONG_WIRE_THRESHOLD = 100.0
+for w in wires:
+    longest = None
+    longest_len = 0.0
+    for a, b in segs(w.get('line') or []):
+        length = hypot(b[0] - a[0], b[1] - a[1])
+        if length > longest_len:
+            longest, longest_len = (a, b), length
+    if longest is not None and longest_len > LONG_WIRE_THRESHOLD + 1e-9:
+        problems['long_wire'].append(
+            f"导线 {w['pid']} 网络 '{w.get('net') or '?'}' 最长单段 "
+            f"{longest_len:.1f}u > {LONG_WIRE_THRESHOLD:.0f}u "
+            f"{longest[0]}->{longest[1]} — 回源检查能否移动完整功能组、缩短直连或改用同名标签")
+
 for f in flags:
     ax, ay = f['x'], f['y']
     for w in wires:
@@ -954,7 +972,7 @@ if SOP_SCALE:
             problems['local_net_as_flag'].append(
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
-order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin','single_pin_net',
+order = ['flag_on_pin','zero_wire','diagonal_wire','long_wire','dangling_wire','floating_pin','single_pin_net',
          'flag_no_wire','marker_wire_overlap','wire_over_pin_lead','cross_chip_direct_wire','text_wire_overlap','label_visibility','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid',
          'cross_kind_label_economy','label_distance','signal_marker_type','signal_port_exempt',
@@ -962,6 +980,7 @@ order = ['flag_on_pin','zero_wire','diagonal_wire','dangling_wire','floating_pin
 labels = {
   'flag_on_pin':'🔴 标识与引脚重叠 (DRC fatal)','zero_wire':'🔴 零长度导线',
   'diagonal_wire':'🔴 斜线/非正交导线',
+  'long_wire':'🔵 单段导线过长',
   'dangling_wire':'🔴 导线空连端点','floating_pin':'🟠 悬空引脚',
   'single_pin_net':'🟠 单引脚孤网 (空连)','flag_no_wire':'🟠 标识无导线',
   'marker_wire_overlap':'🟠 标识压在导线上(锚点近似)',

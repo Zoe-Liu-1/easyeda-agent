@@ -1,0 +1,36 @@
+{
+  "_intent": "A 130-unit physical segment must produce one long-wire advisory even when both endpoints are real pins.",
+  "parts": [
+    {
+      "pid": "u1",
+      "type": "part",
+      "designator": "U1",
+      "x": 0,
+      "y": 0,
+      "pins": [
+        { "num": "1", "name": "P", "x": 0, "y": 0 }
+      ],
+      "bbox": [-10, -10, 10, 10]
+    },
+    {
+      "pid": "u2",
+      "type": "part",
+      "designator": "U2",
+      "x": 130,
+      "y": 60,
+      "pins": [
+        { "num": "1", "name": "P", "x": 130, "y": 60 }
+      ],
+      "bbox": [120, 50, 140, 70]
+    }
+  ],
+  "flags": [],
+  "wires": [
+    {
+      "pid": "long",
+      "net": "SIG",
+      "line": [0, 0, 130, 0, 130, 60]
+    }
+  ],
+  "sheets": []
+}

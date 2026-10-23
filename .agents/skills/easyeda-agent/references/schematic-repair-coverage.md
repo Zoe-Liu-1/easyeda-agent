@@ -46,6 +46,7 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `floating-pin` | 语义选择 | 设计上使用则接线；明确不用才 `sch no-connect`；未知不等于 NC |
 | `geom-net-mismatch` / `net-marker-mismatch` | 语义选择或重排 | 先确定触脚但网表未认领的原因，再重连或修名称；不能靠重导网表掩盖 |
 | `dangling-wire` / `zero-length-wire` | 语义选择 | 先确认是否为有意命名端点；删除局部残支前核对共享树 |
+| `long-wire` | 诊断或重排 | 单物理段超过 `100 raw` 只作 INFO；用 `alignment-plan` / `direct-connect-plan` 验证完整功能组和障碍后再决策。不能因为长度直接移动器件或拆开真实直连 |
 | `multi-net-wire` / `wire-bridge` / `wire-crossing` / `non-orthogonal-wire` | 重排重布 | 先找短路/并网来源，拆树或按正交通道重走；不得只删交叉点 |
 | `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 直接执行或重排重布 | `wire-reroute-fix` 只替换单段隔离线并搜索障碍感知正交通道；多段/共享树、端点不明或无路径保持 blocked |
 | `pin-exit-direction` | 重排重布 | 首段先沿引脚外向再正交折线；`wire-reroute-fix` 只在完整单段替换可行时执行，多段共享树由对应功能级执行器重建 |

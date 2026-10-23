@@ -146,6 +146,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `cross-chip-direct-wire` | 同一物理信号线树直接触及两个不同主动芯片（多脚 `U/Q/IC`）。芯片之间改用同名网络标签或显式模块端口；电源/地轨不套用此信号规则。`sch cross-chip-label-fix` 自动拆可证明的树，带现成 marker、混合网络或槽位不足时 blocked。WARN。 |
 | `wire-over-pin` / `wire-through-body` | 导线穿过非目标引脚或器件本体。`wire-reroute-fix` 对隔离单段线搜索障碍感知正交替代；共享/分支树不自动拆。 |
 | `dangling-wire` | 按 wire primitive 的 degree-1 自由端逐个核验；同一树上的其他引脚/标识不能掩盖空白/自动网名分支上的无落点自由端。`at` 指向真正悬空端，`count` 为该树自由端数量；真实网名标签端点保留为有意连接。删除残留短支路或接到明确目标。 |
+| `long-wire` | 单个真实物理段超过 `100 raw` 时的 INFO。`wireSegment` 给出最长段，`wireLength` 给出长度，`at` 为段中点。按单段而不是整棵折线包络计算；长度本身不是移动器件或拆真连线的许可。先判断完整功能组能否平移、是否有短正交直连或表示法可换，再进入 `alignment-plan` / `direct-connect-plan`。 |
 | `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏项和空名称可由 `sch label-fix` 修复；空名称必须有父级明确网名，没有 Name 属性保持 blocked。 |
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。90/270 可由 `sch label-fix` 改为 0；符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |
 | `power-ground-orientation` | 电源/地旗 body 未朝上/下。`sch power-orientation-fix` 只重接单桩 netflag，首段沿引脚外向并搜索本地正交折线；共享/分支树或反向脚保持 blocked，反向脚显式 `orientationExempt`。 |
