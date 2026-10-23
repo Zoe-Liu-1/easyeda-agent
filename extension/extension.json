@@ -1,9 +1,9 @@
 {
 	"name": "easyeda-agent-connector",
-	"uuid": "29c2915044c24493bceee4359631b733",
+	"uuid": "34bdee34e07944ba903353e7a8f1397b",
 	"displayName": "EDA Agent Connector",
 	"description": "Bridges the local agent daemon to the official eda.* API over a local WebSocket, dispatching typed schematic and PCB actions.",
-	"version": "1.14.5",
+	"version": "1.14.6",
 	"publisher": "zhoushoujian",
 	"engines": {
 		"eda": "~3.2.0"
