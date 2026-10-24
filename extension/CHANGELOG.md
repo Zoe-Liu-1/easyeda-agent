@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.14.14] - 2026-10-24
+
+- `schematic.netflag.create` 对新建的电源/GND/netport 自动绑定其唯一 Name 属性并确保 `ValueVisible=true`；无法证明可见时保留已创建符号并返回 `nameVisibility:"unverified"` 与警告，不能静默通过。
+- `schematic.netflag.create` 的 `rotation` 改为“期望的存储角度”，与 `power.connect_pin` 共用宿主旋转负号补偿，避免同一参数在两条创建路径上生成相反方向的旗。
+
 ## [1.14.13] - 2026-10-24
 
 - `schematic.netflag.create` 的 `net_label` 模式新增可选 `expectedParentWireId`：创建后必须证明新 Name 属性确实挂到指定父导线，否则返回不可验证的 partial 结果，不把错误线树当成成功。

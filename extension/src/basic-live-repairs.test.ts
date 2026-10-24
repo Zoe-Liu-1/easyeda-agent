@@ -61,6 +61,53 @@ test('native label binds to the expected existing parent wire', async (t) => {
 	assert.match(result.error, /target-wire/);
 });
 
+test('netflag create makes a hidden native Name visible', async (t) => {
+	let visible = false;
+	let modifyCalls = 0;
+	const component = primitive({
+		PrimitiveId: 'flag', ComponentType: 'netflag', X: 20, Y: 30,
+		Net: 'GND', Rotation: 90, Mirror: false,
+	});
+	const attribute = primitive({
+		PrimitiveId: 'name', ParentPrimitiveId: 'flag', Key: 'Name', Value: 'GND',
+		X: 20, Y: 30, Rotation: 0, Color: '#000000', FontName: 'Arial',
+		FontSize: 8, Bold: false, Italic: false, UnderLine: false,
+		AlignMode: 0, FillColor: '#000000', KeyVisible: false, ValueVisible: false,
+	});
+	(globalThis as any).eda = {
+		...context,
+		sch_PrimitiveComponent: {
+			createNetFlag: async () => component,
+			get: async () => component,
+		},
+		sch_PrimitiveAttribute: {
+			getAll: async () => [new Proxy(attribute, {
+				get: (target, key) => key === 'getState_ValueVisible'
+					? () => visible
+					: Reflect.get(target, key),
+			})],
+			get: async () => new Proxy(attribute, {
+				get: (target, key) => key === 'getState_ValueVisible'
+					? () => visible
+					: Reflect.get(target, key),
+			}),
+			modify: async () => {
+				modifyCalls++;
+				visible = true;
+				return attribute;
+			},
+		},
+	};
+	t.after(() => { delete (globalThis as any).eda; });
+	const { result }: any = await runAction('schematic.netflag.create', {
+		kind: 'ground', net: 'GND', x: 20, y: 30,
+	});
+	assert.equal(modifyCalls, 1);
+	assert.equal(visible, true);
+	assert.equal(result.nameVisibility, 'visible');
+	assert.equal(result.nameAttributeId, 'name');
+});
+
 test('PCB stale ID and unreadable inventory refuse before modify', async (t) => {
 	let writes = 0;
 	t.after(() => { delete (globalThis as any).eda; });

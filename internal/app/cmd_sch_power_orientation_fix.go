@@ -17,6 +17,7 @@ type powerOrientationProposal struct {
 	MarkerID      string         `json:"markerId"`
 	Net           string         `json:"net"`
 	Family        string         `json:"family"`
+	Mode          string         `json:"mode"`
 	FromDirection string         `json:"fromDirection"`
 	ToDirection   string         `json:"toDirection"`
 	FromRotation  float64        `json:"fromRotation"`
@@ -55,9 +56,11 @@ type powerOrientationScene struct {
 }
 
 type appliedPowerOrientation struct {
-	Proposal    powerOrientationProposal
-	NewMarkerID string
-	NewWireIDs  []string
+	Proposal         powerOrientationProposal
+	NewMarkerID      string
+	NewWireIDs       []string
+	OldMarkerDeleted bool
+	Changed          bool
 }
 
 func newSchPowerOrientationFixCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
@@ -66,16 +69,17 @@ func newSchPowerOrientationFixCmd(cfg *appConfig, window *string, stdout, stderr
 	cmd := &cobra.Command{
 		Use:   "power-orientation-fix",
 		Short: "Re-route power/ground flags so their bodies face up/down",
-		Long: `Plan from power-ground-orientation findings and replace only single-stub
-netflag branches. Power flags target body-up; ground flags target body-down.
-The first stub segment follows the measured pin outward direction, then an
-orthogonal route reaches the desired vertical anchor. Reverse pins are not
-forced: they remain blocked until an explicit orientationExempt is recorded.
+		Long: `Plan from power-ground-orientation findings. Power flags target body-up; ground
+flags target body-down. A single-stub branch is rerouted from the host pin when
+a clear orthogonal path exists; otherwise a marker whose anchor is on exactly
+one parent wire is recreated vertically in place without changing that wire.
+Reverse pins are not forced: they remain blocked until an explicit
+orientationExempt is recorded.
 
-Apply mode deletes and recreates one verified marker branch at a time, compares
-the complete pin-to-net map and bridge set, requires every target finding to
-disappear, and rolls back newly changed markers on failure. Without --apply this
-command is read-only.`,
+Apply mode verifies one marker replacement at a time, compares the complete
+pin-to-net map and bridge set, requires every target finding to disappear, and
+rolls back newly changed markers on failure. Without --apply this command is
+read-only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pinned, win, doc, err := pinZonePage(cfg, *window)
@@ -179,6 +183,16 @@ func readPowerOrientationScene(pinned *appConfig, win, doc string) (powerOrienta
 func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 	items []visibleTextItem, sheet, titleBlock *layoutBBox, exempt map[string]bool) []powerOrientationProposal {
 	problems, _ := powerGroundOrientationFindings(comps, exempt)
+	seen := map[string]bool{}
+	for _, finding := range problems {
+		seen[finding.PrimitiveId] = true
+	}
+	for _, finding := range reversedNetFlagFindings(comps, wires) {
+		if !seen[finding.PrimitiveId] {
+			problems = append(problems, finding)
+			seen[finding.PrimitiveId] = true
+		}
+	}
 	byID := map[string]layoutComp{}
 	for _, c := range comps {
 		byID[c.ID] = c
@@ -202,16 +216,25 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 			MarkerID: c.ID, Net: c.Net, Family: family,
 			FromDirection: fromDir, ToDirection: want,
 			FromRotation: *c.Rotation, ToRotation: flagBodyRotation[family][want],
-			Status: "blocked",
+			Status: "blocked", Original: &c,
 		}
 		stub, reason := stubOfMarker(c, wires)
 		if stub == nil || reason != "" {
+			if fallback, ok, adapterReason := planAdapterPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock); ok {
+				fallback.MarkerID, fallback.Net, fallback.Family = c.ID, c.Net, family
+				fallback.FromDirection, fallback.ToDirection = fromDir, want
+				fallback.FromRotation, fallback.ToRotation = *c.Rotation, flagBodyRotation[family][want]
+				fallback.Original = &c
+				out = append(out, fallback)
+				continue
+			} else if adapterReason != "" {
+				reason += ";adapter:" + adapterReason
+			}
 			base.Reason = "unsafe-marker-stub:" + reason
 			out = append(out, base)
 			continue
 		}
 		base.StubWireID = stub.WireID
-		base.Original = &c
 		base.OriginalStub = stub
 		host, hostPin, ok := powerOrientationHostPin(comps, stub.HostX, stub.HostY)
 		if !ok {
@@ -236,13 +259,26 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 			best, ok = choosePowerOrientationPathAStar(c, stub, hostPin, outward, want, items, comps, wires, sheet, titleBlock)
 		}
 		if !ok {
+			if fallback, ok, _ := planAdapterPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock); ok {
+				fallback.MarkerID, fallback.Net, fallback.Family = c.ID, c.Net, family
+				fallback.FromDirection, fallback.ToDirection = fromDir, want
+				fallback.FromRotation, fallback.ToRotation = *c.Rotation, flagBodyRotation[family][want]
+				fallback.Original = &c
+				out = append(out, fallback)
+				continue
+			}
+			_, _, adapterReason := planAdapterPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock)
 			base.Reason = "no-clear-vertical-marker-route"
+			if adapterReason != "" {
+				base.Reason += ":" + adapterReason
+			}
 			out = append(out, base)
 			continue
 		}
 		best.MarkerID, best.Net, best.Family = c.ID, c.Net, family
 		best.FromDirection, best.ToDirection = fromDir, want
 		best.FromRotation, best.ToRotation = *c.Rotation, flagBodyRotation[family][want]
+		best.Mode = "reroute-stub"
 		best.StubWireID = stub.WireID
 		best.Original = &c
 		best.OriginalStub = stub
@@ -264,6 +300,99 @@ func powerOrientationHostPin(comps []layoutComp, x, y float64) (layoutComp, layo
 		}
 	}
 	return layoutComp{}, layoutPin{}, false
+}
+
+// planAdapterPowerOrientation preserves the existing shared/branched wire tree
+// and appends one short orthogonal adapter branch at the flag's existing wire
+// endpoint. Recreating a horizontal flag vertically at the same point would
+// make bridge/reverse rules see a body-side mismatch, so the new branch makes
+// the final approach serve the required up/down body direction.
+func planAdapterPowerOrientation(c layoutComp, family, want string, items []visibleTextItem,
+	comps []layoutComp, wires []schGroupWire, sheet, titleBlock *layoutBBox) (powerOrientationProposal, bool, string) {
+	wireID, attach, ok := powerOrientationAttachmentPoint(c, wires)
+	if !ok {
+		return powerOrientationProposal{}, false, "attachment-unresolved"
+	}
+	kind := "power"
+	if family == "ground" {
+		kind = "ground"
+	}
+	stub := &destaggerStub{Flag: c, WireID: wireID, HostX: attach.X, HostY: attach.Y, Dir: want}
+	vertical := 1.0
+	if want == "down" {
+		vertical = -1
+	}
+	lastBlocker := "no-clear-adapter-route"
+	for _, length := range []float64{15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140} {
+		for _, dx := range []float64{0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100, 120, -120} {
+			end := [2]float64{attach.X + dx, attach.Y + vertical*length}
+			var path [][2]float64
+			if dx == 0 {
+				path = [][2]float64{{attach.X, attach.Y}, end}
+			} else {
+				path = [][2]float64{
+					{attach.X, attach.Y},
+					{attach.X + dx, attach.Y},
+					end,
+				}
+			}
+			newBox := predictedMarkerBBox(end[0], end[1], kind, want, c.Net)
+			if !powerOrientationMarkerBoxClear(c, newBox, items, comps, wires, wireID, sheet, titleBlock) {
+				lastBlocker = "marker-box"
+				continue
+			}
+			if !powerOrientationPathEndpointsClear(stub, path, wires) {
+				lastBlocker = "path-endpoint"
+				continue
+			}
+			if !powerOrientationRouteClear(c, newBox, stub, path, items, comps, wires, sheet, titleBlock) {
+				lastBlocker = "path-geometry"
+				continue
+			}
+			host := attach
+			anchor := checkPoint{X: end[0], Y: end[1]}
+			return powerOrientationProposal{
+				Mode: "adapter-vertical-flag", Host: &host, NewAnchor: &anchor,
+				NewStubPath: append([][2]float64(nil), path...),
+				StubWireID:  wireID, Status: "ready",
+			}, true, ""
+		}
+	}
+	return powerOrientationProposal{}, false, lastBlocker
+}
+
+func powerOrientationAttachmentPoint(c layoutComp, wires []schGroupWire) (string, checkPoint, bool) {
+	const attachmentEps = 5.5
+	var wireIDs []string
+	bestDistance := math.Inf(1)
+	var best checkPoint
+	for _, wire := range wires {
+		if wire.Net != "" && c.Net != "" && wire.Net != c.Net {
+			continue
+		}
+		found := false
+		for _, seg := range labelWireSegments(wire) {
+			for _, point := range [][2]float64{{seg[0], seg[1]}, {seg[2], seg[3]}} {
+				dx, dy := point[0]-c.X, point[1]-c.Y
+				if math.Abs(dx) > attachmentEps || math.Abs(dy) > attachmentEps {
+					continue
+				}
+				distance := math.Hypot(dx, dy)
+				if distance < bestDistance {
+					bestDistance = distance
+					best = checkPoint{X: point[0], Y: point[1]}
+				}
+				found = true
+			}
+		}
+		if found {
+			wireIDs = appendUniqueString(wireIDs, wire.ID)
+		}
+	}
+	if len(wireIDs) != 1 {
+		return "", checkPoint{}, false
+	}
+	return wireIDs[0], best, true
 }
 
 func pinCardinalOutward(p layoutPin) (string, bool) {
@@ -715,10 +844,12 @@ func executePowerOrientationFix(pinned *appConfig, win, doc string, scene powerO
 			continue
 		}
 		app, err := executePowerOrientationProposal(pinned, win, doc, proposal)
+		if app.Changed || app.NewMarkerID != "" || len(app.NewWireIDs) > 0 || app.OldMarkerDeleted {
+			applied = append(applied, app)
+		}
 		if err != nil {
 			return rollback(err)
 		}
-		applied = append(applied, app)
 		report.AppliedIDs = append(report.AppliedIDs, proposal.MarkerID)
 		if err := verifyPowerOrientationBaseline(pinned, win, doc, beforeNets, beforeBridges); err != nil {
 			return rollback(err)
@@ -734,10 +865,21 @@ func executePowerOrientationFix(pinned *appConfig, win, doc string, scene powerO
 			wantGone[p.MarkerID] = true
 		}
 	}
+	newMarkerIDs := map[string]bool{}
+	for _, app := range applied {
+		if app.NewMarkerID != "" {
+			newMarkerIDs[app.NewMarkerID] = true
+		}
+	}
 	remaining, _ := powerGroundOrientationFindings(after.comps, nil)
 	for _, finding := range remaining {
-		if wantGone[finding.PrimitiveId] {
+		if wantGone[finding.PrimitiveId] || newMarkerIDs[finding.PrimitiveId] {
 			return rollback(fmt.Errorf("power-orientation-fix: marker %s remains non-vertical", finding.PrimitiveId))
+		}
+	}
+	for _, finding := range reversedNetFlagFindings(after.comps, after.wires) {
+		if wantGone[finding.PrimitiveId] || newMarkerIDs[finding.PrimitiveId] {
+			return rollback(fmt.Errorf("power-orientation-fix: marker %s remains body/stub-reversed", finding.PrimitiveId))
 		}
 	}
 	if err := verifyPowerOrientationBaseline(pinned, win, doc, beforeNets, beforeBridges); err != nil {
@@ -760,22 +902,30 @@ func executePowerOrientationFix(pinned *appConfig, win, doc string, scene powerO
 
 func executePowerOrientationProposal(pinned *appConfig, win, doc string,
 	p powerOrientationProposal) (appliedPowerOrientation, error) {
+	if p.Mode == "adapter-vertical-flag" {
+		return executeAdapterPowerOrientation(pinned, win, doc, p)
+	}
+	if p.Mode == "in-place-vertical-flag" {
+		return executeInPlacePowerOrientation(pinned, win, doc, p)
+	}
 	if p.Original == nil || p.OriginalStub == nil || p.Host == nil || p.NewAnchor == nil || len(p.NewStubPath) < 2 {
-		return appliedPowerOrientation{}, fmt.Errorf("proposal %s lacks complete geometry", p.MarkerID)
+		return appliedPowerOrientation{Proposal: p}, fmt.Errorf("proposal %s lacks complete geometry", p.MarkerID)
 	}
 	kind := "power"
 	if p.Family == "ground" {
 		kind = "ground"
 	}
+	app := appliedPowerOrientation{Proposal: p}
 	disc, err := requestAutolayoutAction(pinned, "schematic.pin.disconnect", win, map[string]any{
 		"wirePrimitiveId": p.StubWireID, "pinX": p.Host.X, "pinY": p.Host.Y,
 	}, doc, "power-orientation-fix 拆除旧支路")
 	if err != nil {
-		return appliedPowerOrientation{}, err
+		return app, err
 	}
 	if disc.Result["disconnected"] != true || disc.Result["partial"] == true {
-		return appliedPowerOrientation{}, fmt.Errorf("old marker branch disconnect not proven")
+		return app, fmt.Errorf("old marker branch disconnect not proven")
 	}
+	app.Changed = true
 	var preliminaryWireIDs []string
 	connectStart := [2]float64{p.Host.X, p.Host.Y}
 	var via *[2]float64
@@ -789,7 +939,7 @@ func executePowerOrientationProposal(pinned *appConfig, win, doc string,
 			"points": points, "net": p.Net,
 		}, doc, "power-orientation-fix 创建多段前置路径")
 		if werr != nil {
-			return appliedPowerOrientation{Proposal: p}, werr
+			return app, werr
 		}
 		if id, _ := wres.Result["primitiveId"].(string); id != "" {
 			preliminaryWireIDs = append(preliminaryWireIDs, id)
@@ -822,7 +972,7 @@ func executePowerOrientationProposal(pinned *appConfig, win, doc string,
 			_, _ = requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
 				map[string]any{"primitiveIds": preliminaryWireIDs}, doc, "power-orientation-fix 清理前置路径")
 		}
-		return appliedPowerOrientation{Proposal: p}, err
+		return app, err
 	}
 	newMarker, _ := created.Result["flagPrimitiveId"].(string)
 	newWire, _ := created.Result["wirePrimitiveId"].(string)
@@ -831,36 +981,264 @@ func executePowerOrientationProposal(pinned *appConfig, win, doc string,
 			_, _ = requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
 				map[string]any{"primitiveIds": preliminaryWireIDs}, doc, "power-orientation-fix 清理未确认前置路径")
 		}
-		return appliedPowerOrientation{Proposal: p}, fmt.Errorf("new marker identities incomplete")
+		app.NewMarkerID = newMarker
+		app.NewWireIDs = append(app.NewWireIDs, preliminaryWireIDs...)
+		if newWire != "" {
+			app.NewWireIDs = append(app.NewWireIDs, newWire)
+		}
+		return app, fmt.Errorf("new marker identities incomplete")
 	}
 	preliminaryWireIDs = append(preliminaryWireIDs, newWire)
-	return appliedPowerOrientation{Proposal: p, NewMarkerID: newMarker, NewWireIDs: preliminaryWireIDs}, nil
+	app.NewMarkerID = newMarker
+	app.NewWireIDs = preliminaryWireIDs
+	return app, nil
+}
+
+func executeAdapterPowerOrientation(pinned *appConfig, win, doc string,
+	p powerOrientationProposal) (appliedPowerOrientation, error) {
+	app := appliedPowerOrientation{Proposal: p}
+	if p.Original == nil || p.Host == nil || p.NewAnchor == nil ||
+		len(p.NewStubPath) < 2 || p.StubWireID == "" {
+		return app, fmt.Errorf("adapter orientation proposal %s lacks complete geometry", p.MarkerID)
+	}
+	kind := "power"
+	if p.Family == "ground" {
+		kind = "ground"
+	}
+	lastA := p.NewStubPath[len(p.NewStubPath)-2]
+	lastB := p.NewStubPath[len(p.NewStubPath)-1]
+	offset := math.Abs(lastB[0]-lastA[0]) + math.Abs(lastB[1]-lastA[1])
+	payload := map[string]any{
+		"pinX": p.Host.X, "pinY": p.Host.Y, "kind": kind, "net": p.Net,
+		"direction": p.ToDirection, "offset": offset, "rotation": p.ToRotation,
+	}
+	if len(p.NewStubPath) > 2 {
+		corner := p.NewStubPath[len(p.NewStubPath)-2]
+		payload["via"] = []float64{corner[0], corner[1]}
+	}
+	created, err := requestAutolayoutAction(pinned, "schematic.power.connect_pin", win, payload,
+		doc, "power-orientation-fix 创建竖排适配支路")
+	if err != nil {
+		return app, err
+	}
+	app.NewMarkerID, _ = created.Result["flagPrimitiveId"].(string)
+	if wireID, _ := created.Result["wirePrimitiveId"].(string); wireID != "" {
+		app.NewWireIDs = append(app.NewWireIDs, wireID)
+	}
+	app.Changed = app.NewMarkerID != "" || len(app.NewWireIDs) > 0
+	if app.NewMarkerID == "" || len(app.NewWireIDs) == 0 {
+		return app, fmt.Errorf("adapter marker/wire identities are incomplete")
+	}
+	if err := verifyVerticalPowerOrientationMarker(pinned, win, doc, p, app.NewMarkerID); err != nil {
+		return app, err
+	}
+	deleted, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win, map[string]any{
+		"primitiveIds": []string{p.MarkerID},
+	}, doc, "power-orientation-fix 删除旧横排网络符号")
+	if err == nil {
+		app.OldMarkerDeleted = markerDeleteProven(deleted.Result)
+	}
+	if !app.OldMarkerDeleted {
+		present, readErr := signalMarkerPresent(pinned, win, doc, p.MarkerID)
+		if readErr == nil && !present {
+			app.OldMarkerDeleted = true
+		}
+	}
+	if !app.OldMarkerDeleted {
+		if err != nil {
+			return app, err
+		}
+		return app, fmt.Errorf("old adapter marker deletion was not proven")
+	}
+	return app, nil
+}
+
+func executeInPlacePowerOrientation(pinned *appConfig, win, doc string,
+	p powerOrientationProposal) (appliedPowerOrientation, error) {
+	app := appliedPowerOrientation{Proposal: p}
+	if p.Original == nil || p.NewAnchor == nil || p.StubWireID == "" {
+		return app, fmt.Errorf("in-place orientation proposal %s lacks original/anchor geometry", p.MarkerID)
+	}
+	kind := "power"
+	if p.Family == "ground" {
+		kind = "ground"
+	}
+	created, err := requestAutolayoutAction(pinned, "schematic.netflag.create", win, map[string]any{
+		"kind": kind, "net": p.Net, "x": p.NewAnchor.X, "y": p.NewAnchor.Y,
+		"rotation": p.ToRotation,
+	}, doc, "power-orientation-fix 原位创建竖排旧网络符号")
+	if err != nil {
+		return app, err
+	}
+	app.NewMarkerID, _ = created.Result["primitiveId"].(string)
+	if app.NewMarkerID == "" {
+		return app, fmt.Errorf("in-place vertical marker identity is missing")
+	}
+	app.Changed = true
+	if err := verifyVerticalPowerOrientationMarker(pinned, win, doc, p, app.NewMarkerID); err != nil {
+		return app, err
+	}
+	deleted, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win, map[string]any{
+		"primitiveIds": []string{p.MarkerID},
+	}, doc, "power-orientation-fix 删除旧横排网络符号")
+	if err == nil {
+		app.OldMarkerDeleted = markerDeleteProven(deleted.Result)
+	}
+	if !app.OldMarkerDeleted {
+		present, readErr := signalMarkerPresent(pinned, win, doc, p.MarkerID)
+		if readErr == nil && !present {
+			app.OldMarkerDeleted = true
+		}
+	}
+	if !app.OldMarkerDeleted {
+		if err != nil {
+			return app, err
+		}
+		return app, fmt.Errorf("old horizontal marker deletion was not proven")
+	}
+	return app, nil
+}
+
+func verifyVerticalPowerOrientationMarker(pinned *appConfig, win, doc string,
+	p powerOrientationProposal, markerID string) error {
+	res, err := requestAutolayoutAction(pinned, "schematic.components.list", win, map[string]any{
+		"includeBBox": true, "includePagePrimitives": true,
+	}, doc, "power-orientation-fix 回读原位竖排网络符号")
+	if err != nil {
+		return err
+	}
+	comps, err := parseLayoutComps(res.Result)
+	if err != nil {
+		return err
+	}
+	for _, c := range comps {
+		if c.ID != markerID {
+			continue
+		}
+		if c.ComponentType != "netflag" || c.Net != p.Net || c.Rotation == nil ||
+			math.Abs(c.X-p.NewAnchor.X) > 0.5 || math.Abs(c.Y-p.NewAnchor.Y) > 0.5 {
+			return fmt.Errorf("new marker state differs from request")
+		}
+		dir, ok := flagDirectionOf(p.Family, *c.Rotation)
+		if !ok || dir != p.ToDirection {
+			return fmt.Errorf("new marker body direction is %q, want %q", dir, p.ToDirection)
+		}
+		return ensurePowerOrientationMarkerNameVisible(pinned, win, doc, markerID)
+	}
+	return fmt.Errorf("new marker %s is absent from fresh component inventory", markerID)
+}
+
+func ensurePowerOrientationMarkerNameVisible(pinned *appConfig, win, doc, markerID string) error {
+	scene, err := readLabelFixScene(pinned, win, doc, io.Discard)
+	if err != nil {
+		return err
+	}
+	var target *visibleTextItem
+	for i := range scene.items {
+		item := &scene.items[i]
+		if item.ParentID == markerID && item.Kind == "attribute" && item.Key == "Name" {
+			target = item
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("new marker %s has no native Name attribute", markerID)
+	}
+	if target.Visible != nil && *target.Visible {
+		return nil
+	}
+	state, err := dcAttributeState(scene.geomResult, target.ID)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"projectUuid": scene.projectID, "documentUuid": doc,
+		"primitiveId": target.ID, "expected": state,
+		"patch": map[string]any{"valueVisible": true},
+	}
+	if err := validateSchAttributeModifyPayload(payload); err != nil {
+		return err
+	}
+	res, err := requestAction(pinned, "schematic.attribute.modify", win, payload)
+	if err != nil {
+		return err
+	}
+	if err := schAttributeModifyResultError("schematic.attribute.modify", res.Result); err != nil {
+		return err
+	}
+	fresh, err := readLabelFixScene(pinned, win, doc, io.Discard)
+	if err != nil {
+		return err
+	}
+	for _, item := range fresh.items {
+		if item.ID == target.ID {
+			if item.Visible == nil || !*item.Visible {
+				return fmt.Errorf("new marker Name visibility was not proven after modify")
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("new marker Name attribute disappeared after modify")
 }
 
 func rollbackPowerOrientation(pinned *appConfig, win, doc string, applied []appliedPowerOrientation) error {
 	for i := len(applied) - 1; i >= 0; i-- {
 		app := applied[i]
-		if app.Proposal.Original == nil || app.Proposal.OriginalStub == nil || app.Proposal.Host == nil {
-			return fmt.Errorf("rollback proposal %s missing original geometry", app.Proposal.MarkerID)
-		}
-		if app.NewMarkerID == "" || len(app.NewWireIDs) == 0 {
-			return fmt.Errorf("rollback %s has incomplete new marker/wire identities", app.Proposal.MarkerID)
-		}
-		artifactIDs := append([]string{app.NewMarkerID}, app.NewWireIDs...)
-		deleted, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
-			map[string]any{"primitiveIds": artifactIDs}, doc, "power-orientation-fix 回滚新支路")
-		if err != nil {
-			return err
-		}
-		if err := verifyPowerOrientationArtifactDeletion(deleted, artifactIDs); err != nil {
-			return err
-		}
 		old := app.Proposal.Original
-		stub := app.Proposal.OriginalStub
+		if old == nil || !app.Changed {
+			continue
+		}
 		kind := "power"
 		if app.Proposal.Family == "ground" {
 			kind = "ground"
 		}
+		if app.Proposal.Mode == "in-place-vertical-flag" || app.Proposal.Mode == "adapter-vertical-flag" {
+			if app.OldMarkerDeleted {
+				restored, err := requestAutolayoutAction(pinned, "schematic.netflag.create", win, map[string]any{
+					"kind": kind, "net": old.Net, "x": old.X, "y": old.Y,
+					"rotation": app.Proposal.FromRotation,
+				}, doc, "power-orientation-fix 回滚原横排网络符号")
+				if err != nil {
+					return err
+				}
+				if id, _ := restored.Result["primitiveId"].(string); id == "" {
+					return fmt.Errorf("restored original marker has no verified primitive ID")
+				}
+			}
+			artifactIDs := append([]string(nil), app.NewWireIDs...)
+			if app.NewMarkerID != "" {
+				artifactIDs = append([]string{app.NewMarkerID}, artifactIDs...)
+			}
+			if len(artifactIDs) > 0 {
+				deleted, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
+					map[string]any{"primitiveIds": artifactIDs}, doc, "power-orientation-fix 回滚竖排网络符号")
+				if err != nil {
+					return err
+				}
+				if err := verifyPowerOrientationArtifactDeletion(deleted, artifactIDs); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if app.Proposal.OriginalStub == nil || app.Proposal.Host == nil {
+			return fmt.Errorf("rollback proposal %s missing original branch geometry", app.Proposal.MarkerID)
+		}
+		artifactIDs := append([]string(nil), app.NewWireIDs...)
+		if app.NewMarkerID != "" {
+			artifactIDs = append([]string{app.NewMarkerID}, artifactIDs...)
+		}
+		if len(artifactIDs) > 0 {
+			deleted, err := requestAutolayoutAction(pinned, "schematic.primitives.delete", win,
+				map[string]any{"primitiveIds": artifactIDs}, doc, "power-orientation-fix 回滚新支路")
+			if err != nil {
+				return err
+			}
+			if err := verifyPowerOrientationArtifactDeletion(deleted, artifactIDs); err != nil {
+				return err
+			}
+		}
+		stub := app.Proposal.OriginalStub
 		if _, err := requestAutolayoutAction(pinned, "schematic.power.connect_pin", win, map[string]any{
 			"pinX": stub.HostX, "pinY": stub.HostY, "kind": kind, "net": old.Net,
 			"direction": stub.Dir, "offset": stub.Offset, "rotation": app.Proposal.FromRotation,

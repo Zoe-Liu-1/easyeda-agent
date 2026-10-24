@@ -8,9 +8,10 @@ func TestMarkerWireOverlapFindings(t *testing.T) {
 		X: 110, Y: 120, BBox: &layoutBBox{MinX: 100, MinY: 100, MaxX: 120, MaxY: 140},
 	}
 	wires := []schGroupWire{
-		{ID: "stub", Points: []float64{110, 120, 110, 80}},   // 自己的短桩:应跳过
-		{ID: "graze", Points: []float64{100, 100, 130, 100}}, // 贴边:内缩 eps 后不算
-		{ID: "cross", Points: []float64{100, 110, 130, 110}}, // 真正穿入:应报
+		{ID: "stub", Points: []float64{110, 120, 110, 80}},               // 自己的短桩:应跳过
+		{ID: "native-offset-stub", Points: []float64{110, 125, 110, 80}}, // 宿主约半格偏移的自身连接
+		{ID: "graze", Points: []float64{100, 100, 130, 100}},             // 贴边:内缩 eps 后不算
+		{ID: "cross", Points: []float64{100, 110, 130, 110}},             // 真正穿入:应报
 	}
 	got := markerWireOverlapFindings([]layoutComp{marker}, wires, 1.0)
 	if len(got) != 1 {

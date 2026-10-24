@@ -4144,7 +4144,7 @@ const schematicNetflagCreate: Handler = async (payload) => {
 	const kind = requireString(payload, 'kind');
 	const x = requireNumber(payload, 'x');
 	const y = requireNumber(payload, 'y');
-	const rotation = optionalNumber(payload, 'rotation');
+	const desiredRotation = optionalNumber(payload, 'rotation');
 	const mirror = optionalBoolean(payload, 'mirror');
 	if (kind === NET_LABEL_KIND) {
 		return createVerifiedNetLabel(x, y, requireString(payload, 'net'),
@@ -4155,6 +4155,7 @@ const schematicNetflagCreate: Handler = async (payload) => {
 	try {
 		if (kind in NET_FLAG_KINDS) {
 			const net = requireString(payload, 'net');
+			const rotation = desiredRotation === undefined ? undefined : await appliedRotation(desiredRotation);
 			component = await eda.sch_PrimitiveComponent.createNetFlag(
 				NET_FLAG_KINDS[kind],
 				net,
@@ -4166,6 +4167,7 @@ const schematicNetflagCreate: Handler = async (payload) => {
 		}
 		else if (kind in NET_PORT_KINDS) {
 			const net = requireString(payload, 'net');
+			const rotation = desiredRotation === undefined ? undefined : await appliedRotation(desiredRotation);
 			component = await eda.sch_PrimitiveComponent.createNetPort(
 				NET_PORT_KINDS[kind],
 				net,
@@ -4177,7 +4179,7 @@ const schematicNetflagCreate: Handler = async (payload) => {
 		}
 
 		else if (kind === 'short_circuit') {
-			component = await eda.sch_PrimitiveComponent.createShortCircuitFlag(x, y, rotation, mirror);
+			component = await eda.sch_PrimitiveComponent.createShortCircuitFlag(x, y, desiredRotation, mirror);
 		}
 		else {
 			throw new ActionError(
@@ -4195,13 +4197,61 @@ const schematicNetflagCreate: Handler = async (payload) => {
 	if (!component) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to create net flag of kind "${kind}".`);
 	}
+	const nameVisibility = await ensureCreatedMarkerNameVisible(component);
 	return {
 		result: {
 			primitiveId: component.getState_PrimitiveId(),
 			...(kind === NET_LABEL_KIND ? {} : { component: serializeComponent(component as SchComponent) }),
+			nameVisibility: nameVisibility.verified ? 'visible' : 'unverified',
+			...(nameVisibility.attributeId ? { nameAttributeId: nameVisibility.attributeId } : {}),
 		},
+		...(nameVisibility.verified ? {} : {
+			warnings: [`Created marker Name visibility was not proven: ${nameVisibility.error ?? 'unknown error'}`],
+		}),
 	};
 };
+
+// EasyEDA may create a Net flag/port Name attribute hidden. The project rule is
+// that every power/ground/port name is visible, so bind the exact child Name
+// attribute and turn only ValueVisible on through the protected attribute path.
+async function ensureCreatedMarkerNameVisible(component: SchPrimitiveLike): Promise<{
+	verified: boolean;
+	attributeId?: string;
+	error?: string;
+}> {
+	let attributeId = '';
+	try {
+		const parentId = component.getState_PrimitiveId();
+		const all = await eda.sch_PrimitiveAttribute.getAll();
+		if (!Array.isArray(all)) throw new Error('attribute inventory unavailable');
+		const names = all.filter(attribute =>
+			attribute.getState_ParentPrimitiveId() === parentId
+			&& attribute.getState_Key() === 'Name');
+		if (names.length !== 1) throw new Error(`expected one Name attribute, found ${names.length}`);
+		const attribute = names[0];
+		attributeId = attribute.getState_PrimitiveId();
+		if (attribute.getState_ValueVisible() === true) return { verified: true, attributeId };
+		const identity = await readResponseContext();
+		if (!identity.projectUuid || !identity.documentUuid || identity.documentType !== 'schematic') {
+			throw new Error('current schematic identity unavailable');
+		}
+		const expected = await schAttributeStateRecord(attribute, readCurrentNativePageAttributes);
+		const modified = await modifySchematicAttributeProperties({
+			projectUuid: identity.projectUuid,
+			documentUuid: identity.documentUuid,
+			primitiveId: attributeId,
+			expected,
+			patch: { valueVisible: true },
+		}, current => schAttributeStateRecord(current, readCurrentNativePageAttributes));
+		if (modified.result?.verified !== true) {
+			throw new Error(String((modified.result as Record<string, unknown> | undefined)?.errors ?? 'modify not verified'));
+		}
+		return { verified: true, attributeId };
+	}
+	catch (error) {
+		return { verified: false, ...(attributeId ? { attributeId } : {}), error: describeThrown(error) };
+	}
+}
 
 // ─── No-connect flag (非连接标识) ───────────────────────────────────────
 //

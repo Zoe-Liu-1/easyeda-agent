@@ -235,6 +235,12 @@ func powerGroundOrientationFindings(comps []layoutComp, exempt map[string]bool) 
 // markerWireOverlapFindings 规则:网络标识(netflag/netport)本体压在导线上。
 // 标识自己的短桩(endpoint 恰在 anchor)不算;只有异线穿过标识 bbox 才报。
 func markerWireOverlapFindings(comps []layoutComp, wires []schGroupWire, eps float64) []checkFinding {
+	// Native power/ground symbols report their placement origin about half a
+	// 5-raw grid step away from the wire endpoint (live: marker 600,900 on a
+	// wire ending 600,905). Bridge-check already treats that grid residue as the
+	// same physical island; use the same ownership tolerance here so the flag's
+	// own connection trunk is not reported as a foreign wire inside its body.
+	const markerAttachEps = 5.5
 	var out []checkFinding
 	for _, c := range comps {
 		if !isSchMarker(c.ComponentType) || c.BBox == nil {
@@ -250,8 +256,8 @@ func markerWireOverlapFindings(comps []layoutComp, wires []schGroupWire, eps flo
 		}
 		for _, w := range wires {
 			for _, s := range schDesignatorWireSegments(w) {
-				if (math.Abs(s[0]-c.X) < 0.5 && math.Abs(s[1]-c.Y) < 0.5) ||
-					(math.Abs(s[2]-c.X) < 0.5 && math.Abs(s[3]-c.Y) < 0.5) {
+				if (math.Abs(s[0]-c.X) <= markerAttachEps && math.Abs(s[1]-c.Y) <= markerAttachEps) ||
+					(math.Abs(s[2]-c.X) <= markerAttachEps && math.Abs(s[3]-c.Y) <= markerAttachEps) {
 					continue // 标识自己的短桩
 				}
 				if schSegmentCrossesBox(s[0], s[1], s[2], s[3], inner) {

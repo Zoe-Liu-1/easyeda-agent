@@ -48,6 +48,28 @@ func TestBuildPowerOrientationPlanTargetsGroundDown(t *testing.T) {
 	}
 }
 
+func TestPlanAdapterPowerOrientationPreservesParentWire(t *testing.T) {
+	rot := flagBodyRotation["power"]["right"]
+	flag := layoutComp{
+		ID: "flag", ComponentType: "netflag", Net: "+3V3", X: 50, Y: 70,
+		Rotation: &rot, AnchorAvailable: true,
+		BBox: &layoutBBox{MinX: 50, MinY: 65, MaxX: 60, MaxY: 75},
+	}
+	wires := []schGroupWire{{
+		ID: "shared-tree", Net: "+3V3",
+		Points: []float64{20, 60, 20, 70, 50, 70},
+	}}
+	got, ok, reason := planAdapterPowerOrientation(flag, "power", "up", nil,
+		[]layoutComp{flag}, wires,
+		&layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 200}, nil)
+	if !ok || got.Status != "ready" || got.Mode != "adapter-vertical-flag" ||
+		got.Host == nil || got.Host.X != 50 || got.Host.Y != 70 ||
+		got.NewAnchor == nil || got.NewAnchor.X != 50 || got.NewAnchor.Y <= 70 ||
+		got.StubWireID != "shared-tree" || len(got.NewStubPath) < 2 {
+		t.Fatalf("adapter orientation fallback = %+v ok=%v reason=%s", got, ok, reason)
+	}
+}
+
 func TestPowerOrientationPathRejectsForeignWireAtEndpoint(t *testing.T) {
 	stub := &destaggerStub{WireID: "stub", HostX: 40, HostY: 70}
 	path := [][2]float64{{40, 70}, {20, 70}, {20, 60}}

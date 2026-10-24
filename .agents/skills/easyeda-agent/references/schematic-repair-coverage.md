@@ -62,13 +62,13 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `wire-over-pin` / `wire-over-pin-lead` / `wire-through-body` | 直接执行或重排重布 | `wire-reroute-fix` 只替换单段隔离线并搜索障碍感知正交通道；多段/共享树、端点不明或无路径保持 blocked |
 | `pin-exit-direction` | 重排重布 | 首段先沿引脚外向再正交折线；`wire-reroute-fix` 只在完整单段替换可行时执行，多段共享树由对应功能级执行器重建 |
 | `signal-netflag-type` / `signal-netport-type` | 直接执行或显式阻断 | `signal-marker-fix` 保留既有线树，在端口落点唯一命中的父线上创建文字 net_label；原位碰撞时只允许沿同一父线移动标签锚点并重验完整 bbox。父线已有同名标签、父线归属不明或搜索范围内无安全槽时阻断。模块边界端口用 `signal-port-exempt` 保留并审计 |
-| `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。布线段与预测的标记占位都必须避开所有器件引脚 lead，候选终点落在异网导线上时硬拒绝。Apply 失败按本次新建 marker/wire 的显式 primitiveId 删除并逐 ID 回读，不能改用会被多段共享线拒绝的 `disconnect` 做回滚。共享树、无单桩和反向脚保持 blocked，反向脚登记 `orientationExempt` |
+| `power-ground-orientation` / `reversed-net-flag` | 直接执行或显式阻断 | `power-orientation-fix` 优先重接单桩 netflag；首段沿引脚外向，最终 body 朝上/下。共享/分支树无法重走时，可从唯一父线端点追加短竖排适配支路，再移除旧符号；布线段与预测标记占位都必须避开器件引脚 lead、异网导线和图签，并复验最终进线方向。Apply 逐项核对 pin→net、bridge 与目标 finding，失败恢复原符号/支路。反向脚保持 blocked 并登记 `orientationExempt` |
 | `label-visibility` / `label-orientation` | 直接执行或显式阻断 | `sch label-fix` 设置可见和水平；空名称只有父 wire/marker 已携带明确网名时补齐。缺原生 Name 或网名未知不猜 |
 | `label-distance` | 语义选择或重排 | 用 `attribute-move` 把可见名称移回挂载点附近，并复查文字/导线碰撞 |
 | `polarity-convention-outlier` | 语义选择 | 对照器件极性和同页多数派确认是否反装；编号约定本身不证明电气极性 |
 | `visible-text-overlap` | 直接执行或显式阻断 | `visual-text-fix` 在 60 单位内搜索无碰撞槽位，属性/自由文字分别走 typed move；无锚点或无可清槽位保持 blocked |
 | `designator-overlap` / `designator-wire-overlap` | 直接执行或显式阻断 | `designator-fix` 只移动 Designator 属性，5 单位网格避开本体、引脚、marker、文字、导线、图签与纸边；无安全槽保持 blocked |
-| `marker-wire-overlap` | 重排重布 | 移动 marker 或改走线，必须复查器件、引脚、导线和标题区 |
+| `marker-wire-overlap` | 重排重布 | 与 bridge-check 使用同一约半格连接容差，排除标识自身的父线端点；只有异线穿入 bbox 才报告。修复时移动 marker 或改走线，并复查器件、引脚、导线和标题区 |
 | `titleblock-overlap` / `out-of-sheet` | 重排重布 | 移入图签外/图纸内；不缩小页面或隐藏文字来规避 |
 | `partition-overlap` / `part-out-of-frame` / `part-frame-unresolved` / `designator-out-of-frame` | 重排重布 | 重新布局功能组、区框或文字槽位；不能删除位号或把未认领器件硬塞进框 |
 | `missing-partition` / `missing-titleblock` / `missing-note` / `zones-not-claimed` / `titleblock-key-absent` | 显式计划或语义选择 | `zones` / `zone-draw` / `titleblock` 按已声明归属生成；字段内容无依据时保留待确认 |
