@@ -230,6 +230,14 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 			} else if adapterReason != "" {
 				reason += ";adapter:" + adapterReason
 			}
+			if fallback, ok := planRoutedAnchorPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock); ok {
+				fallback.MarkerID, fallback.Net, fallback.Family = c.ID, c.Net, family
+				fallback.FromDirection, fallback.ToDirection = fromDir, want
+				fallback.FromRotation, fallback.ToRotation = *c.Rotation, flagBodyRotation[family][want]
+				fallback.Original = &c
+				out = append(out, fallback)
+				continue
+			}
 			base.Reason = "unsafe-marker-stub:" + reason
 			out = append(out, base)
 			continue
@@ -260,6 +268,14 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 		}
 		if !ok {
 			if fallback, ok, _ := planAdapterPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock); ok {
+				fallback.MarkerID, fallback.Net, fallback.Family = c.ID, c.Net, family
+				fallback.FromDirection, fallback.ToDirection = fromDir, want
+				fallback.FromRotation, fallback.ToRotation = *c.Rotation, flagBodyRotation[family][want]
+				fallback.Original = &c
+				out = append(out, fallback)
+				continue
+			}
+			if fallback, ok := planRoutedAnchorPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock); ok {
 				fallback.MarkerID, fallback.Net, fallback.Family = c.ID, c.Net, family
 				fallback.FromDirection, fallback.ToDirection = fromDir, want
 				fallback.FromRotation, fallback.ToRotation = *c.Rotation, flagBodyRotation[family][want]
@@ -361,6 +377,76 @@ func planAdapterPowerOrientation(c layoutComp, family, want string, items []visi
 		}
 	}
 	return powerOrientationProposal{}, false, lastBlocker
+}
+
+// planRoutedAnchorPowerOrientation keeps the marker's existing connection point
+// and searches a bounded orthogonal corridor to a clear vertical anchor. Unlike
+// the adapter planner, it can route around nearby symbols without moving any
+// component and without abandoning a leaf branch.
+func planRoutedAnchorPowerOrientation(c layoutComp, family, want string, items []visibleTextItem,
+	comps []layoutComp, wires []schGroupWire, sheet, titleBlock *layoutBBox) (powerOrientationProposal, bool) {
+	wireID, _, ok := powerOrientationAttachmentCandidates(c, wires)
+	if !ok {
+		return powerOrientationProposal{}, false
+	}
+	kind := "power"
+	if family == "ground" {
+		kind = "ground"
+	}
+	vertical := 1.0
+	if want == "down" {
+		vertical = -1
+	}
+	start := [2]float64{c.X, c.Y}
+	stub := &destaggerStub{Flag: c, WireID: wireID, HostX: c.X, HostY: c.Y, Dir: want}
+	host := layoutPin{X: c.X, Y: c.Y}
+	type anchor struct {
+		x, y, cost float64
+	}
+	var anchors []anchor
+	for _, length := range []float64{20, 40, 60, 80, 100, 120, 140, 160, 180, 200} {
+		for _, dx := range []float64{0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100, 120, -120} {
+			anchors = append(anchors, anchor{x: c.X + dx, y: c.Y + vertical*length, cost: math.Abs(dx) + length})
+		}
+	}
+	sort.Slice(anchors, func(i, j int) bool {
+		if anchors[i].cost != anchors[j].cost {
+			return anchors[i].cost < anchors[j].cost
+		}
+		if anchors[i].x != anchors[j].x {
+			return anchors[i].x < anchors[j].x
+		}
+		return anchors[i].y < anchors[j].y
+	})
+	for _, candidate := range anchors {
+		end := [2]float64{candidate.x, candidate.y}
+		newBox := predictedMarkerBBox(end[0], end[1], kind, want, c.Net)
+		if !powerOrientationMarkerBoxClear(c, newBox, items, comps, wires, wireID, sheet, titleBlock) {
+			continue
+		}
+		clear := func(p, q [2]float64) bool {
+			return powerOrientationSegmentClear(c, stub, host, p, q, items, comps, wires, sheet)
+		}
+		path, ok := dcFindOrthogonalPath(start, end, sheet, titleBlock, clear, 3000)
+		if !ok || len(path) < 2 {
+			continue
+		}
+		lastA, lastB := path[len(path)-2], path[len(path)-1]
+		if directionBetween(lastA, lastB) != want {
+			continue
+		}
+		if !powerOrientationRouteClear(c, newBox, stub, path, items, comps, wires, sheet, titleBlock) {
+			continue
+		}
+		h := checkPoint{X: c.X, Y: c.Y}
+		a := checkPoint{X: end[0], Y: end[1]}
+		return powerOrientationProposal{
+			Mode: "routed-anchor-flag", Host: &h, NewAnchor: &a,
+			NewStubPath: append([][2]float64(nil), path...),
+			StubWireID:  wireID, Status: "ready",
+		}, true
+	}
+	return powerOrientationProposal{}, false
 }
 
 func powerOrientationAttachmentCandidates(c layoutComp, wires []schGroupWire) (string, []checkPoint, bool) {
@@ -960,6 +1046,9 @@ func executePowerOrientationProposal(pinned *appConfig, win, doc string,
 	if p.Mode == "adapter-vertical-flag" {
 		return executeAdapterPowerOrientation(pinned, win, doc, p)
 	}
+	if p.Mode == "routed-anchor-flag" {
+		return executeAdapterPowerOrientation(pinned, win, doc, p)
+	}
 	if p.Mode == "in-place-vertical-flag" {
 		return executeInPlacePowerOrientation(pinned, win, doc, p)
 	}
@@ -1060,20 +1149,47 @@ func executeAdapterPowerOrientation(pinned *appConfig, win, doc string,
 	if p.Family == "ground" {
 		kind = "ground"
 	}
+	connectStart := *p.Host
+	var preliminaryWireIDs []string
+	var via *[2]float64
+	if len(p.NewStubPath) > 3 {
+		pre := p.NewStubPath[:len(p.NewStubPath)-1]
+		points := make([]float64, 0, len(pre)*2)
+		for _, q := range pre {
+			points = append(points, q[0], q[1])
+		}
+		createdPath, err := requestAutolayoutAction(pinned, "schematic.wire.create", win, map[string]any{
+			"points": points, "net": p.Net,
+		}, doc, "power-orientation-fix 创建锚点前置路径")
+		if err != nil {
+			return app, err
+		}
+		if wireID, _ := createdPath.Result["primitiveId"].(string); wireID != "" {
+			preliminaryWireIDs = append(preliminaryWireIDs, wireID)
+			app.NewWireIDs = append(app.NewWireIDs, wireID)
+			app.Changed = true
+		} else {
+			return app, fmt.Errorf("anchor route wire identity is missing")
+		}
+		connectStart = checkPoint{X: pre[len(pre)-1][0], Y: pre[len(pre)-1][1]}
+	} else if len(p.NewStubPath) == 3 {
+		corner := p.NewStubPath[len(p.NewStubPath)-2]
+		via = &corner
+	}
 	lastA := p.NewStubPath[len(p.NewStubPath)-2]
 	lastB := p.NewStubPath[len(p.NewStubPath)-1]
 	offset := math.Abs(lastB[0]-lastA[0]) + math.Abs(lastB[1]-lastA[1])
 	payload := map[string]any{
-		"pinX": p.Host.X, "pinY": p.Host.Y, "kind": kind, "net": p.Net,
+		"pinX": connectStart.X, "pinY": connectStart.Y, "kind": kind, "net": p.Net,
 		"direction": p.ToDirection, "offset": offset, "rotation": p.ToRotation,
 	}
-	if len(p.NewStubPath) > 2 {
-		corner := p.NewStubPath[len(p.NewStubPath)-2]
-		payload["via"] = []float64{corner[0], corner[1]}
+	if via != nil {
+		payload["via"] = []float64{via[0], via[1]}
 	}
 	created, err := requestAutolayoutAction(pinned, "schematic.power.connect_pin", win, payload,
 		doc, "power-orientation-fix 创建竖排适配支路")
 	if err != nil {
+		app.Changed = len(preliminaryWireIDs) > 0
 		return app, err
 	}
 	app.NewMarkerID, _ = created.Result["flagPrimitiveId"].(string)

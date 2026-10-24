@@ -379,8 +379,9 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `--allow-partial` 会先为写后发现的冲突文字搜索 60 单位内安全槽，成功项保留移动，
 无法安全放置的项恢复原属性并登记 blocked。
 `sch power-orientation-fix` 把电源 netflag 重接到 body-up、GND 重接到 body-down。
-单段桩优先从实测引脚外向重走本地正交折线；共享/分支树无法安全重走时，可在端口落点
-唯一命中的父线端点追加短竖排适配支路，再把符号替换到新锚点，原线树保持不动；
+单段桩优先从实测引脚外向重走本地正交折线；共享/分支树无法安全重走时，可从端口原锚点
+或有界 A* 正交通道接到安全竖排锚点，再把符号替换到新目标；叶端点不能在父线树上移挂，
+否则会留下悬空残支；原线树保持不动；
 新符号必须回读确认 body 方向、最终进线方向和可见 Name。反向脚不改，必须已有
 `orientationExempt`。每个替换都复核 pin→net、bridge 和目标 finding，失败逆序恢复。
 `sch visual-text-fix` 对 `visible-text-overlap` 在 60 单位内按 5 单位搜索局部空槽；
