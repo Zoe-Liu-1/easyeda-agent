@@ -3216,6 +3216,54 @@ test('wire_tree.rebuild_without_labels deletes exact wires and recreates geometr
 	assert.equal(wires.size, 2);
 });
 
+test('wire_tree.rebuild_without_labels treats flat line data as independent segments', async t => {
+	let wires = new Map<string, any>([
+		['wire-tree', {
+			getState_PrimitiveId: () => 'wire-tree',
+			getState_Line: () => [0, 0, 10, 0, 10, 0, 10, 10, 10, 10, 20, 10],
+			getState_Net: () => 'GND', getState_Color: () => null,
+			getState_LineWidth: () => null, getState_LineType: () => null,
+		}],
+	]);
+	const createCalls: Array<any[]> = [];
+	let nextId = 1;
+	const previousTypes = (globalThis as any).EDMT_EditorDocumentType;
+	(globalThis as any).EDMT_EditorDocumentType = { SCHEMATIC_PAGE: 1 };
+	(globalThis as any).eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'tab', documentType: 1 }) },
+		sch_PrimitiveWire: {
+			getAll: async () => [...wires.values()],
+			delete: async (ids: string[]) => { for (const id of ids) wires.delete(id); return true; },
+			create: async (...args: any[]) => {
+				createCalls.push(args);
+				const id = `new-${nextId++}`;
+				const wire = {
+					getState_PrimitiveId: () => id, getState_Line: () => args[0],
+					getState_Net: () => args[1],
+				};
+				wires.set(id, wire);
+				return wire;
+			},
+		},
+	};
+	t.after(() => {
+		delete (globalThis as any).eda;
+		if (previousTypes === undefined) delete (globalThis as any).EDMT_EditorDocumentType;
+		else (globalThis as any).EDMT_EditorDocumentType = previousTypes;
+	});
+	const res: any = await runAction('schematic.wire_tree.rebuild_without_labels', {
+		items: [{ primitiveId: 'wire-tree', points: [0, 0, 10, 0, 10, 0, 10, 10, 10, 10, 20, 10] }],
+	});
+	assert.equal(res.result.verified, true);
+	assert.equal(res.result.deleted, true);
+	assert.deepEqual(createCalls.map(call => call[0]), [
+		[0, 0, 10, 0],
+		[10, 0, 10, 10],
+		[10, 10, 20, 10],
+	], 'independent flat segment records must never be joined into synthetic diagonals');
+});
+
 test('wire_tree.rebuild_without_labels verifies geometry after host replaces created IDs', async t => {
 	let wires = new Map<string, any>([
 		['wire-a', {

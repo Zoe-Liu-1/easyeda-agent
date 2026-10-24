@@ -3773,7 +3773,10 @@ function sameWireLine(actual: unknown, expected: Array<number>): boolean {
 
 function wireEdges(points: number[]): WireSegment[] {
 	const edges: WireSegment[] = [];
-	for (let i = 0; i + 3 < points.length; i += 2) {
+	// getState_Line() in flat form is a list of independent four-coordinate
+	// segment records, not an authored vertex polyline. Stepping by two would
+	// invent connecting edges between unrelated branches (including diagonals).
+	for (let i = 0; i + 3 < points.length; i += 4) {
 		edges.push([points[i]!, points[i + 1]!, points[i + 2]!, points[i + 3]!]);
 	}
 	return edges;
@@ -3869,6 +3872,7 @@ async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<
 		return {
 			primitiveId,
 			points,
+			edges: wireEdges(points),
 			net: String(wire.getState_Net?.() ?? ''),
 			color: wire.getState_Color?.(),
 			lineWidth: wire.getState_LineWidth?.(),
@@ -3895,18 +3899,20 @@ async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<
 	const createErrors: string[] = [];
 	try {
 		for (const item of items) {
-			try {
-				const created = await eda.sch_PrimitiveWire.create(
-					item.points, undefined, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
-				);
-				if (!created) throw new Error(`recreate ${item.primitiveId} returned no primitive`);
-				createReturnIds.push(created.getState_PrimitiveId());
-			}
-			catch (err) {
-				createErrors.push(describeThrown(err));
+			for (const edge of item.edges) {
+				try {
+					const created = await eda.sch_PrimitiveWire.create(
+						edge, undefined, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
+					);
+					if (!created) throw new Error(`recreate ${item.primitiveId} returned no primitive`);
+					createReturnIds.push(created.getState_PrimitiveId());
+				}
+				catch (err) {
+					createErrors.push(describeThrown(err));
+				}
 			}
 		}
-		const expectedEdges = items.flatMap(item => wireEdges(item.points));
+		const expectedEdges = items.flatMap(item => item.edges);
 		const afterCreate = await readWireInventoryUntilCovered(expectedEdges);
 		const afterObserved = afterCreate.observed;
 		if (afterCreate.missing.length) {
@@ -3916,7 +3922,7 @@ async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<
 		}
 		const resolvedIds = new Set<string>();
 		for (const item of items) {
-			for (const edge of wireEdges(item.points)) {
+			for (const edge of item.edges) {
 				for (const id of observedCoveringIds(edge, afterObserved)) resolvedIds.add(id);
 			}
 		}
@@ -3943,9 +3949,11 @@ async function schematicWireTreeRebuildWithoutLabels(payload: Payload): Promise<
 		try {
 			if (createReturnIds.length) await eda.sch_PrimitiveWire.delete([...new Set(createReturnIds)]);
 			for (const item of items) {
-				await eda.sch_PrimitiveWire.create(
-					item.points, item.net, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
-				);
+				for (const edge of item.edges) {
+					await eda.sch_PrimitiveWire.create(
+						edge, item.net, item.color ?? null, item.lineWidth ?? null, item.lineType ?? null,
+					);
+				}
 			}
 			const restored = await eda.sch_PrimitiveWire.getAll();
 			rollbackVerified = Array.isArray(restored) && items.every(item =>
@@ -3993,13 +4001,14 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 		const item = raw as Record<string, unknown>;
 		return {
 			points: normalizeWirePoints(item.points),
+			edges: wireEdges(normalizeWirePoints(item.points)),
 			color: optionalString(item, 'color') ?? null,
 			lineWidth: optionalNumber(item, 'lineWidth') ?? null,
 			lineType: (item.lineType as ESCH_PrimitiveLineType | undefined) ?? null,
 		};
 	});
 	const beforeObserved = collectWireSegments(beforeWires);
-	const alreadyCovered = items.flatMap((item, index) => wireEdges(item.points)
+	const alreadyCovered = items.flatMap((item, index) => item.edges
 		.filter(edge => observedCoveringIds(edge, beforeObserved).length > 0)
 		.map(edge => ({ index, edge })));
 	if (alreadyCovered.length) {
@@ -4022,7 +4031,7 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 			createErrors.set(index, describeThrown(err));
 		}
 	}
-	const expectedEdges = items.flatMap(item => wireEdges(item.points));
+	const expectedEdges = items.flatMap(item => item.edges);
 	const afterCreate = await readWireInventoryUntilCovered(expectedEdges);
 	const afterObserved = afterCreate.observed;
 	const resolvedIds = new Set<string>();
@@ -4030,10 +4039,10 @@ async function schematicWireTreeRestoreSegments(payload: Payload): Promise<Actio
 	const missingSuccessful: Array<{ index: number; edge: WireSegment }> = [];
 	for (let index = 0; index < items.length; index++) {
 		const item = items[index]!;
-		const uncovered = wireEdges(item.points).filter(edge => observedCoveringIds(edge, afterObserved).length === 0);
+		const uncovered = item.edges.filter(edge => observedCoveringIds(edge, afterObserved).length === 0);
 		if (uncovered.length === 0) {
 			recoveredIndexes.push(index);
-			for (const edge of wireEdges(item.points)) {
+			for (const edge of item.edges) {
 				for (const id of observedCoveringIds(edge, afterObserved)) resolvedIds.add(id);
 			}
 		}
