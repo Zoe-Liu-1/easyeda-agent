@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.14.15] - 2026-10-24
+
+- 修复 1.14.14 打包包内运行代码仍为旧版本的问题：本版重新执行完整 TypeScript 编译后打包，包内 `CONNECTOR_VERSION` 与 `extension.json` 均为 1.14.15。
+
 ## [1.14.14] - 2026-10-24
 
 - `schematic.netflag.create` 对新建的电源/GND/netport 自动绑定其唯一 Name 属性并确保 `ValueVisible=true`；无法证明可见时保留已创建符号并返回 `nameVisibility:"unverified"` 与警告，不能静默通过。
