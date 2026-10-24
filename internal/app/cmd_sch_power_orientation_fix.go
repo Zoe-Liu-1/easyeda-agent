@@ -404,8 +404,8 @@ func planRoutedAnchorPowerOrientation(c layoutComp, family, want string, items [
 		x, y, cost float64
 	}
 	var anchors []anchor
-	for _, length := range []float64{20, 40, 60, 80, 100, 120, 140, 160, 180, 200} {
-		for _, dx := range []float64{0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100, 120, -120} {
+	for _, length := range []float64{20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300, 320, 340, 360, 380, 400} {
+		for _, dx := range []float64{0, 40, -40, 80, -80, 120, -120, 160, -160, 200, -200, 240, -240, 280, -280, 320, -320, 360, -360, 400, -400} {
 			anchors = append(anchors, anchor{x: c.X + dx, y: c.Y + vertical*length, cost: math.Abs(dx) + length})
 		}
 	}
@@ -427,7 +427,7 @@ func planRoutedAnchorPowerOrientation(c layoutComp, family, want string, items [
 		clear := func(p, q [2]float64) bool {
 			return powerOrientationSegmentClear(c, stub, host, p, q, items, comps, wires, sheet)
 		}
-		path, ok := dcFindOrthogonalPath(start, end, sheet, titleBlock, clear, 3000)
+		path, ok := dcFindOrthogonalPath(start, end, sheet, titleBlock, clear, 5000)
 		if !ok || len(path) < 2 {
 			continue
 		}
@@ -1159,7 +1159,7 @@ func executeAdapterPowerOrientation(pinned *appConfig, win, doc string,
 			points = append(points, q[0], q[1])
 		}
 		createdPath, err := requestAutolayoutAction(pinned, "schematic.wire.create", win, map[string]any{
-			"points": points, "net": p.Net,
+			"points": points,
 		}, doc, "power-orientation-fix 创建锚点前置路径")
 		if err != nil {
 			return app, err
