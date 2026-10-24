@@ -137,7 +137,10 @@ DSH Git 安装时报 `entry file missing: index.js` 时，使用包含入口修�
 | [立创插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector) | 在市场安装，平台支持原地自动更新；市场版本可落后 patch，只要 major.minor 相同就无需处理。 |
 
 开发连接器：`make connector` 按当前版本/UUID 构建，`make eext` 升 patch 后构建同 UUID
-安装包。用户要求轮换侧载包时，Codex 可在用户已打开的 Web EDA 中管理扩展：先对每个
+安装包。禁止把 `npm run package` 当成完整构建：它只重新封包现有 `dist/`，可能让
+`extension.json` 版本已经变化、包内 `CONNECTOR_VERSION` 却仍是旧值。交付前必须核对
+`extension.json`、解包后的 `dist/index.js` 和现场握手版本三者一致；修改源码后使用
+`npm run build` / `make connector` 重新编译。用户要求轮换侧载包时，Codex 可在用户已打开的 Web EDA 中管理扩展：先对每个
 已打开文档 typed 保存，再核对 UUID/旧版本、卸载旧项、导入新包，并在新项配置中重新启用
 “允许外部交互”。只重新导入包不保证已打开页面执行新代码；Web 端可用 typed `web reload`
 刷新并等待新连接与同一工程/文档回读，桌面端完全退出后重开。不要用 IndexedDB 覆写或清空站点数据作为
