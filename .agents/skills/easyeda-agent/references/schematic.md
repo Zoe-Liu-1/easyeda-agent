@@ -391,9 +391,11 @@ Designator 属性，并避开器件本体、引脚、marker、其他可见文字
 保持 blocked。替换前后逐 pin 网表与 bridge 集必须一致，失败恢复原线。
 `sch cross-chip-label-fix` 处理跨芯片多段树：从物理线岛提取全部相关引脚，整树删除后每脚
 向外建立短线和同名 `net_label`；现成 marker、混合网名、未解析引脚或无安全槽位保持 blocked。
-`sch signal-marker-fix` 把非电源/地 netflag/netport 的安全单桩替换为原生文字 `net_label`，
-首段沿引脚外向；共享树、分支树和方向未知保持 blocked。模块边界端口必须显式登记豁免，
-不能静默换型。
+`sch signal-marker-fix` 把非电源/地 netflag/netport 替换为原生文字 `net_label`：
+旧线树保持不动，标签必须绑定到端口落点唯一命中的同一父 wire；原位有碰撞时，标签锚点
+可沿该父线按 5 raw 步进移到 ≤80 raw 的安全位置。完整标签 bbox 须避开器件、引脚 lead、
+其他文字、异网导线、图签与纸边。无唯一父线或父线上没有安全标签槽时保持 blocked。
+模块边界端口必须显式登记豁免，不能静默换型。
 
 
 ## 修改属性时保留供应商身份

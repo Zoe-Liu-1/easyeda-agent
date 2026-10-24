@@ -37,6 +37,30 @@ for (const mode of ['empty-return', 'throw-after-write', 'no-write', 'duplicate'
 	});
 }
 
+test('native label binds to the expected existing parent wire', async (t) => {
+	let calls = 0;
+	const label = primitive({
+		PrimitiveId: 'label', ParentPrimitiveId: 'other-wire', Key: 'Name',
+		Value: 'SIG', X: 20, Y: 30, ValueVisible: true,
+	});
+	(globalThis as any).eda = {
+		...context,
+		sch_PrimitiveAttribute: {
+			getAll: async () => calls ? [label] : [],
+			createNetLabel: async () => { calls++; return undefined; },
+		},
+		sch_PrimitiveWire: { get: async () => primitive({ PrimitiveId: 'other-wire', Net: 'SIG' }) },
+	};
+	t.after(() => { delete (globalThis as any).eda; });
+	const { result }: any = await runAction('schematic.netflag.create', {
+		kind: 'net_label', net: 'SIG', x: 20, y: 30, expectedParentWireId: 'target-wire',
+	});
+	assert.equal(calls, 1);
+	assert.equal(result.verified, false);
+	assert.equal(result.partial, true);
+	assert.match(result.error, /target-wire/);
+});
+
 test('PCB stale ID and unreadable inventory refuse before modify', async (t) => {
 	let writes = 0;
 	t.after(() => { delete (globalThis as any).eda; });

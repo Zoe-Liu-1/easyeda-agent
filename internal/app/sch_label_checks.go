@@ -715,6 +715,8 @@ func isRailLabelNet(net string) bool {
 		strings.Contains(n, "vss") || strings.Contains(n, "agnd") {
 		return true
 	}
-	return strings.HasPrefix(n, "vout") || strings.HasPrefix(n, "vload") ||
-		strings.HasPrefix(n, "vbias") || strings.HasPrefix(n, "dc")
+	// VOUT/VLOAD are regulated signal outputs, not the rail that powers the
+	// circuit. They must use the same text-only net-label convention as other
+	// signals; only genuine local rails stay exempt.
+	return strings.HasPrefix(n, "vbias") || strings.HasPrefix(n, "dc")
 }

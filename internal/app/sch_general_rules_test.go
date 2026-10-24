@@ -94,15 +94,20 @@ func TestSignalMarkerTypeFindings(t *testing.T) {
 		{ID: "f1", ComponentType: "netflag", Net: "SIG", X: 0, Y: 0},
 		{ID: "p1", ComponentType: "netport", Net: "SIG", X: 0, Y: 0},
 		{ID: "f2", ComponentType: "netflag", Net: "+3V3", X: 0, Y: 0},
+		{ID: "f3", ComponentType: "netflag", Net: "VOUT1", X: 0, Y: 0},
+		{ID: "f4", ComponentType: "netflag", Net: "VLOAD1", X: 0, Y: 0},
+		{ID: "f5", ComponentType: "netflag", Net: "DC55", X: 0, Y: 0},
 		{ID: "l1", ComponentType: "netlabel", Net: "SIG", X: 0, Y: 0},
 	}
 	got := signalMarkerTypeFindings(comps, nil)
-	if len(got) != 2 || got[0].Type != "signal-netflag-type" || got[0].Level != "warn" ||
-		got[1].Type != "signal-netport-type" || got[1].Level != "warn" {
+	if len(got) != 4 || got[0].Type != "signal-netflag-type" || got[0].Level != "warn" ||
+		got[1].Type != "signal-netflag-type" || got[1].Level != "warn" ||
+		got[2].Type != "signal-netflag-type" || got[2].Level != "warn" ||
+		got[3].Type != "signal-netport-type" || got[3].Level != "warn" {
 		t.Fatalf("wrong signal marker classification: %+v", got)
 	}
 	exempt := signalMarkerTypeFindings(comps, map[string]bool{"p1": true})
-	if len(exempt) != 2 || exempt[1].Type != "signal-port-exempt" || exempt[1].Level != "info" {
+	if len(exempt) != 4 || exempt[3].Type != "signal-port-exempt" || exempt[3].Level != "info" {
 		t.Fatalf("module-boundary exception must remain visible as INFO: %+v", exempt)
 	}
 }

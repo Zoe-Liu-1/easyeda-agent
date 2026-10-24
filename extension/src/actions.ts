@@ -4146,7 +4146,10 @@ const schematicNetflagCreate: Handler = async (payload) => {
 	const y = requireNumber(payload, 'y');
 	const rotation = optionalNumber(payload, 'rotation');
 	const mirror = optionalBoolean(payload, 'mirror');
-	if (kind === NET_LABEL_KIND) return createVerifiedNetLabel(x, y, requireString(payload, 'net'));
+	if (kind === NET_LABEL_KIND) {
+		return createVerifiedNetLabel(x, y, requireString(payload, 'net'),
+			optionalString(payload, 'expectedParentWireId'));
+	}
 
 	let component;
 	try {
