@@ -57,7 +57,7 @@ func TestPlanAdapterPowerOrientationPreservesParentWire(t *testing.T) {
 	}
 	wires := []schGroupWire{{
 		ID: "shared-tree", Net: "+3V3",
-		Points: []float64{20, 60, 20, 70, 50, 70},
+		Points: []float64{20, 60, 20, 70, 20, 70, 50, 70},
 	}}
 	got, ok, reason := planAdapterPowerOrientation(flag, "power", "up", nil,
 		[]layoutComp{flag}, wires,
@@ -67,6 +67,22 @@ func TestPlanAdapterPowerOrientationPreservesParentWire(t *testing.T) {
 		got.NewAnchor == nil || got.NewAnchor.X != 50 || got.NewAnchor.Y <= 70 ||
 		got.StubWireID != "shared-tree" || len(got.NewStubPath) < 2 {
 		t.Fatalf("adapter orientation fallback = %+v ok=%v reason=%s", got, ok, reason)
+	}
+}
+
+func TestPowerOrientationLeafDoesNotMoveToAnotherVertex(t *testing.T) {
+	flag := layoutComp{
+		ID: "flag", ComponentType: "netflag", Net: "+3V3", X: 50, Y: 90,
+		AnchorAvailable: true,
+	}
+	wires := []schGroupWire{{
+		ID: "tree", Net: "+3V3",
+		Points: []float64{0, 70, 20, 70, 20, 90, 50, 90},
+	}}
+	wireID, points, ok := powerOrientationAttachmentCandidates(flag, wires)
+	if !ok || wireID != "tree" || len(points) != 1 ||
+		points[0].X != 50 || points[0].Y != 90 {
+		t.Fatalf("leaf attachment candidates = %s %+v ok=%v", wireID, points, ok)
 	}
 }
 

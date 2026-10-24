@@ -309,7 +309,7 @@ func powerOrientationHostPin(comps []layoutComp, x, y float64) (layoutComp, layo
 // the final approach serve the required up/down body direction.
 func planAdapterPowerOrientation(c layoutComp, family, want string, items []visibleTextItem,
 	comps []layoutComp, wires []schGroupWire, sheet, titleBlock *layoutBBox) (powerOrientationProposal, bool, string) {
-	wireID, attach, ok := powerOrientationAttachmentPoint(c, wires)
+	wireID, attachments, ok := powerOrientationAttachmentCandidates(c, wires)
 	if !ok {
 		return powerOrientationProposal{}, false, "attachment-unresolved"
 	}
@@ -317,55 +317,55 @@ func planAdapterPowerOrientation(c layoutComp, family, want string, items []visi
 	if family == "ground" {
 		kind = "ground"
 	}
-	stub := &destaggerStub{Flag: c, WireID: wireID, HostX: attach.X, HostY: attach.Y, Dir: want}
 	vertical := 1.0
 	if want == "down" {
 		vertical = -1
 	}
 	lastBlocker := "no-clear-adapter-route"
-	for _, length := range []float64{15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140} {
-		for _, dx := range []float64{0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100, 120, -120} {
-			end := [2]float64{attach.X + dx, attach.Y + vertical*length}
-			var path [][2]float64
-			if dx == 0 {
-				path = [][2]float64{{attach.X, attach.Y}, end}
-			} else {
-				path = [][2]float64{
-					{attach.X, attach.Y},
-					{attach.X + dx, attach.Y},
-					end,
+	for _, attach := range attachments {
+		stub := &destaggerStub{Flag: c, WireID: wireID, HostX: attach.X, HostY: attach.Y, Dir: want}
+		for _, length := range []float64{15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140} {
+			for _, dx := range []float64{0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100, 120, -120} {
+				end := [2]float64{attach.X + dx, attach.Y + vertical*length}
+				var path [][2]float64
+				if dx == 0 {
+					path = [][2]float64{{attach.X, attach.Y}, end}
+				} else {
+					path = [][2]float64{
+						{attach.X, attach.Y},
+						{attach.X + dx, attach.Y},
+						end,
+					}
 				}
+				newBox := predictedMarkerBBox(end[0], end[1], kind, want, c.Net)
+				if !powerOrientationMarkerBoxClear(c, newBox, items, comps, wires, wireID, sheet, titleBlock) {
+					lastBlocker = "marker-box"
+					continue
+				}
+				if !powerOrientationPathEndpointsClear(stub, path, wires) {
+					lastBlocker = "path-endpoint"
+					continue
+				}
+				if !powerOrientationRouteClear(c, newBox, stub, path, items, comps, wires, sheet, titleBlock) {
+					lastBlocker = "path-geometry"
+					continue
+				}
+				host := attach
+				anchor := checkPoint{X: end[0], Y: end[1]}
+				return powerOrientationProposal{
+					Mode: "adapter-vertical-flag", Host: &host, NewAnchor: &anchor,
+					NewStubPath: append([][2]float64(nil), path...),
+					StubWireID:  wireID, Status: "ready",
+				}, true, ""
 			}
-			newBox := predictedMarkerBBox(end[0], end[1], kind, want, c.Net)
-			if !powerOrientationMarkerBoxClear(c, newBox, items, comps, wires, wireID, sheet, titleBlock) {
-				lastBlocker = "marker-box"
-				continue
-			}
-			if !powerOrientationPathEndpointsClear(stub, path, wires) {
-				lastBlocker = "path-endpoint"
-				continue
-			}
-			if !powerOrientationRouteClear(c, newBox, stub, path, items, comps, wires, sheet, titleBlock) {
-				lastBlocker = "path-geometry"
-				continue
-			}
-			host := attach
-			anchor := checkPoint{X: end[0], Y: end[1]}
-			return powerOrientationProposal{
-				Mode: "adapter-vertical-flag", Host: &host, NewAnchor: &anchor,
-				NewStubPath: append([][2]float64(nil), path...),
-				StubWireID:  wireID, Status: "ready",
-			}, true, ""
 		}
 	}
 	return powerOrientationProposal{}, false, lastBlocker
 }
 
-func powerOrientationAttachmentPoint(c layoutComp, wires []schGroupWire) (string, checkPoint, bool) {
+func powerOrientationAttachmentCandidates(c layoutComp, wires []schGroupWire) (string, []checkPoint, bool) {
 	const attachmentEps = 5.5
 	var wireIDs []string
-	bestDistance := math.Inf(1)
-	var best checkPoint
 	for _, wire := range wires {
 		if wire.Net != "" && c.Net != "" && wire.Net != c.Net {
 			continue
@@ -377,11 +377,6 @@ func powerOrientationAttachmentPoint(c layoutComp, wires []schGroupWire) (string
 				if math.Abs(dx) > attachmentEps || math.Abs(dy) > attachmentEps {
 					continue
 				}
-				distance := math.Hypot(dx, dy)
-				if distance < bestDistance {
-					bestDistance = distance
-					best = checkPoint{X: point[0], Y: point[1]}
-				}
 				found = true
 			}
 		}
@@ -390,9 +385,65 @@ func powerOrientationAttachmentPoint(c layoutComp, wires []schGroupWire) (string
 		}
 	}
 	if len(wireIDs) != 1 {
-		return "", checkPoint{}, false
+		return "", nil, false
 	}
-	return wireIDs[0], best, true
+	target := signalMarkerWireByID(wires, wireIDs[0])
+	incident := 0
+	for _, seg := range labelWireSegments(target) {
+		if pointsClose(c.X, c.Y, seg[0], seg[1], 0.5) || pointsClose(c.X, c.Y, seg[2], seg[3], 0.5) {
+			incident++
+		}
+	}
+	points := []checkPoint{}
+	seen := map[[2]float64]bool{}
+	for _, seg := range labelWireSegments(target) {
+		length := math.Hypot(seg[2]-seg[0], seg[3]-seg[1])
+		if length < 1 {
+			continue
+		}
+		ux, uy := (seg[2]-seg[0])/length, (seg[3]-seg[1])/length
+		for distance := 0.0; distance < length; distance += 5 {
+			points = appendPowerOrientationAttachment(points, seen, c,
+				seg[0]+ux*distance, seg[1]+uy*distance)
+		}
+		points = appendPowerOrientationAttachment(points, seen, c, seg[2], seg[3])
+	}
+	if len(points) == 0 {
+		return "", nil, false
+	}
+	sort.Slice(points, func(i, j int) bool {
+		di := math.Abs(points[i].X-c.X) + math.Abs(points[i].Y-c.Y)
+		dj := math.Abs(points[j].X-c.X) + math.Abs(points[j].Y-c.Y)
+		if di != dj {
+			return di < dj
+		}
+		if points[i].X != points[j].X {
+			return points[i].X < points[j].X
+		}
+		return points[i].Y < points[j].Y
+	})
+	// Replacing a leaf flag at a different attachment point would leave its
+	// former branch dangling. Interior junctions can be relocated safely; for
+	// a leaf (or a native anchor offset that is not itself a wire vertex), use
+	// only the nearest attachment.
+	if incident <= 1 && len(points) > 1 {
+		points = points[:1]
+	}
+	return wireIDs[0], points, true
+}
+
+func appendPowerOrientationAttachment(points []checkPoint, seen map[[2]float64]bool,
+	c layoutComp, x, y float64) []checkPoint {
+	const maxAttachmentSearch = 300.0
+	if math.Abs(x-c.X)+math.Abs(y-c.Y) > maxAttachmentSearch {
+		return points
+	}
+	key := [2]float64{math.Round(x*10) / 10, math.Round(y*10) / 10}
+	if seen[key] {
+		return points
+	}
+	seen[key] = true
+	return append(points, checkPoint{X: key[0], Y: key[1]})
 }
 
 func pinCardinalOutward(p layoutPin) (string, bool) {
@@ -826,6 +877,10 @@ func executePowerOrientationFix(pinned *appConfig, win, doc string, scene powerO
 	if err != nil {
 		return fmt.Errorf("power-orientation-fix: baseline bridge set: %w", err)
 	}
+	beforeDangling, err := schematicDanglingWireCount(pinned, win)
+	if err != nil {
+		return fmt.Errorf("power-orientation-fix: baseline dangling-wire count: %w", err)
+	}
 	var applied []appliedPowerOrientation
 	rollback := func(cause error) error {
 		if len(applied) == 0 {
@@ -851,7 +906,7 @@ func executePowerOrientationFix(pinned *appConfig, win, doc string, scene powerO
 			return rollback(err)
 		}
 		report.AppliedIDs = append(report.AppliedIDs, proposal.MarkerID)
-		if err := verifyPowerOrientationBaseline(pinned, win, doc, beforeNets, beforeBridges); err != nil {
+		if err := verifyPowerOrientationBaseline(pinned, win, doc, beforeNets, beforeBridges, beforeDangling); err != nil {
 			return rollback(err)
 		}
 	}
@@ -882,7 +937,7 @@ func executePowerOrientationFix(pinned *appConfig, win, doc string, scene powerO
 			return rollback(fmt.Errorf("power-orientation-fix: marker %s remains body/stub-reversed", finding.PrimitiveId))
 		}
 	}
-	if err := verifyPowerOrientationBaseline(pinned, win, doc, beforeNets, beforeBridges); err != nil {
+	if err := verifyPowerOrientationBaseline(pinned, win, doc, beforeNets, beforeBridges, beforeDangling); err != nil {
 		return rollback(err)
 	}
 	if save {
@@ -1284,7 +1339,7 @@ func verifyPowerOrientationArtifactDeletion(res *actionResult, wantIDs []string)
 }
 
 func verifyPowerOrientationBaseline(pinned *appConfig, win, doc string,
-	beforeNets map[string]map[string]bool, beforeBridges []string) error {
+	beforeNets map[string]map[string]bool, beforeBridges []string, beforeDangling int) error {
 	afterNets, _, err := readLiveNets(pinned, win)
 	if err != nil || !dcNetsEqual(beforeNets, afterNets) {
 		return fmt.Errorf("power-orientation-fix: pin netlist differs from baseline (%v)", err)
@@ -1296,5 +1351,30 @@ func verifyPowerOrientationBaseline(pinned *appConfig, win, doc string,
 	if added := dcNewBridgeSignatures(beforeBridges, afterBridges); len(added) > 0 {
 		return fmt.Errorf("power-orientation-fix: bridge set gained %s", strings.Join(added, ","))
 	}
+	afterDangling, err := schematicDanglingWireCount(pinned, win)
+	if err != nil {
+		return fmt.Errorf("power-orientation-fix: dangling-wire verification failed: %w", err)
+	}
+	if afterDangling > beforeDangling {
+		return fmt.Errorf("power-orientation-fix: dangling-wire count increased %d→%d", beforeDangling, afterDangling)
+	}
 	return nil
+}
+
+func schematicDanglingWireCount(pinned *appConfig, win string) (int, error) {
+	res, err := requestAction(pinned, "schematic.check", win, nil)
+	if err != nil {
+		return 0, err
+	}
+	summary, _ := res.Result["summary"].(map[string]any)
+	if summary == nil {
+		return 0, fmt.Errorf("schematic.check summary unavailable")
+	}
+	if n, ok := summary["danglingWires"].(float64); ok {
+		return int(n), nil
+	}
+	if n, ok := summary["danglingWires"].(int); ok {
+		return n, nil
+	}
+	return 0, fmt.Errorf("schematic.check danglingWires unavailable")
 }
