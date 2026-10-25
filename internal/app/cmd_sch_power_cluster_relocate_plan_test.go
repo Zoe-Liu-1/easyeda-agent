@@ -101,3 +101,31 @@ func TestParsePowerRelocatePairs(t *testing.T) {
 		t.Fatal("malformed pair must fail")
 	}
 }
+
+func TestRelocateMoveInsideFrameRejectsMovedTextOutside(t *testing.T) {
+	comps := []layoutComp{{
+		ID: "c1", Designator: "C1", ComponentType: "part",
+		BBox: &layoutBBox{MinX: 10, MinY: 10, MaxX: 20, MaxY: 20},
+		Pins: []layoutPin{
+			{Number: "1", X: 15, Y: 25, Net: "+3V3", Rotation: 90, RotationKnown: true},
+			{Number: "2", X: 15, Y: 5, Net: "GND", Rotation: 270, RotationKnown: true},
+		},
+	}}
+	items := []visibleTextItem{{
+		ID: "name", Kind: "attribute", ParentID: "flag", Key: "Name", Value: "GND",
+		BBox: &layoutBBox{MinX: 10, MinY: 0, MaxX: 30, MaxY: 8},
+	}}
+	wires := []schGroupWire{{ID: "w1", Points: []float64{15, 15, 15, 20}}}
+	frame := layoutBBox{MinX: 0, MinY: 10, MaxX: 100, MaxY: 100}
+	movedComp := map[string]bool{"c1": true, "flag": true}
+	if relocateMoveInsideFrame([2]float64{0, 0}, movedComp, map[string]bool{"w1": true},
+		[]string{"name"}, items, comps, wires, &frame) {
+		t.Fatal("moved text below the functional frame must be rejected")
+	}
+	items[0].BBox = &layoutBBox{MinX: 10, MinY: 20, MaxX: 30, MaxY: 28}
+	wires[0].Points = []float64{15, 25, 15, 35}
+	if !relocateMoveInsideFrame([2]float64{0, 0}, movedComp, map[string]bool{"w1": true},
+		[]string{"name"}, items, comps, wires, &frame) {
+		t.Fatal("clear in-frame move should be accepted")
+	}
+}
