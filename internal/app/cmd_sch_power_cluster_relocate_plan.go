@@ -30,6 +30,7 @@ type powerClusterRelocateReport struct {
 	Blocked       int                        `json:"blocked"`
 	Ambiguous     int                        `json:"ambiguous"`
 	AlreadyWired  int                        `json:"alreadyWired"`
+	InFrame       int                        `json:"inFrame"`
 }
 
 type powerClusterRelocatePlan struct {
@@ -84,7 +85,7 @@ func newSchPowerClusterRelocatePlanCmd(cfg *appConfig, window *string, stdout, s
 	var pairSpecs, partSpecs []string
 	var jsonOut bool
 	var out string
-	var includeGround bool
+	var includeGround, frameOnly bool
 	var maxDistance, maxDirect, searchRadius float64
 	cmd := &cobra.Command{
 		Use:   "power-cluster-relocate-plan",
@@ -99,7 +100,9 @@ the moved position. Moving recreates wire/flag primitive IDs, so passive-side fl
 deletion is deferred to a fresh post-move power-cluster-plan.
 
 No schematic mutation occurs. Use --pair PASSIVE:CONSUMER[.PIN] to resolve an otherwise
-ambiguous target; the flag may be repeated.`,
+ambiguous target; the flag may be repeated. With --frame-only, only move the selected
+passive attachment group fully inside its current functional frame; connection planning
+is deliberately deferred.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pinned, win, doc, _, _, groups, err := loadSchGroupsContext(cfg, *window)
@@ -160,7 +163,7 @@ ambiguous target; the flag may be repeated.`,
 				return fmt.Errorf("power-cluster-relocate-plan: parse module frames: %w", err)
 			}
 			plans := planPowerClusterRelocations(comps, wires, visible.Items, groups,
-				requests, partFilter, includeGround, maxDistance, maxDirect, searchRadius,
+				requests, partFilter, includeGround, frameOnly, maxDistance, maxDirect, searchRadius,
 				sheet, titleBlock, schModuleFrames(survey))
 			report := powerClusterRelocateReport{
 				SchemaVersion: 1, DocumentID: doc, MaxDistance: maxDistance,
@@ -176,6 +179,8 @@ ambiguous target; the flag may be repeated.`,
 					report.Ambiguous++
 				case "already-wired":
 					report.AlreadyWired++
+				case "in-frame":
+					report.InFrame++
 				}
 			}
 			if jsonOut || out != "" {
@@ -199,6 +204,7 @@ ambiguous target; the flag may be repeated.`,
 	cmd.Flags().StringSliceVar(&pairSpecs, "pair", nil, "explicit PASSIVE:CONSUMER[.PIN] target; repeat or comma-separate")
 	cmd.Flags().StringSliceVar(&partSpecs, "part", nil, "only plan these passive designators (CSV); default scans eligible 2-pin passives")
 	cmd.Flags().BoolVar(&includeGround, "include-gnd", false, "also consider GND passives and passive-side GND flags")
+	cmd.Flags().BoolVar(&frameOnly, "frame-only", false, "only move passive attachments fully inside their current functional frame; do not plan a direct lead yet")
 	cmd.Flags().Float64Var(&maxDistance, "max-distance", 1000, "maximum pin-to-pin Manhattan distance to consider a target")
 	cmd.Flags().Float64Var(&maxDirect, "max-direct", 100, "maximum current pin distance that may use a direct wire without moving")
 	cmd.Flags().Float64Var(&searchRadius, "search-radius", 200, "5-unit-grid search radius around the consumer pin")
@@ -241,7 +247,7 @@ func splitDesignatorPin(ref string) (string, string) {
 
 func planPowerClusterRelocations(comps []layoutComp, wires []schGroupWire, items []visibleTextItem,
 	groups []*schGroup, requests map[string]powerRelocatePairRequest, partFilter map[string]bool,
-	includeGround bool, maxDistance, maxDirect, searchRadius float64,
+	includeGround, frameOnly bool, maxDistance, maxDirect, searchRadius float64,
 	sheet, titleBlock *layoutBBox, frames []schFrameSpec) []powerClusterRelocatePlan {
 	pinRoot, flagRoot := powerConnectivity(comps, wires)
 	groupOf := map[string]string{}
@@ -291,7 +297,7 @@ func planPowerClusterRelocations(comps []layoutComp, wires []schGroupWire, items
 				powerPin = p
 			}
 		}
-		if powerPin == nil || groundPin == nil {
+		if powerPin == nil || (!frameOnly && groundPin == nil) {
 			continue
 		}
 		if isPowerClusterGround(powerPin.Net) && !includeGround {
@@ -310,6 +316,27 @@ func planPowerClusterRelocations(comps []layoutComp, wires []schGroupWire, items
 			PassivePin: powerPin.Number, Status: "blocked",
 			DeleteFlagsBeforeMove:  passiveFlags,
 			RequiresPostMoveReplan: true,
+		}
+		if frameOnly {
+			currentFrame, frameReason := frameForRelocatePart(c, frames)
+			if currentFrame == nil {
+				plan.Reason = frameReason
+				plans = append(plans, plan)
+				continue
+			}
+			mv, already, reason := planPowerFrameRelocateMove(c, items, comps, wires, sheet, titleBlock, currentFrame, searchRadius)
+			if already {
+				plan.Status = "in-frame"
+				plan.Note = "passive attachment group is already fully inside its functional frame"
+			} else if mv != nil {
+				plan.Status = "ready"
+				plan.Move = mv
+				plan.Note = "frame-only move; rerun power-cluster-plan after the move before attempting a lead"
+			} else {
+				plan.Reason = reason
+			}
+			plans = append(plans, plan)
+			continue
 		}
 		if groupID == "" {
 			plan.Reason = "no registered functional-group ownership"
@@ -391,7 +418,11 @@ func planPowerClusterRelocations(comps []layoutComp, wires []schGroupWire, items
 		plan.Status = "ready"
 		plan.Move = mv
 		plan.Connection = connection
-		plan.Note = "apply move first, then rerun power-cluster-plan against fresh IDs; do not delete the old flag IDs after the move"
+		if connection != nil && connection.Status == "clear" {
+			plan.Note = "move and post-move lead are both clear; still apply the move first, then rerun power-cluster-plan against fresh IDs"
+		} else {
+			plan.Note = "move is clear; direct path is not yet clear. Apply the move first, then rerun power-cluster-plan and solve the post-move wiring"
+		}
 		plans = append(plans, plan)
 	}
 	sort.Slice(plans, func(i, j int) bool {
@@ -529,8 +560,11 @@ func planPowerRelocateMove(c layoutComp, pp layoutPin, consumer layoutComp, cp l
 		}
 	}
 	bestCost := math.Inf(1)
+	bestBlockedCost := math.Inf(1)
 	var best *powerRelocateMove
 	var bestConn *powerClusterConnection
+	var bestBlocked *powerRelocateMove
+	var bestBlockedConn *powerClusterConnection
 	for _, delta := range powerRelocateDeltas(c, cp, searchRadius) {
 		if !partMoveClear(c, delta, movedComp, movedWire, movedTextIDs, items, comps, wires, sheet, titleBlock) {
 			continue
@@ -564,16 +598,6 @@ func planPowerRelocateMove(c layoutComp, pp layoutPin, consumer layoutComp, cp l
 			wireRootsAtPin(simWires, find, wireIndex, movedPin),
 			wireRootsAtPin(simWires, find, wireIndex, cp),
 			simItems, simComps, simWires, sheet, titleBlock)
-		if len(blockers) > 0 {
-			continue
-		}
-		if !powerPathInsideFrame(path, targetFrame) {
-			continue
-		}
-		cost := math.Abs(delta[0]) + math.Abs(delta[1]) + powerPathLength(path)
-		if cost >= bestCost {
-			continue
-		}
 		mv := &powerRelocateMove{
 			PartID: c.ID, Designator: c.Designator,
 			FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
@@ -599,9 +623,28 @@ func planPowerRelocateMove(c layoutComp, pp layoutPin, consumer layoutComp, cp l
 			Passive: fmt.Sprintf("%s.%s", c.Designator, pp.Number),
 			From:    checkPoint{X: round2(movedPin.X), Y: round2(movedPin.Y)},
 			To:      checkPoint{X: round2(cp.X), Y: round2(cp.Y)},
-			Status:  "clear", Path: path,
 		}
-		best, bestConn, bestCost = mv, conn, cost
+		moveCost := math.Abs(delta[0]) + math.Abs(delta[1])
+		if len(blockers) == 0 && powerPathInsideFrame(path, targetFrame) {
+			conn.Status = "clear"
+			conn.Path = path
+			cost := moveCost + powerPathLength(path)
+			if cost < bestCost {
+				best, bestConn, bestCost = mv, conn, cost
+			}
+			continue
+		}
+		conn.Status = "blocked"
+		conn.Blockers = blockerLabels(blockers)
+		if moveCost < bestBlockedCost {
+			bestBlocked, bestBlockedConn, bestBlockedCost = mv, conn, moveCost
+		}
+	}
+	if best != nil {
+		return best, bestConn, ""
+	}
+	if bestBlocked != nil {
+		return bestBlocked, bestBlockedConn, ""
 	}
 	if best == nil {
 		return nil, nil, "no-clear-relocation-and-connection"
@@ -625,6 +668,10 @@ func frameForRelocateTarget(consumer layoutComp, frames []schFrameSpec) (*layout
 		return nil, fmt.Sprintf("consumer must belong to exactly one functional frame (found %d)", len(owners))
 	}
 	return &owners[0], ""
+}
+
+func frameForRelocatePart(c layoutComp, frames []schFrameSpec) (*layoutBBox, string) {
+	return frameForRelocateTarget(c, frames)
 }
 
 func relocateMoveInsideFrame(delta [2]float64, movedComp, movedWire map[string]bool,
@@ -667,6 +714,104 @@ func relocateMoveInsideFrame(delta [2]float64, movedComp, movedWire map[string]b
 		}
 	}
 	return true
+}
+
+func planPowerFrameRelocateMove(c layoutComp, items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, sheet, titleBlock, frame *layoutBBox, searchRadius float64) (*powerRelocateMove, bool, string) {
+	if frame == nil {
+		return nil, false, "functional-frame ownership unavailable"
+	}
+	var flags []schGroupFlag
+	for _, o := range comps {
+		if isSchMarker(o.ComponentType) && o.AnchorAvailable {
+			flags = append(flags, schGroupFlag{ID: o.ID, X: o.X, Y: o.Y})
+		}
+	}
+	var memberPins, otherPins [][2]float64
+	for _, p := range c.Pins {
+		memberPins = append(memberPins, [2]float64{p.X, p.Y})
+	}
+	for _, o := range comps {
+		if o.ID == c.ID || (o.ComponentType != "" && o.ComponentType != schLayoutPartType) {
+			continue
+		}
+		for _, p := range o.Pins {
+			otherPins = append(otherPins, [2]float64{p.X, p.Y})
+		}
+	}
+	exp := expandGroupAttachments(groupExpandInput{
+		MemberPins: memberPins, OtherPins: otherPins, Wires: wires, Flags: flags,
+	})
+	if len(exp.Suspects) > 0 {
+		return nil, false, "incomplete-attachment-expansion"
+	}
+	if exp.SharedTrees > 0 {
+		return nil, false, "shared-wire-tree"
+	}
+	if len(exp.WireIDs) > 16 || partGroupExtent(c, exp.WireIDs, wires) > 400 {
+		return nil, false, "attachment-group-too-large"
+	}
+	movedComp := map[string]bool{c.ID: true}
+	for _, id := range exp.FlagIDs {
+		movedComp[id] = true
+	}
+	movedWire := map[string]bool{}
+	for _, id := range exp.WireIDs {
+		movedWire[id] = true
+	}
+	var movedTextIDs []string
+	for _, it := range items {
+		if it.ParentID != "" && (movedComp[it.ParentID] || movedWire[it.ParentID]) {
+			movedTextIDs = append(movedTextIDs, it.ID)
+		}
+	}
+	if relocateMoveInsideFrame([2]float64{0, 0}, movedComp, movedWire, movedTextIDs, items, comps, wires, frame) {
+		return nil, true, ""
+	}
+	center := layoutPin{X: c.X, Y: c.Y}
+	bestCost := math.Inf(1)
+	var best *powerRelocateMove
+	collisionRejects, frameRejects := 0, 0
+	for _, delta := range powerRelocateDeltas(c, center, searchRadius) {
+		if !partMoveClear(c, delta, movedComp, movedWire, movedTextIDs, items, comps, wires, sheet, titleBlock) {
+			collisionRejects++
+			continue
+		}
+		if !relocateMoveInsideFrame(delta, movedComp, movedWire, movedTextIDs, items, comps, wires, frame) {
+			frameRejects++
+			continue
+		}
+		cost := math.Abs(delta[0]) + math.Abs(delta[1])
+		if cost >= bestCost {
+			continue
+		}
+		mv := &powerRelocateMove{
+			PartID: c.ID, Designator: c.Designator,
+			FromAnchor: &checkPoint{X: round2(c.X), Y: round2(c.Y)},
+			ToAnchor:   &checkPoint{X: round2(c.X + delta[0]), Y: round2(c.Y + delta[1])},
+			DeltaX:     delta[0], DeltaY: delta[1],
+			WireIDs: append([]string(nil), exp.WireIDs...),
+			FlagIDs: append([]string(nil), exp.FlagIDs...),
+			TextIDs: append([]string(nil), movedTextIDs...),
+		}
+		if c.BBox != nil {
+			b := translateLayoutBBox(*c.BBox, delta)
+			mv.NewBBox = &b
+		}
+		ids := []string{c.ID}
+		ids = append(ids, exp.WireIDs...)
+		ids = append(ids, exp.FlagIDs...)
+		mv.CommandHints = []string{
+			fmt.Sprintf("easyeda sch group-move --ids %s --dx %.0f --dy %.0f",
+				strings.Join(ids, ","), delta[0], delta[1]),
+			"then save, reload, and rerun power-cluster-plan",
+		}
+		best, bestCost = mv, cost
+	}
+	if best == nil {
+		return nil, false, fmt.Sprintf("no-clear-in-frame-relocation (collision=%d, frame=%d)", collisionRejects, frameRejects)
+	}
+	return best, false, ""
 }
 
 func powerPathInsideFrame(path [][2]float64, frame *layoutBBox) bool {
@@ -718,8 +863,8 @@ func powerRelocateDeltas(c layoutComp, target layoutPin, radius float64) [][2]fl
 }
 
 func renderPowerClusterRelocatePlan(rep powerClusterRelocateReport, w io.Writer) {
-	fmt.Fprintf(w, "power-cluster-relocate-plan: %d plan(s), %d ready, %d blocked, %d ambiguous, %d already-wired (document %s)\n",
-		len(rep.Plans), rep.Ready, rep.Blocked, rep.Ambiguous, rep.AlreadyWired, rep.DocumentID)
+	fmt.Fprintf(w, "power-cluster-relocate-plan: %d plan(s), %d ready, %d blocked, %d ambiguous, %d already-wired, %d in-frame (document %s)\n",
+		len(rep.Plans), rep.Ready, rep.Blocked, rep.Ambiguous, rep.AlreadyWired, rep.InFrame, rep.DocumentID)
 	for _, p := range rep.Plans {
 		fmt.Fprintf(w, "  [%s] %s.%s %s", strings.ToUpper(p.Status), p.Passive, p.PassivePin, p.Net)
 		if p.Consumer != "" {

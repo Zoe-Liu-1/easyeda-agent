@@ -39,7 +39,7 @@ func TestPlanPowerClusterRelocationMovesThenConnects(t *testing.T) {
 	comps, wires, groups := relocatePlanFixture()
 	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 500, MaxY: 300}
 	frames := []schFrameSpec{{ID: "f1", Rect: *sheet}}
-	plans := planPowerClusterRelocations(comps, wires, nil, groups, nil, nil, false,
+	plans := planPowerClusterRelocations(comps, wires, nil, groups, nil, nil, false, false,
 		500, 100, 40, sheet, nil, frames)
 	if len(plans) != 1 {
 		t.Fatalf("want one relocation plan, got %+v", plans)
@@ -73,7 +73,7 @@ func TestPlanPowerClusterRelocationExplicitTargetBreaksTie(t *testing.T) {
 	sheet := &layoutBBox{MinX: 0, MinY: -200, MaxX: 500, MaxY: 300}
 	frames := []schFrameSpec{{ID: "f1", Rect: *sheet}}
 
-	auto := planPowerClusterRelocations(comps, wires, nil, groups, nil, nil, false,
+	auto := planPowerClusterRelocations(comps, wires, nil, groups, nil, nil, false, false,
 		500, 100, 40, sheet, nil, frames)
 	if len(auto) != 1 || auto[0].Status != "ambiguous" {
 		t.Fatalf("equal-distance targets must require an explicit pair, got %+v", auto)
@@ -81,7 +81,7 @@ func TestPlanPowerClusterRelocationExplicitTargetBreaksTie(t *testing.T) {
 	explicit := map[string]powerRelocatePairRequest{
 		"C1": {Passive: "C1", Consumer: "U2", Pin: "1"},
 	}
-	got := planPowerClusterRelocations(comps, wires, nil, groups, explicit, nil, false,
+	got := planPowerClusterRelocations(comps, wires, nil, groups, explicit, nil, false, false,
 		500, 100, 40, sheet, nil, frames)
 	if len(got) != 1 || got[0].Consumer != "U2" || got[0].Status != "ready" {
 		t.Fatalf("explicit target must break the tie, got %+v", got)
@@ -127,5 +127,33 @@ func TestRelocateMoveInsideFrameRejectsMovedTextOutside(t *testing.T) {
 	if !relocateMoveInsideFrame([2]float64{0, 0}, movedComp, map[string]bool{"w1": true},
 		[]string{"name"}, items, comps, wires, &frame) {
 		t.Fatal("clear in-frame move should be accepted")
+	}
+}
+
+func TestPlanPowerClusterRelocationCanReturnMoveBeforeConnection(t *testing.T) {
+	comps, wires, groups := relocatePlanFixture()
+	comps = append(comps, layoutComp{
+		ID: "wall", Designator: "WALL", ComponentType: "part",
+		BBox: &layoutBBox{MinX: 180, MinY: 70, MaxX: 185, MaxY: 130},
+	})
+	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 500, MaxY: 300}
+	frames := []schFrameSpec{{ID: "f1", Rect: *sheet}}
+	plans := planPowerClusterRelocations(comps, wires, nil, groups, nil, nil, false, false,
+		500, 100, 80, sheet, nil, frames)
+	if len(plans) != 1 || plans[0].Status != "ready" || plans[0].Move == nil {
+		t.Fatalf("a safe in-frame move must be returned even when the current lead is blocked, got %+v", plans)
+	}
+	if plans[0].Connection == nil || plans[0].Connection.Status == "" {
+		t.Fatalf("connection status must remain explicit, got %+v", plans[0])
+	}
+}
+
+func TestPlanPowerFrameRelocateMoveIgnoresConnectionAvailability(t *testing.T) {
+	comps, wires, groups := relocatePlanFixture()
+	frame := layoutBBox{MinX: 0, MinY: 80, MaxX: 500, MaxY: 300}
+	plans := planPowerClusterRelocations(comps, wires, nil, groups, nil, nil, false, true,
+		500, 100, 80, &frame, nil, []schFrameSpec{{ID: "f1", Rect: frame}})
+	if len(plans) != 1 || plans[0].Status != "ready" || plans[0].Move == nil {
+		t.Fatalf("want a frame-only move plan, got %+v", plans)
 	}
 }
