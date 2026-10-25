@@ -5005,6 +5005,7 @@ const schematicCheck: Handler = async (payload) => {
 	const findings: Array<CheckFinding> = [];
 	let netMarkerMismatches = 0;
 	let multiNetWires = 0;
+	let wireContacts = 0;
 
 	// Rule 0: net marker/port/label names must agree with the wire they touch.
 	// The UI DRC reports this as "网络标识 X 的名称与所连导线 Y 名称不一致", but
@@ -5230,6 +5231,7 @@ const schematicCheck: Handler = async (payload) => {
 			const relation = classifyWireContact(segs[i], segs[j]);
 			const a = wireSegs[i], b = wireSegs[j];
 			if ((relation === 'endpoint-touch' || relation === 'collinear-overlap') && a.net && b.net && a.net !== b.net) {
+				wireContacts++;
 				findings.push({ type: 'wire-contact', level: 'error', nets: [a.net, b.net],
 					message: '异网导线存在端点/T接/共线重叠的真实电气接触',
 					segments: [a, b].map(s => ({ primitiveId: s.wirePrimitiveId, segmentIndex: s.segmentIndex, rawEncoding: s.rawEncoding })) });
@@ -5384,6 +5386,7 @@ const schematicCheck: Handler = async (payload) => {
 		netMarkerMismatches,
 		multiNetWires,
 		wireCrossings: crossingTotal,
+		wireContacts,
 		wireOverPins: overPinTotal,
 		zeroLengthWires,
 		danglingWires,

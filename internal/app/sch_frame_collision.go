@@ -44,16 +44,24 @@ func schFrameCollisionFindings(s schFrameSurvey) []checkFinding {
 	return out
 }
 
-func liveSchFrameCollisionFindings(cfg *appConfig, window string, comps []layoutComp, wires []schGroupWire) []checkFinding {
+func fetchSchVisualSurvey(cfg *appConfig, window string, comps []layoutComp) (map[string]any, error) {
 	pinned, win, doc, err := pinZonePage(cfg, window)
-	if err == nil {
-		var value map[string]any
-		value, err = execAutolayoutZoneJS(pinned, win, doc, "visual-survey", buildSchVisualSurveyJS(comps))
-		if err == nil {
-			return schVisualSurveyFindings(value, comps, wires)
-		}
+	if err != nil {
+		return nil, err
 	}
-	return []checkFinding{{Type: "partition-geometry-unavailable", Level: "ERROR", Message: fmt.Sprintf("live visual check could not run: %v", err)}}
+	value, err := execAutolayoutZoneJS(pinned, win, doc, "visual-survey", buildSchVisualSurveyJS(comps))
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func liveSchFrameCollisionFindings(cfg *appConfig, window string, comps []layoutComp, wires []schGroupWire) []checkFinding {
+	value, err := fetchSchVisualSurvey(cfg, window, comps)
+	if err != nil {
+		return []checkFinding{{Type: "partition-geometry-unavailable", Level: "ERROR", Message: fmt.Sprintf("live visual check could not run: %v", err)}}
+	}
+	return schVisualSurveyFindings(value, comps, wires)
 }
 
 func schVisualSurveyFindings(value map[string]any, comps []layoutComp, wires []schGroupWire) []checkFinding {

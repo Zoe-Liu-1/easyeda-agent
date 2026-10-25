@@ -56,3 +56,34 @@ func TestVisibleTextOverlapFindings_WireCollision(t *testing.T) {
 		t.Fatalf("wire collision set wrong: %+v", got)
 	}
 }
+
+func TestVisibleTextFrameCrossingIncludesShownAttributes(t *testing.T) {
+	box := func(x0, y0, x1, y1 float64) *layoutBBox {
+		return &layoutBBox{MinX: x0, MinY: y0, MaxX: x1, MaxY: y1}
+	}
+	items := []visibleTextItem{
+		{ID: "value", Kind: "attribute", ComponentType: "part", ParentID: "r1", Designator: "R1", Key: "Value",
+			BBox: box(90, 20, 130, 30)},
+		{ID: "inside", Kind: "attribute", ComponentType: "part", ParentID: "r2", Designator: "R2", Key: "Value",
+			BBox: box(20, 20, 40, 30)},
+		{ID: "title", Kind: "attribute", ComponentType: "sheet", ParentID: "sheet", Key: "Name",
+			BBox: box(90, 20, 130, 30)},
+	}
+	frames := []schFrameSpec{{ID: "f1", Rect: *box(0, 0, 100, 100)}}
+	got := visibleTextFrameCrossingFindings(items, frames, 0.5)
+	if len(got) != 1 || got[0].PrimitiveId != "value" || got[0].Type != "text-frame-crossing" {
+		t.Fatalf("want only the shown Value crossing the module boundary, got %+v", got)
+	}
+}
+
+func TestVisibleTextOverlapLeavesDesignatorOwnershipToDesignatorRule(t *testing.T) {
+	box := func(x0, y0, x1, y1 float64) *layoutBBox {
+		return &layoutBBox{MinX: x0, MinY: y0, MaxX: x1, MaxY: y1}
+	}
+	comps := []layoutComp{{ID: "u1", Designator: "U1", ComponentType: "part", BBox: box(0, 0, 100, 100)}}
+	items := []visibleTextItem{{ID: "d1", Kind: "attribute", ComponentType: "part", ParentID: "u1", Designator: "U1",
+		Key: "Designator", BBox: box(40, 40, 60, 50)}}
+	if got := visibleTextOverlapFindings(items, comps, nil, 0.5); len(got) != 0 {
+		t.Fatalf("Designator collisions must be owned by designator-overlap, got %+v", got)
+	}
+}

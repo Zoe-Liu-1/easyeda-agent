@@ -177,10 +177,15 @@ func visibleTextTitleblockFindings(items []visibleTextItem, comps []layoutComp,
 }
 
 // visibleTextFindings reads the measured visible text and applies the ruler.
-// An older connector without the action is reported once on stderr (no
-// finding: the rule simply does not exist there); a failed read or items the
-// host could not measure are surfaced, never treated as "inside".
+// An older connector without the action, a failed read, and items the host
+// could not measure all produce an ERROR finding. Missing evidence is never
+// treated as "inside" or otherwise clean.
 func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps []layoutComp, wires []schGroupWire, eps float64, stderr io.Writer) []checkFinding {
+	return visibleTextFindingsWithFrames(cfg, window, sheet, comps, wires, nil, eps, stderr)
+}
+
+func visibleTextFindingsWithFrames(cfg *appConfig, window string, sheet *layoutBBox, comps []layoutComp, wires []schGroupWire,
+	frames []schFrameSpec, eps float64, stderr io.Writer) []checkFinding {
 	if sheet == nil {
 		return nil
 	}
@@ -188,9 +193,12 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps
 	if err != nil {
 		if res != nil && res.errorCode == "UNKNOWN_ACTION" {
 			fmt.Fprintln(stderr, "sch check: visible-text out-of-sheet skipped — connector predates schematic.visible_text.bboxes")
-			return nil
+			return []checkFinding{{
+				Type: "visible-text-unverified", Level: "ERROR",
+				Message: "连接器不支持 schematic.visible_text.bboxes；可见文字、标签名称和碰撞无法核验。安装匹配版本的连接器后重跑，不得把跳过当通过",
+			}}
 		}
-		return []checkFinding{{Type: "visible-text-unverified", Level: "warn", Message: "可见文字/属性是否越出图纸无法核验（读取失败）: " + err.Error()}}
+		return []checkFinding{{Type: "visible-text-unverified", Level: "ERROR", Message: "可见文字/属性是否越出图纸无法核验（读取失败）: " + err.Error()}}
 	}
 	var parsed struct {
 		Items      []visibleTextItem `json:"items"`
@@ -198,11 +206,12 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps
 	}
 	raw, _ := json.Marshal(res.Result)
 	if json.Unmarshal(raw, &parsed) != nil {
-		return []checkFinding{{Type: "visible-text-unverified", Level: "warn", Message: "可见文字/属性测量结果无法解析"}}
+		return []checkFinding{{Type: "visible-text-unverified", Level: "ERROR", Message: "可见文字/属性测量结果无法解析"}}
 	}
 	titleBlock, _ := titleBlockKeepoutWithSource(sheet)
 	out := visibleTextBoundaryFindings(parsed.Items, sheet, eps)
 	out = append(out, visibleTextTitleblockFindings(parsed.Items, comps, titleBlock, eps)...)
+	out = append(out, visibleTextFrameCrossingFindings(parsed.Items, frames, eps)...)
 	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, wires, eps)...)
 	out = append(out, netLabelVisibilityFindings(parsed.Items)...)
 	out = append(out, netLabelOrientationFindings(parsed.Items)...)
@@ -212,8 +221,45 @@ func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps
 	out = append(out, alignmentOpportunityFindings(parsed.Items, comps, wires, sheet, titleBlock)...)
 	out = append(out, directConnectOpportunityFindings(parsed.Items, comps, wires, sheet, titleBlock)...)
 	if n := len(parsed.Unmeasured); n > 0 {
-		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "info",
+		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "ERROR",
 			Message: fmt.Sprintf("%d 个可见文字/属性宿主未给出 bbox，越界情况未核验", n)})
+	}
+	return out
+}
+
+// visibleTextFrameCrossingFindings extends frame-boundary checking to every
+// measured visible text item. Text wholly outside all frames is not guessed
+// into an owner; only measured overlap with a frame boundary is reported.
+func visibleTextFrameCrossingFindings(items []visibleTextItem, frames []schFrameSpec, eps float64) []checkFinding {
+	if len(frames) == 0 {
+		return nil
+	}
+	var out []checkFinding
+	for _, it := range items {
+		if it.BBox == nil || (it.Kind == "attribute" && it.ComponentType == "sheet") {
+			continue
+		}
+		for _, f := range frames {
+			ox, oy, hit := overlapExtent(*it.BBox, f.Rect)
+			if !hit || ox <= eps || oy <= eps || boxInside(*it.BBox, f.Rect) {
+				continue
+			}
+			what := "文字「" + it.Content + "」"
+			if it.Kind == "attribute" {
+				owner := it.Designator
+				if owner == "" {
+					owner = it.ComponentType
+				}
+				what = fmt.Sprintf("%s 的可见属性 %s", owner, it.Key)
+			}
+			out = append(out, checkFinding{
+				Type: "text-frame-crossing", Level: "warn", PrimitiveId: it.ID,
+				Designator: it.Designator, PrimitiveIds: []string{it.ID, f.ID},
+				BBox: it.BBox, Keepout: &f.Rect,
+				Message: fmt.Sprintf("%s 跨越功能框 %s 边界（重叠 %.1f×%.1f）— 移入所属框或调整框包络", what, f.ID, ox, oy),
+			})
+			break
+		}
 	}
 	return out
 }
@@ -264,7 +310,7 @@ func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, wir
 	}
 	var out []checkFinding
 	for _, it := range items {
-		if it.BBox == nil {
+		if it.BBox == nil || it.Key == "Designator" {
 			continue
 		}
 		for _, o := range obstacles {
@@ -314,7 +360,7 @@ func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, wir
 	// Text-vs-part catches the body; this loop closes the remaining lead blind
 	// spot while excluding a part's own attributes.
 	for _, it := range items {
-		if it.BBox == nil {
+		if it.BBox == nil || it.Key == "Designator" {
 			continue
 		}
 		hit := false
@@ -326,7 +372,9 @@ func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, wir
 				if c.BBox != nil && pointInBox2(pin.X, pin.Y, *c.BBox, eps) {
 					continue // already covered by the text-vs-part body rule
 				}
-				if pointInBox2(pin.X, pin.Y, *it.BBox, eps) {
+				onPin := pointInBox2(pin.X, pin.Y, *it.BBox, eps)
+				onLead := powerOrientationPinLeadCrossesBox(c, pin, *it.BBox)
+				if onPin || onLead {
 					owner := c.Designator
 					if owner == "" {
 						owner = c.ID
@@ -337,7 +385,7 @@ func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, wir
 					out = append(out, checkFinding{
 						Type: "visible-text-overlap", Level: "warn",
 						PrimitiveId: it.ID, Designator: it.Designator, BBox: it.BBox,
-						Message: fmt.Sprintf("%s 压在引脚 %s.%s 上 — 挪开文字或改引脚走线",
+						Message: fmt.Sprintf("%s 压在引脚 %s.%s 的端点或 lead 上 — 挪开文字或改引脚走线",
 							describe(it), owner, pin.Number),
 					})
 					hit = true
@@ -351,12 +399,12 @@ func visibleTextOverlapFindings(items []visibleTextItem, comps []layoutComp, wir
 	}
 	for i := 0; i < len(items); i++ {
 		a := items[i]
-		if a.BBox == nil {
+		if a.BBox == nil || a.Key == "Designator" {
 			continue
 		}
 		for j := i + 1; j < len(items); j++ {
 			b := items[j]
-			if b.BBox == nil || (a.ParentID != "" && a.ParentID == b.ParentID) {
+			if b.BBox == nil || b.Key == "Designator" || (a.ParentID != "" && a.ParentID == b.ParentID) {
 				continue
 			}
 			ix, iy := overlap(a.BBox, b.BBox)

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.14.17] - 2026-10-25
+
+- `schematic.check` 新增 `summary.wireContacts`，把异网导线端点/T 接/共线重叠的真实接触与 `wire-crossing` 分开计数。
+- 可见文字与网络标签几何改为 fail-closed 契约：旧连接器缺 `schematic.visible_text.bboxes`、标签缺 rotation 或文字缺 bbox 时不再可被 strict 当成通过。
+
 ## [1.14.16] - 2026-10-24
 
 - 修复线树重建/恢复把 flat `getState_Line()` 的独立四坐标线段误当成连续折线的问题；多段/分支线现在逐段创建，不再产生伪斜线、错误重叠或重建失败。

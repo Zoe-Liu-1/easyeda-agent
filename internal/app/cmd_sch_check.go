@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // ── sch check: reconstructed per-item design check ──────────────────────────
@@ -120,6 +121,7 @@ type checkSummary struct {
 	NetMarkerMismatches    int `json:"netMarkerMismatches"`
 	MultiNetWires          int `json:"multiNetWires"`
 	WireCrossings          int `json:"wireCrossings"`
+	WireContacts           int `json:"wireContacts"`
 	WireOverPins           int `json:"wireOverPins"`
 	CrossChipDirectWires   int `json:"crossChipDirectWires"`
 	NonOrthogonalWires     int `json:"nonOrthogonalWires"`
@@ -137,6 +139,8 @@ type checkSummary struct {
 	// Visible text (free text + shown attributes, incl. Value/name text) overlapping
 	// a different owner's part body / marker / text.
 	VisibleTextOverlaps int `json:"visibleTextOverlaps"`
+	// Measured visible text crossing a live module-frame boundary.
+	TextFrameCrossings int `json:"textFrameCrossings"`
 	// Visible wire-name label economy/orientation (Go-side, net-label data).
 	LabelVisibility            int `json:"labelVisibility"`
 	LabelEconomy               int `json:"labelEconomy"`
@@ -185,6 +189,13 @@ type checkReport struct {
 	Findings []checkFinding `json:"findings"`
 }
 
+// schemCheckRequestBudget is shared by standalone `sch check` and `sch gate`.
+// A large page must enumerate components, all page primitives, visible text,
+// wire segments and the manufacture netlist before geometry checks can start.
+// Keeping the budget in one place prevents the gate from silently falling back
+// to the generic 20-second action timeout.
+const schemCheckRequestBudget = 60 * time.Second
+
 // runSchCheck runs the reconstructed design check, renders it, and (only with
 // strict) returns a non-zero exit when there are findings. By default it is
 // informational — floating IO pins are normal on an MCU board until NC-marked.
@@ -194,7 +205,12 @@ func runSchCheck(cfg *appConfig, window string, allPages, strict, asJSON bool, o
 	if allPages {
 		payload["allPages"] = true
 	}
-	res, err := requestAction(cfg, "schematic.check", window, payload)
+	// A large page can legitimately need more than the generic 20-second action
+	// budget: the connector must enumerate all components, page primitives,
+	// visible text, wire segments and the manufacture netlist before the Go
+	// geometry pass even starts. Keep the read bounded, but do not misreport a
+	// slow complete check as an unresponsive connector.
+	res, err := requestActionTimed(cfg, "schematic.check", window, payload, schemCheckRequestBudget)
 	if err != nil {
 		return err
 	}
@@ -364,8 +380,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d long-wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.LongWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-contact(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d long-wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d text-frame-crossing(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireContacts, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.LongWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.TextFrameCrossings, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -434,6 +450,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.WireCrossings > 0 || s.WireOverPins > 0 {
 		fmt.Fprintln(w, "→ routing: reroute crossings in clear channels (L-bends); never run a wire through a pin")
+	}
+	if s.WireContacts > 0 {
+		fmt.Fprintln(w, "→ wire-contact: 异网导线存在端点、T 接或共线重叠的真实接触 — 按线树拆开并重新正交布线；不得只删除接触点")
 	}
 	if s.CrossChipDirectWires > 0 {
 		fmt.Fprintln(w, "→ cross-chip-direct-wire: 不同主动芯片之间改用同名网络标签；不要用长导线直接跨过芯片功能块")
@@ -516,6 +535,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.VisibleTextOverlaps > 0 {
 		fmt.Fprintln(w, "→ visible-text-overlap: 可见文字(阻值/网名/说明)压在别的器件、标识或文字上 — 挪开或调属性位置")
+	}
+	if s.TextFrameCrossings > 0 {
+		fmt.Fprintln(w, "→ text-frame-crossing: 可见文字跨越功能框边界 — 把文字移入所属框，或按完整可见包络调整框")
 	}
 	if s.MarkerWireOverlaps > 0 {
 		fmt.Fprintln(w, "→ marker-wire-overlap: 电源/地旗或端口本体压在导线上 — 挪开标识或改走线")

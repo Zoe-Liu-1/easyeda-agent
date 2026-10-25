@@ -78,9 +78,10 @@ CLI 参数以 `easyeda sch <command> --help` 为准；电路选型依据具体�
 
 ### 页面碰撞与入框的统一范围
 
-参与项：器件本体、完整引脚、真实导线、网络标记本体与网络文字、器件位号（Designator）、
-自由文字、模块框和标题，以及纸张/图签边界。按对象关系判断合法连接与遮挡，不将所有接触
-一概认作碰撞。器件本体与位号须完整落在所属框内，位号不得被遮挡。
+参与项：器件本体、完整引脚、真实导线、网络标记本体与网络文字、器件的全部可见属性
+（Designator、Name、Value、型号、参数、描述等）、自由文字、模块框和标题，以及纸张/
+图签边界。按对象关系判断合法连接与遮挡，不将所有接触一概认作碰撞。器件本体与全部可见
+文字须完整落在所属框内；位号另有专用规则。
 实测 Designator bbox 是闭合障碍：导线进入内部、沿边界重合或只触及角点都必须报错；
 不得沿用器件本体允许合法端点落边的开区间判据。
 
@@ -100,14 +101,14 @@ Designator、Value、自由文字没有挂载线，全部导线参与碰撞。
 不能用两者的合并矩形占据中间空角；合并包络仍用于占位、旧端子几何和页面边界。
 真实本体、文字或导线相交仍按原判据报错，不放宽 eps，也不扩展内部 X 的导线豁免。
 
-排除项：型号、参数、描述、供应商信息等**非位号器件属性文字**。它们不进入页面碰撞、
-入框、净距和扩框包络；重叠/越框不报警。不靠隐藏属性、缩短真实型号或器件标准化来过布局门。
-这只排除属性的呈现占位，不豁免器件身份、参数正确性或官方电气 DRC 的独立检查。
-自由文字和网络名称不是器件属性，不随此规则排除。
+离线布局源现有 `textBboxes` 仍可只保存 Designator 占位；这不是最终验收范围。
+落地后必须从 `schematic.visible_text.bboxes` 读取全部可见属性，覆盖 Name、Value、型号、
+参数、描述等文字。不得靠隐藏属性、缩短真实型号或器件标准化来通过现场碰撞/入框门。
+该实测范围不改变器件身份、参数正确性或官方电气 DRC 的独立检查。
 
-测量须保留对象类型、所属器件/zone、可见性和来源。旧 `textBboxes` 仅含矩形、不含属性类型，
-生产者须从有类型的原始属性筛出位号后填入，并保留对应来源；不能混入型号后让消费者猜测。
-缺少位号或其他必检几何不能当作空集合/零碰撞；估计可用于规划，不能冒充现场完整验证。
+测量须保留对象类型、所属器件/zone、可见性和来源。旧 `textBboxes` 仅含矩形和 Designator，
+不得把它当作全部可见文字的证明。缺少位号、其他可见属性或必检几何不能当作空集合/
+零碰撞；估计可用于规划，不能冒充现场完整验证。
 
 布局前对目标当前页运行 `easyeda sch designator-geometry --project <project> --doc <page> --out designators.json`。
 此只读命令逐个读取 part 的 `Designator` 属性，要求每件恰有一个可见、值与位号一致且
@@ -693,7 +694,7 @@ V4 完全未接线页可能无法导出网表，此时 `sch list` 的 `pinNetsAv
 | `titleBlock` | 可选的**本页**图签字段映射。旧字符串值（如 `{"Drawed":"设计者"}`）仅更新文本；对象值支持非空字符串 `value` 和可选布尔 `showTitle` / `showValue`。例如 `{"Name":{"value":"电源与接口","showTitle":false,"showValue":false},"Drawed":{"value":"设计者","showTitle":false,"showValue":true}}`。字段名先从目标页 `sch titleblock-get` 回读；源、计划和受保护队列保留同一显隐声明，strict gate 前通过 `sch titleblock --data` 写入并回读。省略显隐只在执行时已知该布尔状态时保持原值；写 `value` 前任一显隐未知或缺失须在源中显式补该布尔值，不能以 `null` 或字符串布尔代替；拒绝空更新、未知对象项、`@` 派生项及图纸结构项。字段属性显隐不等于图签整体显示；保留表格并用官方整页导出验证正文和附加属性。没有此字段的旧源不修改图签。 |
 | `modules[]` | `id/title/placements/wires/flags`，可附 `terminals/titleMetrics`；与 connectivity 的 Lib 成员逐项对应，每件只归属一个模块。 |
 | `placements[]` | `designator/value/x/y/rotation/mirror/bbox/pins`；bbox 与引脚位置来自官方实测，器件和引脚坐标落在 5 raw 网格。 |
-| `placements[].textBboxes` | 可选外置位号 bbox 数组，格式同 sheet；也用于 measurements。仅填入按原始属性类型筛出的 Designator，非位号属性不进入此数组。与当前实测姿态一致，随平移进入碰撞和框包络。普通 list 不自动提供，须另存类型、parent 与测量来源；不控制实际文字位置，Apply 后须回读验证。缺失不代表位号为空或已验证。 |
+| `placements[].textBboxes` | 可选外置位号 bbox 数组，格式同 sheet；也用于 measurements。离线源仅填入按原始属性类型筛出的 Designator，非位号属性另存原值。它只用于布局候选和位号占位，不替代最终现场 `schematic.visible_text.bboxes` 对全部可见文字的碰撞/框包络验收。普通 list 不自动提供，须另存类型、parent 与测量来源；不控制实际文字位置，Apply 后须回读验证。缺失不代表位号为空或已验证。 |
 | `netlabels[]` | 可选 `{net,x,y,rotation,visible,parentWireId,textBbox?}`；原生 net label 的网名、落点、方向和归属导线。缺失时不能判定标签竖排/重复，只能做导线几何检查；不能把缺失当空集合。 |
 | `pins[]` | 完整 `{number,name,net,x,y}`；官方量测提供时保留 `rotation`（世界坐标外向角：0 右、90 上、180 左、270 下），刚体旋转同步更新，不重复应用父器件旋转。NC 的 `net` 为空，与连接核心的 NC 状态一致。旧输入缺角度时仅允许唯一 bbox 侧推断，不得伪造为官方角度；候选不能删除或篡改已提供的角度。 |
 | `flags[].anchor` | 必须可归因为 `{type:"pin",componentId,pinNumber}` 或 `{type:"wire_tree",zoneId?,net,x,y}`。pin 锚定的 `pinX/pinY/direction` 必须等于目标引脚坐标与官方外向方向；wire_tree 接入点必须落在指定网的唯一真实线岛上。旧结果只在几何能唯一归因时迁移，歧义非零失败。 |
@@ -756,7 +757,8 @@ source 与 page 的纸张、内框和禁放区须精确一致；实际 sheet bbo
 
 仅重排已有电路时，必须保留原器件实例，而不是删件后恢复一个相同位号。
 原生 `uniqueId` 可能关联 PCB；`primitiveId`、真实参数、供应商及自定义属性也不能因
-布局被替换。非位号属性不参与页面碰撞，不代表这些属性可以丢弃或恢复为库默认值。
+布局被替换。离线布局源可暂不把非位号属性塞入 `textBboxes`，不代表这些属性可以丢弃、
+恢复为库默认值，或在最终现场碰撞/入框验收中跳过。
 dev.5 的整页 `compose --replace` 重建没有此保全契约，不可用于声称无损重排。
 
 dev.8 开发入口为 `compose --replace --preserve-instances`：只接受同页、相同完整器件
@@ -843,8 +845,9 @@ easyeda sch compose --from composition.json --out composition-plan.json \
 - Apply 不提供事务回滚。`checkpoint` 只是日志标记，只有 save 动作才保存。
 - `sch connectivity-diff` 以稳定 ID 对账；位号修复还须核对 ref 映射，重新布局还须核对
   库 UUID、完整引脚、真实导线和框。DRC 单项结果不替代这些检查。
-- 官方器件 bbox 不完整包含外置位号；另读 Designator 的真实 bbox 核验遮挡与入框，
-  将必要净距写回源数据。非位号属性排除；官方导图只辅助发现采集/规则遗漏，不代替数据检查。
+- 官方器件 bbox 不完整包含外置文字；离线可另读 Designator 的真实 bbox 做紧凑排版，
+  但最终必须另读全部可见属性核验遮挡、图签、出纸与入框，将必要净距写回源数据。
+  官方导图只辅助发现采集/规则遗漏，不代替实测数据检查。
   短位号可能缩小文字预留并改变重新 compose 的紧凑排版；
   单独修位号不应附带重排。
 - 报告未解决的 WARN、未知数据与未运行的验证。失败队列不会自动执行末尾 save；

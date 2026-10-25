@@ -635,6 +635,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	// a wire-read failure skips this rule only. Single-page only (wires are read
 	// from the active page).
 	var visualWires []schGroupWire
+	var visualFrames []schFrameSpec
+	surveyOK := false
 	if !allPages {
 		if wires, werr := fetchSchWirePolylinesStable(cfg, window, ""); werr != nil {
 			fmt.Fprintf(stderr, "sch check: redundant-marker/reversed-flag skipped — wire read failed: %v\n", werr)
@@ -650,7 +652,26 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			geo = append(geo, powerClusterFindings(comps, wires, powerClusterExempt)...)
 			geo = append(geo, sheetBoundaryFindings(comps, wires, sheetBBoxOf(comps), titleBlock, tbSource, overlapEps)...)
 		}
-		geo = append(geo, visibleTextFindings(cfg, window, sheetBBoxOf(comps), comps, visualWires, overlapEps, stderr)...)
+		if surveyValue, sErr := fetchSchVisualSurvey(cfg, window, comps); sErr != nil {
+			geo = append(geo, checkFinding{
+				Type: "partition-geometry-unavailable", Level: "ERROR",
+				Message: fmt.Sprintf("live visual check could not run: %v", sErr),
+			})
+		} else {
+			surveyOK = true
+			geo = append(geo, schVisualSurveyFindings(surveyValue, comps, visualWires)...)
+			if survey, parseErr := parseSchFrameSurvey(surveyValue); parseErr == nil {
+				visualFrames = schModuleFrames(survey)
+			}
+		}
+		visible := visibleTextFindingsWithFrames(cfg, window, sheetBBoxOf(comps), comps, visualWires, visualFrames, overlapEps, stderr)
+		if surveyOK && !findingsContainType(visible, "visible-text-unverified") {
+			// The complete visible-text inventory supersedes the free-text-only
+			// survey for collision and frame-crossing findings. Dropping the
+			// legacy free-text duplicates keeps one defect owned by one rule.
+			geo = filterFindingTypes(geo, "text-overlap", "text-frame-crossing")
+		}
+		geo = append(geo, visible...)
 	}
 
 	// Layout-organization rule (铁律 #15): a multi-module page with no functional
@@ -658,7 +679,6 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	// in one session when it lived only in docs. Scope to the single page under
 	// check (allPages inflates the part count while text.list is active-page only).
 	if !allPages {
-		geo = append(geo, liveSchFrameCollisionFindings(cfg, window, comps, visualWires)...)
 		for _, pf := range partitionFinding(cfg, window, comps, stderr) {
 			geo = append(geo, *pf)
 		}
@@ -695,6 +715,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.LongWires++
 		case "visible-text-overlap":
 			rep.Summary.VisibleTextOverlaps++
+		case "text-frame-crossing":
+			rep.Summary.TextFrameCrossings++
 		case "label-economy":
 			rep.Summary.LabelEconomy++
 		case "cross-kind-label-economy":
@@ -740,6 +762,29 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	// the connector and --strict exit decision. Recompute even without new
 	// geometry findings so an older connector's INFO-only verdict is consistent.
 	rep.Passed = blockingCheckFindings(*rep, true) == 0
+}
+
+func findingsContainType(findings []checkFinding, typ string) bool {
+	for _, f := range findings {
+		if f.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func filterFindingTypes(findings []checkFinding, excluded ...string) []checkFinding {
+	drop := make(map[string]bool, len(excluded))
+	for _, typ := range excluded {
+		drop[typ] = true
+	}
+	out := findings[:0]
+	for _, f := range findings {
+		if !drop[f.Type] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // ── redundant-net-marker(同树冗余标志)────────────────────────────────────
@@ -893,7 +938,10 @@ func partitionFinding(cfg *appConfig, window string, comps []layoutComp, stderr 
 	res, err := requestAction(cfg, "schematic.text.list", window, map[string]any{})
 	if err != nil {
 		fmt.Fprintf(stderr, "sch check: partition-check skipped — text.list failed: %v\n", err)
-		return nil
+		return []*checkFinding{{
+			Type: "partition-geometry-unavailable", Level: "ERROR",
+			Message: "功能框/分区标题证据无法读取（schematic.text.list 失败）: " + err.Error(),
+		}}
 	}
 	ev := schPartitionPageEvidence(cfg, window, parseZoneMoveTexts(res.Result))
 	out := partitionFindingForZones(parts, ev.Frames(), ev.Labels(), schTextCount(res.Result), ev.Zones)
@@ -920,7 +968,10 @@ func titleBlockFinding(cfg *appConfig, window string, stderr io.Writer) []*check
 	res, err := requestAction(cfg, "schematic.titleblock.get", window, map[string]any{})
 	if err != nil {
 		fmt.Fprintf(stderr, "sch check: titleblock-check skipped — titleblock.get failed: %v\n", err)
-		return nil
+		return []*checkFinding{{
+			Type: "titleblock-geometry-unavailable", Level: "ERROR",
+			Message: "图签必填项与几何证据无法读取（schematic.titleblock.get 失败）: " + err.Error(),
+		}}
 	}
 	data, _ := res.Result["titleBlockData"].(map[string]any)
 	if data == nil {

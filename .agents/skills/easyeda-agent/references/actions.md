@@ -141,6 +141,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | finding | 判读 |
 |---|---|
 | `diagonal-wire` / `non-orthogonal-wire` | 斜线或非正交段。写入前几何守卫应拒绝；`sch check` 汇总层也应作为独立 finding 暴露，不能只在写回执里出现。 |
+| `wire-contact` | 异网导线的端点接触、T 接或共线重叠，均会由宿主合并为真实电气接触；`ERROR` 必须按物理线岛拆开重布。`summary.wireContacts` 单独计数，不能用 `wire-crossing` 或 bridge 结果代替。 |
 | `wire-crossing` | `ERROR` 表示交叉点有引脚/标记或网络证据不完整；`INFO` 表示无接点交叉，电气安全但仍是可读性问题，不能直接当 Pass。只有记录坐标和原因的 deliberate exception 才能 `Waived`。 |
 | `wire-over-pin-lead` | 导线与测得的引脚 lead 区间发生非端点接触：包括沿 lead 共线进入符号、横穿 lead。正常桩线只能从 pin 外向端点离开，不能压进 lead；ERROR。 |
 | `cross-chip-direct-wire` | 同一物理信号线树直接触及两个不同主动芯片（多脚 `U/Q/IC`）。芯片之间改用同名网络标签或显式模块端口；电源/地轨不套用此信号规则。`sch cross-chip-label-fix` 自动拆可证明的树，带现成 marker、混合网络或槽位不足时 blocked。WARN。 |
@@ -158,7 +159,8 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `power-cluster-candidate` | 每个本地被动件只与它距离最近的**单个消费脚**判断局部连接；被动件已经和该脚同一物理线岛时不得因同一芯片其他电源/GND 脚位于不同线岛而误报。未接上时才列出该被动、最近消费脚与各自符号；非 GND 按 250 单位 WARN，GND 按 150 单位 INFO（仍不自动落图）。跨功能区、10 器件以上通道不自动合并。独立去耦排/电源域用 `sch check --power-cluster-exempt '<NET>|<DESIGNATOR>'` 登记为 INFO 例外。 |
 | `signal-netflag-type` / `signal-netport-type` | 非电源/地网络使用 netflag 或 netport 均为 WARN。`sch signal-marker-fix` 可在唯一父线上原位替换为文字 net_label，不重走或拆除整个共享线树；标签碰撞或父线归属不明保持 blocked。确属模块边界的 netport 用 `--signal-port-exempt` 显式登记并保留 INFO 审计。 |
 | `designator-wire-overlap` | 导线进入 Designator 可见文字 bbox，ERROR/WARN 判读仍按 finding level。`sch designator-fix` 在 5 单位网格内搜索不碰器件、引脚、marker、其他文字和导线的槽位。 |
-| `visible-text-overlap` | 可见文字压器件/标识/其他文字/导线/引脚（含 body 外 lead）；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。`sch visual-text-fix` 可规划局部槽位并执行；无锚点或无可清槽位保持 blocked。Designator 的导线碰撞仍由 `designator-wire-overlap` 单独报告，避免重复。 |
+| `visible-text-overlap` | 可见文字压器件/标识/其他文字/导线/引脚（含完整 body 外 lead 区间）；wire net label 只排除自身挂载线，netflag/netport 的 Name 不排除自身桩线。`sch visual-text-fix` 可规划局部槽位并执行；无锚点或无可清槽位保持 blocked。Designator 的碰撞统一由 `designator-overlap` / `designator-wire-overlap` 负责，普通 visible-text 规则跳过它以避免重复。完整可见文字数据可用时，旧的自由文字 `text-overlap` 不再重复产生。 |
+| `text-frame-crossing` | 实测可见文字跨越粉色功能框边界。该规则覆盖器件属性、网络名和自由文字；没有可见文字 bbox、框几何或唯一归属时不能判为通过。当前没有独立自动移动闭环，处理方式是按 bbox 移入所属框或重算框/功能组。 |
 | `titleblock-overlap` | 器件、标记、导线或可见文字落入图签 keep-out；sheet 自身的图签字段豁免。 |
 | `out-of-sheet` | 包含可见属性文字；只包器件 body 不算入框或出图通过。 |
 | `zones-not-claimed` | 多器件页面未登记任何 zone 或虚拟组。INFO；功能框存在不代表已证明器件归属，`layout-score` 的 proximity 只是全页兜底。 |

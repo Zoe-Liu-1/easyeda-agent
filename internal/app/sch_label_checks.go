@@ -86,7 +86,7 @@ func netLabelOrientationFindings(items []visibleTextItem) []checkFinding {
 	}
 	if missing > 0 {
 		out = append(out, checkFinding{
-			Type: "label-orientation-unverified", Level: "info",
+			Type: "label-orientation-unverified", Level: "ERROR",
 			Message: fmt.Sprintf("%d 个网络标签没有 rotation 证据；竖排/折叠未核验（连接器需提供 rotation）", missing),
 		})
 	}

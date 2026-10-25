@@ -227,7 +227,7 @@ func gateCheckStage(cfg *appConfig, window string, allPages, strict bool, overla
 	if allPages {
 		payload["allPages"] = true
 	}
-	res, err := requestAction(cfg, "schematic.check", window, payload)
+	res, err := requestActionTimed(cfg, "schematic.check", window, payload, schemCheckRequestBudget)
 	if err != nil {
 		st.Status, st.Error = gateStatusError, err.Error()
 		st.Summary = "sch check 没能跑起来"

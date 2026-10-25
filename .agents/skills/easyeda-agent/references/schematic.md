@@ -205,6 +205,9 @@ Web 宿主导出网表后可能仍运行 `RealTimeSync`，此时官方删除 API
   marker bbox 被统一内缩而漏检。只允许 marker 自身 lead 在自身 anchor 的精确收口。
 - `sch check --json` 的逐条问题在 `result.findings`。SDK DRC 可能只返回布尔/聚合值，
   不能单凭它宣称官方 UI 所有警告已清除；未运行或缺数据的检查列为未验证。
+  可见文字动作缺失、标签 rotation 缺失、文字 bbox 缺失、分区标题或图签读取失败时，
+  `sch check` 必须产生 `*-unverified` / `*-unavailable` finding，`--strict` 不得把跳过当通过。
+  `wire-contact` 与 `wire-crossing` 分开计数；前者是端点/T 接/共线重叠形成的真实异网接触。
 - 用 `sch export-image` 导整页或指定 `--ids`；这是文档渲染，不依赖前台视口刷新。
   产物路径以响应 `artifacts[].path` 为准。BOM 和网表另用 `bom export`、`sch netlist`。
 
@@ -300,18 +303,25 @@ rotation 与 body bbox 重建 pin→body 的 lead 区间：正常外向桩线只
 不能证明外围语义归属；不得将它的零 findings 当作此项通过。
 
 `sch check` 的图纸边界规则对全部图元（器件、标识、导线）判 `out-of-sheet`（超出图纸可用区，ERROR），并把导线穿入图签区也计入 `titleblock-overlap`；与 `sch clusters`、`layout-lint` 共用同一图纸边框、可用区与图签 keep-out。
-`sch check` 同时读取现场分区矩形和自由文字的真实 bbox：旧框重合报
-`partition-overlap`；自由文字压器件/标记/其他自由文字报 `text-overlap`，
-文字跨分区边界报 `text-frame-crossing`；它们作为 `sch check` finding 返回具体对象。
+`sch check` 同时读取现场分区矩形和全部可见文字的真实 bbox：旧框重合报
+`partition-overlap`；自由文字及可见属性的碰撞报 `visible-text-overlap`，
+任一可见文字跨越分区边界报 `text-frame-crossing`；它们作为 `sch check` finding
+返回具体对象。完整 visible-text 数据可用时，不再重复产生仅检查自由文字的旧
+`text-overlap` / `text-frame-crossing` 结果。
+若分区标题或图签读取失败，必须分别返回 `partition-geometry-unavailable` /
+`titleblock-geometry-unavailable`，禁止静默跳过交付检查。
 完全在框外且归属未知的文字不猜测归属。非空文字缺 bbox 或几何读取失败不能当作零碰撞。
-分区包围的器件范围是本体和位号（如 Q1、Q2）；型号、参数、描述等非位号属性文字
-不参与页面碰撞计算，不要求入框，重叠/越框均不报警，也不据此扩框或判验收失败。
+现场分区和碰撞规则覆盖全部可见属性，包括 Value/阻值、型号、参数和描述；不得因为
+它们不是位号就跳过实测验收。离线布局的 `textBboxes` 仍只负责位号占位；完整可见属性
+由最终 `schematic.visible_text.bboxes` 回读补测。
 位号通过逐器件 `sch_PrimitiveAttribute.getAll(parentId)` 读取，仅选 `Designator`，
 再取真实 bbox。整页 `getAll()` 在 3.2.186 会返回空数组，不能据此判定无位号。
 位号不可读、隐藏、身份不符、bbox 缺失均属未验证；不能用默认文字宽度代替。
-位号与本体/标记/自由文字/其他位号/导线的遮挡及所属框越界进入 `sch check`。
+位号与本体/标记/自由文字/其他位号/导线的遮挡及所属框越界进入 `sch check`；
+普通 `visible-text-overlap` 跳过 Designator，避免同一位号碰撞被重复报告。
 `schematic.visible_text.bboxes` 同时采集自由文字和全部可见属性；自由说明文字与导线、
-器件、引脚、标记及其他文字的碰撞都由 `visible-text-overlap` 报告。离线 `lint.py`
+器件、引脚、标记及其他文字的碰撞都由 `visible-text-overlap` 报告，文字压引脚时覆盖
+完整实测 pin lead 区间而不只检查引脚坐标点。离线 `lint.py`
 同样检查标签可见性/横排、同岛重复、跨类型重复、标签距离、文字碰撞、图签/出图边界、
 保守偏轴机会和障碍感知多折直连。标记 body 的精确 bbox 若源数据未提供，仍须以现场
 `sch check` 为准；缺失数据不能伪装成离线通过。

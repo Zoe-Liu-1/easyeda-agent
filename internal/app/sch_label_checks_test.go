@@ -24,7 +24,7 @@ func TestNetLabelOrientationFindings(t *testing.T) {
 	if got[1].Type != "label-orientation" || got[1].PrimitiveId != "gnd" {
 		t.Fatalf("power/ground name must be checked too: %+v", got[1])
 	}
-	if got[2].Type != "label-orientation-unverified" || got[2].Level != "info" {
+	if got[2].Type != "label-orientation-unverified" || got[2].Level != "ERROR" {
 		t.Fatalf("wrong unverified finding: %+v", got[2])
 	}
 }

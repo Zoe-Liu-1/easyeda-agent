@@ -249,6 +249,7 @@ test('check preserves foreign T contact error; unreadable anchors fail instead o
 	installScene(t,{tee:true});
 	const out:any=await runAction('schematic.check',{});
 	assert.ok(out.result.findings.some((f:any)=>f.type==='wire-contact'&&f.level==='error'));
+	assert.equal(out.result.summary.wireContacts,1);
 });
 
 for (const sameNet of [false,true]) test(`bridge keeps X as two real islands, sameNet=${sameNet}`,async t=>{

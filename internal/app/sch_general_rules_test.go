@@ -127,11 +127,11 @@ func TestVisibleTextTitleblockAndPin(t *testing.T) {
 	comps := []layoutComp{{
 		ID: "p1", ComponentType: "part", Designator: "U1",
 		BBox: &layoutBBox{MinX: 0, MinY: 0, MaxX: 10, MaxY: 10},
-		Pins: []layoutPin{{Number: "1", X: 20, Y: 5}},
+		Pins: []layoutPin{{Number: "1", X: 20, Y: 5, Rotation: 0, RotationKnown: true}},
 	}}
 	pinText := []visibleTextItem{{
 		ID: "pinText", Kind: "text", ParentID: "other",
-		BBox: &layoutBBox{MinX: 15, MinY: 0, MaxX: 25, MaxY: 10},
+		BBox: &layoutBBox{MinX: 12, MinY: 3, MaxX: 16, MaxY: 7},
 	}}
 	got := visibleTextOverlapFindings(pinText, comps, nil, 1)
 	found := false
