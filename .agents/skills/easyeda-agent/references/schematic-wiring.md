@@ -70,6 +70,14 @@ INFO 审计，不再静默放过。跨芯片线树由 `cross-chip-direct-wire` �
 网名；否则 `--net` 会把网名画在导线上，与 netflag 名称重复并增加压字。信号网的
 `net_label` 仍按上面的 `sch connect --kind net_label` 创建。
 
+**远置本地被动件先重定位，再直连。** `sch power-cluster-relocate-plan` 对已登记功能组内
+用独立电源符号表示的 2 脚被动件，按同网消费脚搜索目标附近的 5 raw 网格落点，并要求
+器件、两条桩线、flag 和可见文字整体平移后无碰撞、出纸或图签侵入。计划输出目标候选、
+完整移动成员、`dx/dy` 与移动后的直连路径。若目标有歧义，用
+`--pair PASSIVE:CONSUMER[.PIN]` 明确归属。移动会重建 wire/flag primitive ID，执行顺序必须是
+“平移 → fresh readback → 重新运行 `power-cluster-plan` → 建线并删除新被动侧符号”；
+不能直接复用移动前的删除 ID。
+
 **电源/地/端口符号的 Name 文字按命名标签检查。** 名称必须可见、水平、不压导线/引脚/
 器件/其他文字，同一线岛同名只保留一个。netflag/netport 的 Name 不享受“自身桩线豁免”，
 即使压在自己的短桩上也报错；符号 body 的上/下朝向仍由 `power-ground-orientation`

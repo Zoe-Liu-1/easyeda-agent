@@ -143,6 +143,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchDirectConnectApplyCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchDirectConnectFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchPowerClusterPlanCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchPowerClusterRelocatePlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchAlignmentPlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchAlignmentApplyCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchAlignmentFixCmd(cfg, &window, stdout, stderr))

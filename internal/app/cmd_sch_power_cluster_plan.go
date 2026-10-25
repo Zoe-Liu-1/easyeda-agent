@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
 )
 
 type powerClusterPlanReport struct {
@@ -674,6 +675,23 @@ func powerRouteBlockers(path [][2]float64, passive, consumer layoutComp, cluster
 				if pointOnSegment2(pin.X, pin.Y, path[i], path[i+1]) {
 					add(dcBlocker{Kind: "pin", ID: c.ID + ":" + pin.Number,
 						Label: "pin:" + c.Designator + "." + pin.Number})
+				}
+				if c.BBox != nil && pin.RotationKnown {
+					leadStart, leadEnd, ok := schguard.PinLeadInterval(
+						schguard.Point{X: pin.X, Y: pin.Y}, pin.Rotation,
+						schguard.BBox{
+							MinX: c.BBox.MinX, MinY: c.BBox.MinY,
+							MaxX: c.BBox.MaxX, MaxY: c.BBox.MaxY,
+						},
+					)
+					if ok && schguard.SegmentTouchesPinLead(
+						schguard.Point{X: path[i][0], Y: path[i][1]},
+						schguard.Point{X: path[i+1][0], Y: path[i+1][1]},
+						leadStart, leadEnd, schguard.Point{X: pin.X, Y: pin.Y},
+					) {
+						add(dcBlocker{Kind: "pin-lead", ID: c.ID + ":" + pin.Number,
+							Label: "pin-lead:" + c.Designator + "." + pin.Number})
+					}
 				}
 			}
 		}

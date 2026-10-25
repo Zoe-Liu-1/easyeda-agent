@@ -336,6 +336,11 @@ rotation 与 body bbox 重建 pin→body 的 lead 区间：正常外向桩线只
 正交短线、保留/删除标志和“先接、回读、再删”的顺序；`partial` 只对已 clear 的被动件
 生成接线和删除步骤，被挡 passive 保留符号；`blocked` 不生成删除步骤并列出阻挡对象。
 planner 不调用 modify/wire/connect/prim-delete/save，应用前仍需确认 zones/消费归属。
+对于一个独立线岛上只有自身电源名称、且距同组消费脚较远的被动件，先运行
+`sch power-cluster-relocate-plan`：它给出完整刚体平移成员、安全落点、移动后直连路径和
+目标候选；多目标歧义必须用 `--pair` 选定。执行顺序固定为“平移 → fresh readback →
+重新运行 `power-cluster-plan` → 接线/删除新 flag”。移动会重建 wire/flag ID，移动前的
+删除 ID 不能跨阶段使用。
 `--playbook <file>` 生成带 `requireFullExecution:true` 的 Apply 队列：源引脚核验 →
 wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → 复验 → save；
 任何接线或图检失败都不会进入删除步骤。

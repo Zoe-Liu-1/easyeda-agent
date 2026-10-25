@@ -26,6 +26,7 @@
 | 执行带独立阻塞组的直线化计划 | `sch alignment-fix --doc <page> --plan <id> [--apply] [--save]`；预检要求所有已知独立阻塞组为 `ready`，任何 `review-required`/`blocked` 都在首次写入前停止。逐个阻塞组走安全 move 内核，每次移动后 fresh 重读并重新识别同一主组；主组最终为 `ready` 时直接执行，为无障碍 `rewire-required` 时复用计划边界重连。全程保持完整 pin→net 与 bridge 基线，已执行阻塞组在后续失败时逆序回滚 |
 | 执行直线化计划 | `sch alignment-apply --doc <page> (--net <net> \| --plan <id>) [--apply] [--save] [--out file]`；默认 dry-run。只接受无 blockers 的 `rewire-required`；在现有 `schMoveKernel` 内显式允许计划中的共享树被替换，移动后按边界草案重建正交导线，并做全页逐脚网表与 bridge 对账。失败时走内核恢复段，不把部分写入报成成功 |
 | 电源局部簇规划 | `sch power-cluster-plan --doc <page> [--json\|--out] [--playbook <file>] [--exempt '<NET>\|<DESIGNATOR>'] [--include-gnd]`；只读。输出消费脚、每个被动件的短线路径、保留/删除符号和“先接后删验证”顺序；ready 全可接，partial 只接 clear 的被动件并删其符号，blocked 不给删除建议并列出阻挡对象。GND 默认不规划；`--include-gnd` 才纳入。路径遇到 90° 交叉即判 blocked，交叉优先于少符号。`--playbook` 先接线，再核对目标完整 pin→net 与 bridge（不要求既往整页 geometry finding 归零），最后删被动侧符号、复验和保存 |
+| 远置电源外围重定位 | `sch power-cluster-relocate-plan --doc <page> [--part C1,C2] [--pair C1:U1.1,...] [--search-radius 200] [--json\|--out]`；只读。以已登记功能组成员、同网 active/connector 消费脚和现有 flag 线岛为输入，搜索目标脚周围 5 raw 网格上的无碰撞刚体平移，并计算移动后的直连 path、完整移动成员 ID 与 `dx/dy`。移动会重建 wire/flag ID，所以执行顺序必须是“平移 → save/fresh readback → 重新运行 `power-cluster-plan` → 接线和清理”；不得拿移动前的 flag ID 作为移动后的删除清单 |
 | 执行计划 | `sch apply <playbook.json>` |
 
 生成器的输入、支持范围与位号/身份规则集中在 [schematic-data.md](schematic-data.md)。

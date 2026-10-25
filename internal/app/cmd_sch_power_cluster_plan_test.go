@@ -155,3 +155,26 @@ func TestPowerRouteBlocksCrossingOnOwnPowerRoot(t *testing.T) {
 		t.Fatalf("crossing on own power root was accepted: %+v", blockers)
 	}
 }
+
+func TestPowerRouteBlocksFullPinLeadNotOnlyPinPoint(t *testing.T) {
+	comps := []layoutComp{{
+		ID: "r1", Designator: "R1", ComponentType: "part",
+		BBox: &layoutBBox{MinX: 95, MinY: 95, MaxX: 105, MaxY: 105},
+		Pins: []layoutPin{{
+			Number: "2", X: 100, Y: 90, Net: "SCL", Rotation: 270, RotationKnown: true,
+		}},
+	}}
+	blockers := powerRouteBlockers(
+		[][2]float64{{90, 93}, {110, 93}}, layoutComp{}, layoutComp{},
+		nil, nil, nil, nil, comps, nil,
+	)
+	found := false
+	for _, blocker := range blockers {
+		if blocker.Kind == "pin-lead" && blocker.ID == "r1:2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("route crossing the body-to-pin lead must be blocked, got %+v", blockers)
+	}
+}
