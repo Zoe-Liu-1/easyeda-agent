@@ -383,6 +383,15 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `layout-score` 任一维未测时 verdict 为 `incomplete`；显式 `--min-score`
 遇到缺测也失败，即使已测部分综合 100。frame-fit 只有部分文字归因时仍算未完成。
 
+`pin-outside-frame` 与 `wire-outside-frame` 把功能框容纳规则扩展到连接几何。前者逐脚
+检查器件所属框内的实测 pin 端点，后者先把端点/T 接的 wire primitives 组成物理线树；
+只有当树触及的全部器件引脚都归属同一个功能框时，才要求所有 flat segments 留在框内。
+真正触及多个功能框的树是跨框连接，不套用这条规则。`sch frame-route-fix` 默认只读：
+引脚越框时在 5 raw 网格搜索单件安全落点，并从各引脚外向 lead 起搜索框内正交重布；
+纯线树越框时删除整树后重建，多端同网树用同一 hub 形成星形分支。执行走 move kernel，
+前后比较完整 pin→net 与 bridge；复杂边界、无唯一归属、无可通行路径或框内碰撞时 blocked。
+`long-wire` 不能代替此门禁：长线只说明可疑，越框线即使单段较短也必须报警。
+
 `direct-connect-plan` 的文字、单桩 marker、单件及 2–4 件刚体移动提案可由
 `direct-connect-fix --allow-move` 执行。执行器只处理选中的一对；移动后重新读取页面，
 要求同一 net 的唯一 `already-clear` 路径后才能建线并删除标签。移动前后完整 pin→net

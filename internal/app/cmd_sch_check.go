@@ -35,6 +35,8 @@ import (
 //	zero-length-wire    WARN  degenerate zero-length segment
 //	dangling-wire       WARN  wire end anchored to nothing (incl. orphan stubs)
 //	long-wire           INFO  a physical wire segment exceeds 100 raw units
+//	pin-outside-frame   WARN  a part pin lies outside its owning functional frame
+//	wire-outside-frame  WARN  a same-frame wire tree leaves that functional frame
 //	polarity-convention-outlier WARN cap whose rail-side pin contradicts the
 //	                          same-page majority (#183 phase 1; MLCC numbering is
 //	                          arbitrary, so a consistency hint, not an assertion)
@@ -141,6 +143,10 @@ type checkSummary struct {
 	VisibleTextOverlaps int `json:"visibleTextOverlaps"`
 	// Measured visible text crossing a live module-frame boundary.
 	TextFrameCrossings int `json:"textFrameCrossings"`
+	// Connection primitives owned by one functional frame must stay inside it.
+	// Multi-frame wire trees are real inter-module connections and are exempt.
+	PinOutOfFrames  int `json:"pinOutOfFrames"`
+	WireOutOfFrames int `json:"wireOutOfFrames"`
 	// Visible wire-name label economy/orientation (Go-side, net-label data).
 	LabelVisibility            int `json:"labelVisibility"`
 	LabelEconomy               int `json:"labelEconomy"`
@@ -380,8 +386,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-contact(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d long-wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d text-frame-crossing(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireContacts, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.LongWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.TextFrameCrossings, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-contact(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d long-wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d text-frame-crossing(s), %d pin-outside-frame(s), %d wire-outside-frame(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireContacts, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.LongWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.TextFrameCrossings, s.PinOutOfFrames, s.WireOutOfFrames, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -538,6 +544,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.TextFrameCrossings > 0 {
 		fmt.Fprintln(w, "→ text-frame-crossing: 可见文字跨越功能框边界 — 把文字移入所属框，或按完整可见包络调整框")
+	}
+	if s.PinOutOfFrames > 0 || s.WireOutOfFrames > 0 {
+		fmt.Fprintln(w, "→ frame routing: 同一功能框内的引脚/线树越框 — 运行 `sch frame-route-fix` 生成框内正交重布方案；真实跨框网络不套用此规则")
 	}
 	if s.MarkerWireOverlaps > 0 {
 		fmt.Fprintln(w, "→ marker-wire-overlap: 电源/地旗或端口本体压在导线上 — 挪开标识或改走线")

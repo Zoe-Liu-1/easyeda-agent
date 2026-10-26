@@ -53,6 +53,7 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `direct-connect-opportunity` | 直接执行或显式移动执行 | `already-clear` 用 `sch direct-connect-apply`；文字、单桩 marker、part/group 候选用 `sch direct-connect-fix --allow-move`，移动后必须重新规划成唯一 clear 路径再建线删标签 |
 | `cross-chip-direct-wire` | 直接执行或显式阻断 | `sch cross-chip-label-fix` 按物理线树把全部相关芯片引脚改成向外短线 + 同名 `net_label`；有现成 marker、混合网名、未解析引脚或没有安全标签槽时 blocked |
 | `alignment-opportunity` | 显式计划 | `alignment-plan` 完整后执行：无阻塞的 ready/边界方案可走 `alignment-fix` 或 `alignment-apply`；存在独立阻塞组时仅当全部为 `ready` 才由 `alignment-fix` 先移阻塞、逐步重算再移主组 |
+| `pin-outside-frame` / `wire-outside-frame` | 直接执行或显式阻断 | `sch frame-route-fix` 从 live pins/wires/frames 生成框内正交重布。引脚越框时先搜索单件 5 raw 网格落点，再重接共享网；纯线树越框时删除整树并从各引脚外向 lead 重建。真实跨框树、框归属不唯一、无可通行框内路径、复杂多件边界或网表/bridge 回归时保持 blocked |
 | `power-cluster-candidate` | 显式计划 | 每个被动件按最近单个消费脚判断；已同岛即局部完成，不要求同芯片其他电源/GND 脚并入同树。先由 `power-cluster-plan` 生成接线与“先接后删”顺序；路径必须无器件/文字/异网线和 90° 交叉，不能直接删符号。playbook 以目标网表和 bridge 增量验收，不被无关的既有整页 finding 阻断 |
 | 远置电源被动件 | 显式计划 | 先用 `power-cluster-relocate-plan` 选定同组、同网消费脚并搜索无碰撞刚体平移；目标不唯一时必须用 `--pair`。执行“平移 → fresh readback → 重新运行 `power-cluster-plan` → 接线/删除新 flag”。移动前 flag ID 在移动后失效，不能直接跨阶段删除 |
 | `floating-pin` | 语义选择 | 设计上使用则接线；明确不用才 `sch no-connect`；未知不等于 NC |

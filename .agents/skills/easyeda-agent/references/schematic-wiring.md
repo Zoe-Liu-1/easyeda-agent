@@ -61,6 +61,13 @@ INFO 审计，不再静默放过。跨芯片线树由 `cross-chip-direct-wire` �
 `direct-connect-plan` 和 `alignment-plan` 都跳过它，必须先把长线拆成标签连接，不能通过
 移动芯片继续优化这根线。
 
+**同框引脚和整棵局部线树必须留在功能框内。** `pin-outside-frame` 检查实测引脚端点，
+`wire-outside-frame` 检查线树全部 flat segments；器件 body 在框内不能替代这两项。
+只有线树触及的器件引脚全部属于同一个功能框时才套用；真正触及两个不同功能框的网络是
+跨框连接，不按此规则误报。`sch frame-route-fix` 先在框内搜索单件安全落点，再从每个引脚
+外向 lead 起做 5 raw 网格的障碍感知正交重布。多端同网树可生成同 hub 的星形分支；复杂
+未证明边界、没有唯一框归属或框内无可行路径保持 blocked。
+
 **导线只能停在引脚外向端点，不能覆盖 pin lead。** 从 pin 坐标出发的合法桩线只允许在
 该端点与 lead 接触后向外延伸；沿 lead 进入符号、横穿 lead、或从符号内部穿过该引脚均为
 `wire-over-pin-lead` ERROR。正常的外向短桩不会触发，规则按实测 pin rotation 与 body bbox

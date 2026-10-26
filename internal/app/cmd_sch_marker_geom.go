@@ -662,6 +662,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			geo = append(geo, schVisualSurveyFindings(surveyValue, comps, visualWires)...)
 			if survey, parseErr := parseSchFrameSurvey(surveyValue); parseErr == nil {
 				visualFrames = schModuleFrames(survey)
+				geo = append(geo, frameRouteFindings(comps, visualWires, visualFrames, overlapEps)...)
 			}
 		}
 		visible := visibleTextFindingsWithFrames(cfg, window, sheetBBoxOf(comps), comps, visualWires, visualFrames, overlapEps, stderr)
@@ -717,6 +718,10 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.VisibleTextOverlaps++
 		case "text-frame-crossing":
 			rep.Summary.TextFrameCrossings++
+		case "pin-outside-frame":
+			rep.Summary.PinOutOfFrames++
+		case "wire-outside-frame":
+			rep.Summary.WireOutOfFrames++
 		case "label-economy":
 			rep.Summary.LabelEconomy++
 		case "cross-kind-label-economy":
