@@ -583,8 +583,12 @@ func planFrameRouteWireTree(frame *schFrameSpec, comps []layoutComp, wires []sch
 	}
 	var allSegments [][4]float64
 	var blockers []string
-	for i := 1; i < len(anchors); i++ {
-		segments, why := frameRoutePathSegments(frame.Rect, anchors[0].Pin, anchors[i].Pin,
+	hub := frameRouteHubIndex(anchors)
+	for i := range anchors {
+		if i == hub {
+			continue
+		}
+		segments, why := frameRoutePathSegments(frame.Rect, anchors[hub].Pin, anchors[i].Pin,
 			comps, wires, items, excluded, map[string]bool{}, nil)
 		if len(why) != 0 {
 			blockers = append(blockers, why...)
@@ -602,11 +606,21 @@ func planFrameRouteWireTree(frame *schFrameSpec, comps []layoutComp, wires []sch
 	allSegments = alignmentDedupeSegments(allSegments)
 	issue.BoundaryWires = frameRouteSegmentsAsWires(issue.Net, allSegments)
 	issue.PinRefs = append(issue.PinRefs,
-		comps[anchors[0].PartIndex].Designator+"."+anchors[0].Pin.Number)
+		comps[anchors[hub].PartIndex].Designator+"."+anchors[hub].Pin.Number)
 	sort.Strings(issue.PinRefs)
 	issue.Status = "ready"
 	issue.At = &checkPoint{X: round2(anchors[0].Pin.X), Y: round2(anchors[0].Pin.Y)}
 	return issue
+}
+
+func frameRouteHubIndex(anchors []frameRoutePinAnchor) int {
+	for i, anchor := range anchors {
+		dir, ok := pinCardinalOutward(anchor.Pin)
+		if ok && (dir == "left" || dir == "right") {
+			return i
+		}
+	}
+	return 0
 }
 
 func planFrameRouteBoundaries(movedDesignator string, delta [2]float64, sharedWires []string,

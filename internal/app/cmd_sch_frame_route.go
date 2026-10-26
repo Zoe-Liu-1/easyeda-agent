@@ -42,7 +42,8 @@ touch pins owned by multiple frames are real inter-frame connections and are not
 flagged. Automatic apply is restricted to:
   - one moved two-pin passive whose outside pin is brought back into the frame,
     followed by an obstacle-aware orthogonal boundary reroute; or
-  - one two-pin same-net wire tree whose endpoints are already inside the frame.
+  - one same-net local wire tree (two or more pin anchors) whose pins are already
+    inside the frame.
 
 Every path is checked on the 5-raw grid inside the frame, respects outward pin
 direction, and avoids parts, pins, text, title block and foreign wires. Apply uses
@@ -251,9 +252,16 @@ func executeFrameRouteMove(pinned *appConfig, win, doc string, issue frameRouteI
 	for _, ref := range issue.PinRefs {
 		boundary.PinRefs = append(boundary.PinRefs, strings.Replace(ref, ".", ":", 1))
 	}
+	seenBoundaryNets := map[string]bool{}
 	for _, wire := range issue.BoundaryWires {
+		net := wire.Net
+		if seenBoundaryNets[net] {
+			net = ""
+		} else {
+			seenBoundaryNets[wire.Net] = true
+		}
 		boundary.Wires = append(boundary.Wires, moveKernelBoundaryWire{
-			Net: wire.Net, Points: append([]float64(nil), wire.Points...),
+			Net: net, Points: append([]float64(nil), wire.Points...),
 		})
 	}
 	items := []moveItem{{
