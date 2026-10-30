@@ -88,6 +88,38 @@ func TestBuildAlignmentPlanReadyWithoutSharedBoundary(t *testing.T) {
 	}
 }
 
+func TestGroupMoveClearIgnoresUnrenderedEmptyAttribute(t *testing.T) {
+	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 100}
+	comps := []layoutComp{{
+		ID: "c1", Designator: "C1", ComponentType: schLayoutPartType,
+		BBox: &layoutBBox{MinX: 10, MinY: 10, MaxX: 20, MaxY: 20},
+	}}
+	items := []visibleTextItem{{
+		ID: "empty", Kind: "attribute", ComponentType: "part", ParentID: "c1",
+		Key: "Name", Value: "", BBox: &layoutBBox{},
+	}}
+	if !groupMoveClear([2]float64{5, 5}, map[string]bool{"c1": true}, nil,
+		[]string{"empty"}, items, comps, nil, sheet, nil) {
+		t.Fatal("a zero-bbox empty attribute must not block an otherwise clear rigid move")
+	}
+}
+
+func TestBuildAlignmentPlanPreservesAnchoredDesignators(t *testing.T) {
+	sheet := &layoutBBox{MinX: 0, MinY: 0, MaxX: 200, MaxY: 100}
+	comps := []layoutComp{{
+		ID: "c1", Designator: "C1", ComponentType: schLayoutPartType,
+		BBox: &layoutBBox{MinX: 50, MinY: 30, MaxX: 70, MaxY: 40},
+	}}
+	report := buildAlignmentPlanReport("doc", "", []alignmentCandidate{{
+		Axis: "x", Net: "SIG", Shift: 25,
+		MoveDesignators: []string{"C1"}, MoveWireIDs: []string{"w1"},
+		AnchoredDesignators: []string{"J1"},
+	}}, comps, nil, nil, sheet, nil)
+	if len(report.Plans) != 1 || stringsJoin(report.Plans[0].AnchorDesignators) != "J1" {
+		t.Fatalf("anchored boundary designators must survive into the plan: %+v", report.Plans)
+	}
+}
+
 func TestBuildAlignmentPlanAddsBoundaryRewireDraft(t *testing.T) {
 	comps := []layoutComp{
 		{
@@ -240,7 +272,8 @@ func TestAlignmentApplyEnvelopeRequiresProposedBoundary(t *testing.T) {
 	}}
 	valid := alignmentPlanItem{
 		ID: "alignment-001", Net: "DC55", Status: "rewire-required", ShiftY: -30,
-		MoveDesignators: []string{"C10"}, SharedWireIds: []string{"shared"},
+		MoveDesignators: []string{"C10"}, AnchorDesignators: []string{"J1"},
+		SharedWireIds: []string{"shared"},
 		BoundaryPlans: []alignmentBoundaryPlan{{
 			Net: "DC55", Status: "proposed",
 			FixedPins: []string{"U5.1", "U5.2"}, MovedPins: []string{"C10.1"},
@@ -252,6 +285,7 @@ func TestAlignmentApplyEnvelopeRequiresProposedBoundary(t *testing.T) {
 		t.Fatalf("valid apply envelope rejected: %v", err)
 	}
 	if len(report.Move) != 1 || report.Move[0].ToY != 665 ||
+		strings.Join(report.AnchorDesignators, ",") != "J1" ||
 		strings.Join(report.Boundary.PinRefs, ",") != "C10:1,U5:1,U5:2" ||
 		len(report.Boundary.Wires) != 1 {
 		t.Fatalf("wrong apply envelope: %+v", report)
@@ -303,6 +337,17 @@ func TestAlignmentBoundaryRoutesRespectPinOutwardDirections(t *testing.T) {
 	}
 }
 
+func TestAlignmentBusDoesNotAddBacktrackingStubForPinOnTrunk(t *testing.T) {
+	anchors := []alignmentBoundaryPin{
+		{Key: "U5.8", X: 470, Y: 670, Rotation: 270, RotationKnown: true},
+		{Key: "R4.2", X: 900, Y: 670, Rotation: 90, RotationKnown: true},
+	}
+	segs := alignmentBusWires(anchors, true, 670)
+	if len(segs) != 1 || segs[0] != [4]float64{470, 670, 900, 670} {
+		t.Fatalf("pins already on the trunk must be joined by one straight segment, got %v", segs)
+	}
+}
+
 func TestBuildAlignmentPlanBlocksBoundaryWireCrossing(t *testing.T) {
 	sheet := &layoutBBox{MinX: -50, MinY: -50, MaxX: 200, MaxY: 100}
 	comps := []layoutComp{
@@ -349,6 +394,18 @@ func TestBuildAlignmentPlanBlocksBoundaryWireCrossing(t *testing.T) {
 		report.Plans[0].IndependentBlockerPlans[0].InitialDesignators[0] != "C3" ||
 		report.Plans[0].IndependentBlockerPlans[0].Status != "ready" {
 		t.Fatalf("foreign wire owner should become an independent blocker plan: %+v", report.Plans[0])
+	}
+}
+
+func TestAlignmentBoundaryBlockersRejectRouteOutsideOwningFrame(t *testing.T) {
+	frame := schFrameSpec{ID: "channel", Rect: layoutBBox{MinX: 0, MinY: 0, MaxX: 100, MaxY: 100}}
+	blockers, _ := alignmentBoundaryBlockers(
+		[][4]float64{{10, 10, 10, -10}}, "SIG",
+		alignmentCandidate{Axis: "y", Shift: -20, Net: "SIG"},
+		nil, nil, nil, nil, nil, nil, &frame,
+	)
+	if !stringsContains(strings.Join(blockers, ","), "frame:channel") {
+		t.Fatalf("boundary route outside its frame must be blocked: %v", blockers)
 	}
 }
 
@@ -411,7 +468,7 @@ func TestBuildAlignmentPlanBoundaryDraftAvoidsVisibleText(t *testing.T) {
 		MoveWireIDs: []string{}, OriginalBBox: layoutBBox{MinX: 50, MinY: 40, MaxX: 100, MaxY: 55},
 		MovedBBox: layoutBBox{MinX: 50, MinY: 0, MaxX: 100, MaxY: 15},
 	}
-	plans, _ := alignmentBoundaryPlans(candidate, comps, []visibleTextItem{text}, wires, sheet, nil)
+	plans, _ := alignmentBoundaryPlans(candidate, comps, []visibleTextItem{text}, wires, sheet, nil, nil)
 	if len(plans) != 1 || plans[0].Status != "blocked" {
 		t.Fatalf("text crossing must block boundary draft: %+v", plans)
 	}

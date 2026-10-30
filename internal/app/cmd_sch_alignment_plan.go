@@ -37,6 +37,7 @@ type alignmentPlanItem struct {
 	MoveMarkerIds           []string                `json:"moveMarkerIds,omitempty"`
 	MoveLabelIds            []string                `json:"moveLabelIds,omitempty"`
 	SharedWireIds           []string                `json:"sharedWireIds,omitempty"`
+	AnchorDesignators       []string                `json:"anchorDesignators,omitempty"`
 	SharedLabelIds          []string                `json:"sharedLabelIds,omitempty"`
 	Blockers                []string                `json:"blockers,omitempty"`
 	IndependentBlockers     []string                `json:"independentBlockers,omitempty"`
@@ -107,8 +108,10 @@ func newSchAlignmentPlanCmd(cfg *appConfig, window *string, stdout, stderr io.Wr
 		Short: "Plan rigid group moves that remove unnecessary H-V-H/V-H-V jogs (read-only)",
 		Long: `Read the active page and emit read-only plans derived from sch-check alignment-opportunity findings.
 Each plan contains the complete movable functional group, a translation vector, owned wires,
-markers, labels, shared boundary wires, blockers, independent prerequisite blocker plans, and
-orthogonal boundary-reconnect drafts. A plan with shared boundary wires stays rewire-required;
+markers, labels, fixed boundary anchors, shared boundary wires, blockers, independent
+prerequisite blocker plans, and orthogonal boundary-reconnect drafts. If the complete rigid
+group would leave its functional frame or collide, the planner fixes boundary parts and
+reconnects every crossing net. A plan with shared boundary wires stays rewire-required;
 the draft is recomputed from fresh geometry and is never executable in this command.
 The command never calls modify, group.move, wire, connect, delete or save.`,
 		Args: cobra.NoArgs,
@@ -146,10 +149,19 @@ The command never calls modify, group.move, wire, connect, delete or save.`,
 			if err := json.Unmarshal(raw, &items); err != nil {
 				return fmt.Errorf("alignment-plan: parse visible text: %w", err)
 			}
+			surveyValue, err := fetchSchVisualSurvey(pinned, win, comps)
+			if err != nil {
+				return fmt.Errorf("alignment-plan: functional-frame geometry unavailable: %w", err)
+			}
+			survey, err := parseSchFrameSurvey(surveyValue)
+			if err != nil {
+				return fmt.Errorf("alignment-plan: parse functional frames: %w", err)
+			}
+			frames := schModuleFrames(survey)
 			sheet := sheetBBoxOf(comps)
 			titleBlock, _ := titleBlockKeepoutWithSource(sheet)
-			candidates := alignmentOpportunityCandidates(items.Items, comps, wires, sheet, titleBlock)
-			report := buildAlignmentPlanReport(doc, netFilter, candidates, comps, items.Items, wires, sheet, titleBlock)
+			candidates := alignmentOpportunityCandidatesWithFrames(items.Items, comps, wires, sheet, titleBlock, frames)
+			report := buildAlignmentPlanReportWithFrames(doc, netFilter, candidates, comps, items.Items, wires, sheet, titleBlock, frames)
 			if out != "" {
 				b, err := json.MarshalIndent(report, "", "  ")
 				if err != nil {
@@ -182,6 +194,12 @@ The command never calls modify, group.move, wire, connect, delete or save.`,
 
 func buildAlignmentPlanReport(doc, netFilter string, candidates []alignmentCandidate, comps []layoutComp,
 	items []visibleTextItem, wires []schGroupWire, sheet, titleBlock *layoutBBox) alignmentPlanReport {
+	return buildAlignmentPlanReportWithFrames(doc, netFilter, candidates, comps, items, wires, sheet, titleBlock, nil)
+}
+
+func buildAlignmentPlanReportWithFrames(doc, netFilter string, candidates []alignmentCandidate, comps []layoutComp,
+	items []visibleTextItem, wires []schGroupWire, sheet, titleBlock *layoutBBox,
+	frames []schFrameSpec) alignmentPlanReport {
 	report := alignmentPlanReport{SchemaVersion: 1, DocumentID: doc, Net: netFilter, Plans: []alignmentPlanItem{}}
 	partIDs := map[string]string{}
 	for _, c := range comps {
@@ -204,6 +222,7 @@ func buildAlignmentPlanReport(doc, netFilter string, candidates []alignmentCandi
 			MoveMarkerIds:       append([]string(nil), c.MoveMarkerIDs...),
 			MoveLabelIds:        append([]string(nil), c.MoveLabelIDs...),
 			SharedWireIds:       append([]string(nil), c.SharedWireIDs...),
+			AnchorDesignators:   append([]string(nil), c.AnchoredDesignators...),
 			Blockers:            append([]string(nil), c.Blockers...),
 			IndependentBlockers: append([]string(nil), c.IndependentBlockers...),
 			At:                  &c.At, BBox: &c.MovedBBox,
@@ -221,7 +240,7 @@ func buildAlignmentPlanReport(doc, netFilter string, candidates []alignmentCandi
 		}
 		sort.Strings(componentIDs)
 		item.MoveComponentIds = componentIDs
-		item.BoundaryPlans, item.SharedLabelIds = alignmentBoundaryPlans(c, comps, items, wires, sheet, titleBlock)
+		item.BoundaryPlans, item.SharedLabelIds = alignmentBoundaryPlans(c, comps, items, wires, sheet, titleBlock, frames)
 		for _, bp := range item.BoundaryPlans {
 			for _, blocker := range bp.Blockers {
 				item.Blockers = appendUniqueString(item.Blockers, "boundary:"+blocker)
@@ -233,7 +252,7 @@ func buildAlignmentPlanReport(doc, netFilter string, candidates []alignmentCandi
 		blockerCandidate := c
 		blockerCandidate.IndependentBlockers = append([]string(nil), item.IndependentBlockers...)
 		item.IndependentBlockerPlans = alignmentBuildBlockerPlans(blockerCandidate, comps, items, wires, sheet, titleBlock)
-		for _, blocker := range alignmentPrimaryMoveBlockers(c, comps, items, wires, sheet, titleBlock) {
+		for _, blocker := range alignmentPrimaryMoveBlockers(c, comps, items, wires, sheet, titleBlock, frames) {
 			item.Blockers = appendUniqueString(item.Blockers, blocker)
 		}
 		switch {
@@ -257,12 +276,10 @@ func buildAlignmentPlanReport(doc, netFilter string, candidates []alignmentCandi
 }
 
 func alignmentPrimaryMoveBlockers(c alignmentCandidate, comps []layoutComp, items []visibleTextItem,
-	wires []schGroupWire, sheet, titleBlock *layoutBBox) []string {
+	wires []schGroupWire, sheet, titleBlock *layoutBBox, frames []schFrameSpec) []string {
 	if sheet == nil {
 		return []string{"sheet-geometry-unavailable"}
 	}
-	movedComp := map[string]bool{}
-	movedParent := map[string]bool{}
 	for _, designator := range c.MoveDesignators {
 		found := false
 		for _, comp := range comps {
@@ -272,8 +289,6 @@ func alignmentPrimaryMoveBlockers(c alignmentCandidate, comps []layoutComp, item
 			if comp.ID == "" || comp.BBox == nil {
 				return []string{"group-geometry-unavailable"}
 			}
-			movedComp[comp.ID] = true
-			movedParent[comp.ID] = true
 			found = true
 			break
 		}
@@ -281,31 +296,7 @@ func alignmentPrimaryMoveBlockers(c alignmentCandidate, comps []layoutComp, item
 			return []string{"group-geometry-unavailable"}
 		}
 	}
-	movedWire := map[string]bool{}
-	for _, id := range c.MoveWireIDs {
-		movedWire[id] = true
-		movedParent[id] = true
-	}
-	for _, id := range c.MoveMarkerIDs {
-		movedComp[id] = true
-		movedParent[id] = true
-	}
-	movedText := map[string]bool{}
-	for _, id := range c.MoveLabelIDs {
-		movedText[id] = true
-	}
-	for _, it := range items {
-		if it.ID != "" && movedParent[it.ParentID] {
-			movedText[it.ID] = true
-		}
-	}
-	if !groupMoveClear(
-		[2]float64{candidateShiftX(c), candidateShiftY(c)},
-		movedComp, movedWire, visibleTextIDList(movedText), items, comps, wires, sheet, titleBlock,
-	) {
-		return []string{"group-move-geometry-collision"}
-	}
-	return nil
+	return alignmentMoveBlockers(c, items, comps, wires, sheet, titleBlock, frames)
 }
 
 func appendUniqueString(values []string, value string) []string {
@@ -596,7 +587,7 @@ type alignmentBoundaryPin struct {
 }
 
 func alignmentBoundaryPlans(c alignmentCandidate, comps []layoutComp, items []visibleTextItem,
-	wires []schGroupWire, sheet, titleBlock *layoutBBox) ([]alignmentBoundaryPlan, []string) {
+	wires []schGroupWire, sheet, titleBlock *layoutBBox, frames []schFrameSpec) ([]alignmentBoundaryPlan, []string) {
 	if len(c.SharedWireIDs) == 0 {
 		return nil, nil
 	}
@@ -688,13 +679,14 @@ func alignmentBoundaryPlans(c alignmentCandidate, comps []layoutComp, items []vi
 			continue
 		}
 		options := alignmentBoundaryWireOptions(c, net, fixed, moved)
+		routeFrame := alignmentBoundaryRouteFrame(fixed, moved, comps, frames)
 		var bestSegs [][4]float64
 		var bestBlockers []string
 		var bestIndependent []string
 		bestLen := math.Inf(1)
 		for _, segs := range options {
 			blockers, independent := alignmentBoundaryBlockers(
-				segs, net, c, comps, items, group, wires, sheet, titleBlock,
+				segs, net, c, comps, items, group, wires, sheet, titleBlock, routeFrame,
 			)
 			length := alignmentSegmentsLength(segs)
 			if bestSegs == nil || len(blockers) < len(bestBlockers) || (len(blockers) == len(bestBlockers) && length < bestLen) {
@@ -801,6 +793,17 @@ func alignmentBusWires(anchors []alignmentBoundaryPin, horizontal bool, trunk fl
 	var out [][4]float64
 	var joins []float64
 	for _, a := range anchors {
+		// If the pin already lies on the target trunk axis, the trunk can end
+		// directly at that pin. Adding an outward lead here would create a tiny
+		// U-turn stub and leave the route not visually straight.
+		if horizontal && math.Abs(a.Y-trunk) <= alignmentTolerance {
+			joins = append(joins, a.X)
+			continue
+		}
+		if !horizontal && math.Abs(a.X-trunk) <= alignmentTolerance {
+			joins = append(joins, a.Y)
+			continue
+		}
 		lead, ok := alignmentOutwardLead(a)
 		if !ok {
 			return nil
@@ -919,9 +922,38 @@ func alignmentDedupeSegments(segs [][4]float64) [][4]float64 {
 	return out
 }
 
+func alignmentBoundaryRouteFrame(fixed, moved []alignmentBoundaryPin, comps []layoutComp,
+	frames []schFrameSpec) *schFrameSpec {
+	if len(frames) == 0 || len(fixed)+len(moved) == 0 {
+		return nil
+	}
+	owners := map[string]schFrameSpec{}
+	for _, anchor := range append(append([]alignmentBoundaryPin(nil), fixed...), moved...) {
+		designator := strings.SplitN(anchor.Key, ".", 2)[0]
+		for i := range comps {
+			if comps[i].Designator != designator {
+				continue
+			}
+			frame := componentFrame(&comps[i], frames)
+			if frame != nil {
+				owners[frame.ID] = *frame
+			}
+			break
+		}
+	}
+	if len(owners) != 1 {
+		return nil
+	}
+	for _, frame := range owners {
+		copy := frame
+		return &copy
+	}
+	return nil
+}
+
 func alignmentBoundaryBlockers(segs [][4]float64, net string, c alignmentCandidate,
 	comps []layoutComp, items []visibleTextItem, group map[string]bool,
-	wires []schGroupWire, sheet, titleBlock *layoutBBox) ([]string, []string) {
+	wires []schGroupWire, sheet, titleBlock *layoutBBox, frame *schFrameSpec) ([]string, []string) {
 	blocked := map[string]bool{}
 	independent := map[string]bool{}
 	shared := map[string]bool{}
@@ -944,6 +976,9 @@ func alignmentBoundaryBlockers(segs [][4]float64, net string, c alignmentCandida
 		}
 		if titleBlock != nil && schSegmentCrossesBox(seg[0], seg[1], seg[2], seg[3], *titleBlock) {
 			blocked["title-block"] = true
+		}
+		if frame != nil && !segmentInsideFrame(seg[0], seg[1], seg[2], seg[3], frame.Rect, alignmentTolerance) {
+			blocked["frame:"+frame.ID] = true
 		}
 		for _, comp := range comps {
 			if comp.BBox == nil || (comp.ComponentType != "" && comp.ComponentType != schLayoutPartType) {
@@ -1266,6 +1301,9 @@ func renderAlignmentPlan(w io.Writer, report alignmentPlanReport) {
 	for _, p := range report.Plans {
 		fmt.Fprintf(w, "  %-12s %-5s %-20s shift=(%g,%g)  %s\n",
 			p.ID, p.Status, p.Net, p.ShiftX, p.ShiftY, stringsJoinNonEmpty(p.MoveDesignators))
+		if len(p.AnchorDesignators) > 0 {
+			fmt.Fprintf(w, "    fixed boundary anchors: %s\n", stringsJoinNonEmpty(p.AnchorDesignators))
+		}
 		if len(p.Blockers) > 0 {
 			fmt.Fprintf(w, "    blockers: %s\n", stringsJoinNonEmpty(p.Blockers))
 		}

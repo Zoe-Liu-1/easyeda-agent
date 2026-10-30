@@ -325,6 +325,13 @@ rotation 与 body bbox 重建 pin→body 的 lead 区间：正常外向桩线只
 同样检查标签可见性/横排、同岛重复、跨类型重复、标签距离、文字碰撞、图签/出图边界、
 保守偏轴机会和障碍感知多折直连。标记 body 的精确 bbox 若源数据未提供，仍须以现场
 `sch check` 为准；缺失数据不能伪装成离线通过。
+root-owned `_NETLABEL_` 属性是例外：宿主可能把它渲染出来，却不计入
+`sch_PrimitiveAttribute.getAll()` / `getAllPrimitiveId()` 和 `visible_text.bboxes`。
+连接器 1.14.19 起，`sch prim-delete --ids <explicit-id>` 会用 `get(id)` 定位点名对象，
+优先通过官方属性实例 `delete()` 删除；宿主未暴露实例方法时回退到官方通用
+`sch_PrimitiveObject.delete([id])`，并按 ID 回读；不得据此扩建为“按前缀清孤儿”的批量删除。
+发现图上仍有标签而结构化枚举没有时，先从页面原语/源快照取得精确 ID 和父对象，
+删除后必须保存、重载并重新渲染确认。
 `sch check` 的 `power-cluster-candidate` 把消费电源脚（U/J/Q 的电源脚）与 250 单位内的
 本地 R/C/L/D 归为候选：若它们分属不同线树 root 且各带同名电源符号，先物理接入消费脚，
 再合并为一个符号；已物理直连的簇不报，GND 暂作人工建议。该判据在未认领 zones 时是
@@ -358,19 +365,26 @@ wire.create → `sch check`/`bridge-check` → prim-delete 被动侧符号 → �
 `layout-score` proximity 结果当模块关系通过。
 `alignment-opportunity` INFO 先把端点/T 接的多个 wire primitive 组成物理骨架，再检查
 同网主干的 `H-V-H`/`V-H-V` 偏轴折返：按两侧器件数、最大引脚数和拓扑中心性固定锚点侧，
+比较偏移时取每只臂远离主干的外端点，不能依赖宿主 segment 数组的端点方向；
 给出另一侧外围簇的整体平移方向、位移、
 `moveDesignators`、`bendReduction`、`moveWireIds`、`moveMarkerIds`、`moveLabelIds`、
-`sharedWireIds`、`blockers` 和 `independentBlockers`。外围组沿非 GND/非电源轨/非主干局部网扩展，最多 16 件，
+`sharedWireIds`、`anchorDesignators`、`blockers` 和 `independentBlockers`。外围组沿非 GND/非电源轨/非主干局部网扩展，最多 16 件，
 遇到标准角色 `U`/`Q`/`IC` 且至少 4 脚的另一主动器件停止；专属线树可随动，
 触及固定器件的共享线必须重连，
 最终落点包络内的实体器件作为前置阻塞项；刚体移动的中间扫过区不单独制造阻塞。
+完整功能组不是无条件刚体：若刚体方案越出所属功能框、压到固定文字/器件，或自身碰撞，
+planner 必须搜索最多 4 个 `anchorDesignators` 的分解。锚定件保留原位，原本跨边界的线树
+进入 `sharedWireIds` 并重建；不得把一个连接器拖出框来“保持整组不动”。
+移动后器件 body、全部 pins、专属导线段和有面积的可见文字都须回到各自原功能框；
+零尺寸空属性不是障碍。无法通过任一候选消除时，finding/plan 必须点名具体
+`frame:<id>:...` 或组碰撞原因。
 单器件仅在非 GND 本地电源簇带可见电源标识时参与。
 与移动组不共享局部网的阻塞件进入 `independentBlockers`，可作为独立前置组处理。
 该 finding 不自动改图，也不能把“线更短”单独当移动理由。
 `sch alignment-plan --doc <page> [--net <net>] [--json|--out]` 将 finding 转成只读步骤和
 资源清单；`boundaryPlans[]` 给出共享线的正交重连草案和 `sharedLabelIds[]`，
 `independentBlockerPlans[]` 给出可前置移动的完整阻塞组及位移。边界草案须避开移动后
-器件本体、异网引脚/导线、可见文字、图签区和图纸边界；主组和独立阻塞组都复用整组碰撞
+器件本体、异网引脚/导线、可见文字、所属功能框、图签区和图纸边界；主组和独立阻塞组都复用整组碰撞
 检查，阻塞组自身带共享线时保持 blocked。阻塞落点按 5 单位栅格二维搜索，只有局部预算内
 才为 ready，超预算为 review-required。主计划 `ready` 仅在无 blockers、无 sharedWireIds 时成立；有共享边界
 即使已有 proposed 草案仍为 `rewire-required`，`rewire-required` 和 `blocked` 都不得直接

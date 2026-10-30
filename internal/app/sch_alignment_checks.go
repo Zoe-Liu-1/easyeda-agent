@@ -12,6 +12,7 @@ const (
 	alignmentTolerance    = 0.5
 	alignmentExpandRadius = 500.0
 	alignmentMaxGroup     = 16
+	alignmentMaxAnchored  = 4
 )
 
 type alignmentSegment struct {
@@ -38,23 +39,80 @@ type alignmentCandidate struct {
 	MoveMarkerIDs         []string
 	MoveLabelIDs          []string
 	SharedWireIDs         []string
-	OriginalBBox          layoutBBox
-	MovedBBox             layoutBBox
-	At                    checkPoint
-	Blockers              []string
-	IndependentBlockers   []string
+	// AnchoredDesignators are members of the discovered functional island that
+	// must stay in place. They are boundary anchors, not discarded members:
+	// every wire that used to connect them to the moving subset becomes a
+	// SharedWireIDs entry and is rebuilt by the boundary planner.
+	AnchoredDesignators []string
+	OriginalBBox        layoutBBox
+	MovedBBox           layoutBBox
+	At                  checkPoint
+	Blockers            []string
+	IndependentBlockers []string
 }
 
 func alignmentFinalizeCandidate(c alignmentCandidate, items []visibleTextItem, comps []layoutComp,
-	wires []schGroupWire, sheet, titleBlock *layoutBBox) (alignmentCandidate, bool) {
+	wires []schGroupWire, sheet, titleBlock *layoutBBox, frames []schFrameSpec) (alignmentCandidate, bool) {
 	expanded := alignmentExpandLocalGroup(comps, c.MoveDesignators, c.StationaryDesignators, c.Net, c.OriginalBBox)
 	if len(expanded) == 0 {
 		return alignmentCandidate{}, false
 	}
 	c.MoveDesignators = expanded
-	bbox, ok := alignmentGroupBBox(comps, c.AllSegments, c.MoveSegments, expanded)
+	c = alignmentFinalizeRigidSubset(c, items, comps, wires, sheet, titleBlock, frames)
+
+	// A functional island is not automatically one indivisible rigid body.
+	// Connector/header pins, test points and other boundary parts frequently make
+	// one attachment immovable while the rest of the local circuit can still be
+	// translated. When the rigid proposal is unsafe, keep those parts as anchors
+	// and let the existing shared-boundary reconnect planner rebuild every net
+	// that crosses the new boundary. This search is deterministic and bounded.
+	if len(c.Blockers) == 0 || len(c.MoveDesignators) <= 1 {
+		return c, true
+	}
+	rigid := c
+	best := c
+	for len(best.AnchoredDesignators) < alignmentMaxAnchored &&
+		alignmentBlockersAllowAnchorDecomposition(best.Blockers) {
+		var stepBest alignmentCandidate
+		haveStep := false
+		for _, designator := range best.MoveDesignators {
+			if designator == "" {
+				continue
+			}
+			trial := best
+			trial.MoveDesignators = removeAlignmentDesignator(trial.MoveDesignators, designator)
+			if len(trial.MoveDesignators) == 0 {
+				continue
+			}
+			trial.StationaryDesignators = appendUniqueString(trial.StationaryDesignators, designator)
+			trial.AnchoredDesignators = appendUniqueString(trial.AnchoredDesignators, designator)
+			trial = alignmentFinalizeRigidSubset(trial, items, comps, wires, sheet, titleBlock, frames)
+			if !haveStep || alignmentRepairCandidateBetter(trial, stepBest) {
+				stepBest, haveStep = trial, true
+			}
+		}
+		if !haveStep || len(stepBest.Blockers) >= len(best.Blockers) {
+			break
+		}
+		best = stepBest
+	}
+	if len(best.Blockers) == 0 {
+		return best, true
+	}
+	// A partial split that merely changes the blocker set is not a usable plan.
+	// Keep the original rigid candidate so the report names the actual blocker
+	// instead of presenting an arbitrary anchored subset as progress.
+	return rigid, true
+}
+
+func alignmentFinalizeRigidSubset(c alignmentCandidate, items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, sheet, titleBlock *layoutBBox, frames []schFrameSpec) alignmentCandidate {
+	c.Blockers = nil
+	c.IndependentBlockers = nil
+	bbox, ok := alignmentGroupBBox(comps, nil, nil, c.MoveDesignators)
 	if !ok {
-		return alignmentCandidate{}, false
+		c.Blockers = appendUniqueString(c.Blockers, "group-geometry-unavailable")
+		return c
 	}
 	c.OriginalBBox = bbox
 	if c.Axis == "y" {
@@ -63,12 +121,12 @@ func alignmentFinalizeCandidate(c alignmentCandidate, items []visibleTextItem, c
 		c.MovedBBox = translateLayoutBBox(bbox, [2]float64{c.Shift, 0})
 	}
 	c.MoveWireIDs, c.SharedWireIDs, c.MoveMarkerIDs, c.MoveLabelIDs =
-		alignmentOwnedResources(comps, wires, items, expanded)
-	exclude := append([]string(nil), expanded...)
+		alignmentOwnedResources(comps, wires, items, c.MoveDesignators)
+	exclude := append([]string(nil), c.MoveDesignators...)
 	exclude = append(exclude, c.StationaryDesignators...)
-	c.Blockers, c.IndependentBlockers = alignmentTargetBlockers(comps, expanded, exclude, c.MovedBBox)
-	if len(expanded) > alignmentMaxGroup {
-		c.Blockers = append(c.Blockers, fmt.Sprintf("group-too-large:%d", len(expanded)))
+	c.Blockers, c.IndependentBlockers = alignmentTargetBlockers(comps, c.MoveDesignators, exclude, c.MovedBBox)
+	if len(c.MoveDesignators) > alignmentMaxGroup {
+		c.Blockers = append(c.Blockers, fmt.Sprintf("group-too-large:%d", len(c.MoveDesignators)))
 	}
 	if titleBlock != nil && boxesOverlap2(c.MovedBBox, *titleBlock) {
 		c.Blockers = append(c.Blockers, "title-block")
@@ -76,12 +134,331 @@ func alignmentFinalizeCandidate(c alignmentCandidate, items []visibleTextItem, c
 	if sheet != nil && !boxInside2(c.MovedBBox, *sheet) {
 		c.Blockers = append(c.Blockers, "sheet-boundary")
 	}
-	return c, true
+	for _, blocker := range alignmentMoveBlockers(c, items, comps, wires, sheet, titleBlock, frames) {
+		c.Blockers = appendUniqueString(c.Blockers, blocker)
+	}
+	if len(c.SharedWireIDs) > 0 {
+		boundaryPlans, _ := alignmentBoundaryPlans(c, comps, items, wires, sheet, titleBlock, frames)
+		for _, bp := range boundaryPlans {
+			for _, blocker := range bp.Blockers {
+				c.Blockers = appendUniqueString(c.Blockers, "boundary:"+blocker)
+			}
+			for _, blocker := range bp.IndependentBlockers {
+				c.IndependentBlockers = appendUniqueString(c.IndependentBlockers, blocker)
+			}
+		}
+	}
+	sort.Strings(c.Blockers)
+	sort.Strings(c.IndependentBlockers)
+	return c
+}
+
+func removeAlignmentDesignator(values []string, drop string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != drop {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func alignmentRepairCandidateBetter(a, b alignmentCandidate) bool {
+	if len(a.Blockers) != len(b.Blockers) {
+		return len(a.Blockers) < len(b.Blockers)
+	}
+	if len(a.AnchoredDesignators) != len(b.AnchoredDesignators) {
+		return len(a.AnchoredDesignators) < len(b.AnchoredDesignators)
+	}
+	if len(a.SharedWireIDs) != len(b.SharedWireIDs) {
+		return len(a.SharedWireIDs) < len(b.SharedWireIDs)
+	}
+	if len(a.MoveDesignators) != len(b.MoveDesignators) {
+		return len(a.MoveDesignators) > len(b.MoveDesignators)
+	}
+	return strings.Join(a.MoveDesignators, ",") < strings.Join(b.MoveDesignators, ",")
+}
+
+func alignmentBlockersAllowAnchorDecomposition(blockers []string) bool {
+	for _, blocker := range blockers {
+		if blocker == "group-move-geometry-collision" ||
+			strings.HasPrefix(blocker, "frame:") ||
+			strings.HasPrefix(blocker, "boundary:") {
+			return true
+		}
+	}
+	return false
+}
+
+func alignmentMoveBlockers(c alignmentCandidate, items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, sheet, titleBlock *layoutBBox, frames []schFrameSpec) []string {
+	movedComp := map[string]bool{}
+	movedParent := map[string]bool{}
+	for _, designator := range c.MoveDesignators {
+		for _, comp := range comps {
+			if comp.Designator != designator {
+				continue
+			}
+			if comp.ID != "" {
+				movedComp[comp.ID] = true
+				movedParent[comp.ID] = true
+			}
+			break
+		}
+	}
+	for _, id := range c.MoveMarkerIDs {
+		movedComp[id] = true
+		movedParent[id] = true
+	}
+	movedWire := map[string]bool{}
+	for _, id := range c.MoveWireIDs {
+		movedWire[id] = true
+		movedParent[id] = true
+	}
+	movedText := map[string]bool{}
+	for _, id := range c.MoveLabelIDs {
+		movedText[id] = true
+	}
+	for _, it := range items {
+		if it.ID != "" && movedParent[it.ParentID] {
+			movedText[it.ID] = true
+		}
+	}
+
+	var blockers []string
+	if sheet != nil && !groupMoveClear(
+		[2]float64{candidateShiftX(c), candidateShiftY(c)},
+		movedComp, movedWire, visibleTextIDList(movedText),
+		alignmentCollisionTextItems(items, c), comps, alignmentCollisionWires(wires, c), sheet, titleBlock,
+	) {
+		blockers = append(blockers, "group-move-geometry-collision")
+	}
+	blockers = append(blockers, alignmentFrameBlockers(c, items, comps, wires, frames)...)
+	sort.Strings(blockers)
+	return blockers
+}
+
+// Labels whose parent shared wire is deleted and regenerated cannot be tested at
+// their stale coordinates. This must happen before groupMoveClear sees them.
+func alignmentCollisionTextItems(items []visibleTextItem, c alignmentCandidate) []visibleTextItem {
+	shared := map[string]bool{}
+	for _, id := range c.SharedWireIDs {
+		shared[id] = true
+	}
+	out := make([]visibleTextItem, 0, len(items))
+	for _, it := range items {
+		if shared[it.ParentID] {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+func alignmentCollisionWires(wires []schGroupWire, c alignmentCandidate) []schGroupWire {
+	shared := map[string]bool{}
+	for _, id := range c.SharedWireIDs {
+		shared[id] = true
+	}
+	out := make([]schGroupWire, 0, len(wires))
+	for _, wire := range wires {
+		if shared[wire.ID] {
+			continue
+		}
+		out = append(out, wire)
+	}
+	return out
+}
+
+func alignmentFrameBlockers(c alignmentCandidate, items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, frames []schFrameSpec) []string {
+	if len(frames) == 0 {
+		return nil
+	}
+	group := map[string]bool{}
+	for _, designator := range c.MoveDesignators {
+		group[designator] = true
+	}
+	movedWire := map[string]bool{}
+	for _, id := range c.MoveWireIDs {
+		movedWire[id] = true
+	}
+	movedMarker := map[string]bool{}
+	for _, id := range c.MoveMarkerIDs {
+		movedMarker[id] = true
+	}
+	movedParent := map[string]bool{}
+	for i := range comps {
+		if group[comps[i].Designator] && comps[i].ID != "" {
+			movedParent[comps[i].ID] = true
+		}
+	}
+	for _, id := range c.MoveWireIDs {
+		movedParent[id] = true
+	}
+	for _, id := range c.MoveMarkerIDs {
+		movedParent[id] = true
+	}
+	movedText := map[string]bool{}
+	for _, id := range c.MoveLabelIDs {
+		movedText[id] = true
+	}
+	for _, it := range items {
+		if it.ID != "" && movedParent[it.ParentID] {
+			movedText[it.ID] = true
+		}
+	}
+	blocked := map[string]bool{}
+	for i := range comps {
+		comp := &comps[i]
+		if !group[comp.Designator] || comp.BBox == nil {
+			continue
+		}
+		frame := componentFrame(comp, frames)
+		if frame == nil {
+			continue
+		}
+		movedBox := translateLayoutBBox(*comp.BBox, [2]float64{candidateShiftX(c), candidateShiftY(c)})
+		if !boxInside2(movedBox, frame.Rect) {
+			blocked[fmt.Sprintf("frame:%s:body-outside:%s", frame.ID, comp.Designator)] = true
+		}
+		for _, pin := range comp.Pins {
+			x, y := pin.X+candidateShiftX(c), pin.Y+candidateShiftY(c)
+			if !pointInBox2(x, y, frame.Rect, alignmentTolerance) {
+				blocked[fmt.Sprintf("frame:%s:pin-outside:%s.%s", frame.ID, comp.Designator, pin.Number)] = true
+			}
+		}
+	}
+	for _, w := range wires {
+		if !movedWire[w.ID] {
+			continue
+		}
+		frame := alignmentOwnerFrameForWire(comps, w, frames)
+		if frame == nil {
+			continue
+		}
+		for _, seg := range labelWireSegments(w) {
+			if !segmentInsideFrame(
+				seg[0]+candidateShiftX(c), seg[1]+candidateShiftY(c),
+				seg[2]+candidateShiftX(c), seg[3]+candidateShiftY(c),
+				frame.Rect, alignmentTolerance,
+			) {
+				blocked[fmt.Sprintf("frame:%s:wire-outside:%s", frame.ID, w.ID)] = true
+				break
+			}
+		}
+	}
+	for i := range comps {
+		marker := &comps[i]
+		if !movedMarker[marker.ID] || marker.BBox == nil || !marker.AnchorAvailable {
+			continue
+		}
+		for _, frame := range frames {
+			if !pointInBox2(marker.X, marker.Y, frame.Rect, alignmentTolerance) {
+				continue
+			}
+			movedBox := translateLayoutBBox(*marker.BBox, [2]float64{candidateShiftX(c), candidateShiftY(c)})
+			if !boxInside2(movedBox, frame.Rect) {
+				blocked[fmt.Sprintf("frame:%s:marker-outside:%s", frame.ID, marker.ID)] = true
+			}
+			break
+		}
+	}
+	for _, it := range items {
+		if !movedText[it.ID] || !schPositiveBBox(it.BBox) {
+			continue
+		}
+		frame := alignmentOwnerFrameForTextItem(comps, wires, it, frames)
+		if frame == nil {
+			continue
+		}
+		movedBox := translateLayoutBBox(*it.BBox, [2]float64{candidateShiftX(c), candidateShiftY(c)})
+		if !boxInside2(movedBox, frame.Rect) {
+			label := it.Value
+			if label == "" {
+				label = it.Content
+			}
+			if label == "" {
+				label = it.ID
+			}
+			blocked[fmt.Sprintf("frame:%s:text-outside:%s", frame.ID, label)] = true
+		}
+	}
+	out := make([]string, 0, len(blocked))
+	for item := range blocked {
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func alignmentOwnerFrameForWire(comps []layoutComp, wire schGroupWire, frames []schFrameSpec) *schFrameSpec {
+	owners := map[string]schFrameSpec{}
+	for i := range comps {
+		comp := &comps[i]
+		if comp.BBox == nil || (comp.ComponentType != "" && comp.ComponentType != schLayoutPartType) {
+			continue
+		}
+		frame := componentFrame(comp, frames)
+		if frame == nil {
+			continue
+		}
+		for _, pin := range comp.Pins {
+			if wireTouchesPoint(wire, pin.X, pin.Y) {
+				owners[frame.ID] = *frame
+				break
+			}
+		}
+	}
+	if len(owners) != 1 {
+		return nil
+	}
+	for _, frame := range owners {
+		copy := frame
+		return &copy
+	}
+	return nil
+}
+
+func alignmentOwnerFrameForTextItem(comps []layoutComp, wires []schGroupWire,
+	item visibleTextItem, frames []schFrameSpec) *schFrameSpec {
+	switch item.ParentType {
+	case "part":
+		for i := range comps {
+			if comps[i].ID == item.ParentID {
+				return componentFrame(&comps[i], frames)
+			}
+		}
+	case "wire":
+		for _, wire := range wires {
+			if wire.ID == item.ParentID {
+				return alignmentOwnerFrameForWire(comps, wire, frames)
+			}
+		}
+	case "netflag", "netport", "netlabel":
+		for _, comp := range comps {
+			if comp.ID != item.ParentID || !comp.AnchorAvailable {
+				continue
+			}
+			for _, frame := range frames {
+				if pointInBox2(comp.X, comp.Y, frame.Rect, alignmentTolerance) {
+					copy := frame
+					return &copy
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func alignmentOpportunityFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
 	sheet, titleBlock *layoutBBox) []checkFinding {
-	candidates := alignmentOpportunityCandidates(items, comps, wires, sheet, titleBlock)
+	return alignmentOpportunityFindingsWithFrames(items, comps, wires, sheet, titleBlock, nil)
+}
+
+func alignmentOpportunityFindingsWithFrames(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox, frames []schFrameSpec) []checkFinding {
+	candidates := alignmentOpportunityCandidatesWithFrames(items, comps, wires, sheet, titleBlock, frames)
 	findings := make([]checkFinding, 0, len(candidates))
 	for _, candidate := range candidates {
 		findings = append(findings, alignmentFinding(candidate))
@@ -91,6 +468,11 @@ func alignmentOpportunityFindings(items []visibleTextItem, comps []layoutComp, w
 
 func alignmentOpportunityCandidates(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
 	sheet, titleBlock *layoutBBox) []alignmentCandidate {
+	return alignmentOpportunityCandidatesWithFrames(items, comps, wires, sheet, titleBlock, nil)
+}
+
+func alignmentOpportunityCandidatesWithFrames(items []visibleTextItem, comps []layoutComp, wires []schGroupWire,
+	sheet, titleBlock *layoutBBox, frames []schFrameSpec) []alignmentCandidate {
 	best := map[string]alignmentCandidate{}
 	segs := alignmentSegments(wires)
 	if len(segs) < 3 {
@@ -103,29 +485,15 @@ func alignmentOpportunityCandidates(items []visibleTextItem, comps []layoutComp,
 		if wi, ok := wireIndex[connector.WireID]; ok && len(chipIslands[find(wi)]) > 1 {
 			continue
 		}
-		if connector.Horizontal {
+		// A wire's storage orientation says nothing about which side is
+		// offset. Evaluate both translations for every trunk so a V-H-V with
+		// differently-long end leads is not silently reduced to an X-only
+		// candidate (or missed when the host stores the trunk right-to-left).
+		for _, axis := range []string{"x", "y"} {
 			for _, candidate := range alignmentCandidatesForConnector(
-				comps, segs, adj, connectorIndex, "x",
+				comps, segs, adj, connectorIndex, axis,
 			) {
-				candidate, ok := alignmentFinalizeCandidate(candidate, items, comps, wires, sheet, titleBlock)
-				if !ok {
-					continue
-				}
-				if candidate.Axis != alignmentPreferredMovementAxis(comps, candidate) {
-					continue
-				}
-				candidate.WireID = connector.WireID
-				key := alignmentOpportunityKey(candidate)
-				if prior, ok := best[key]; !ok || alignmentCandidateBetter(candidate, prior) {
-					best[key] = candidate
-				}
-			}
-		}
-		if connector.Vertical {
-			for _, candidate := range alignmentCandidatesForConnector(
-				comps, segs, adj, connectorIndex, "y",
-			) {
-				candidate, ok := alignmentFinalizeCandidate(candidate, items, comps, wires, sheet, titleBlock)
+				candidate, ok := alignmentFinalizeCandidate(candidate, items, comps, wires, sheet, titleBlock, frames)
 				if !ok {
 					continue
 				}
@@ -161,6 +529,11 @@ func alignmentFinding(c alignmentCandidate) checkFinding {
 			blocked += "（可独立前置移动：" + strings.Join(c.IndependentBlockers, ",") + "）"
 		}
 	}
+	anchored := ""
+	if len(c.AnchoredDesignators) > 0 {
+		anchored = "；保留 " + strings.Join(c.AnchoredDesignators, "/") +
+			" 作为边界锚点并重建共享线"
+	}
 	return checkFinding{
 		Type: "alignment-opportunity", Level: "info", MarkerNet: c.Net,
 		WirePrimitiveId: c.WireID, At: &c.At, BBox: &c.MovedBBox,
@@ -179,9 +552,10 @@ func alignmentFinding(c alignmentCandidate) checkFinding {
 		BendReduction: 2, MoveDesignators: append([]string(nil), c.MoveDesignators...),
 		MoveWireIds: append([]string(nil), c.MoveWireIDs...), MoveMarkerIds: append([]string(nil), c.MoveMarkerIDs...),
 		MoveLabelIds: append([]string(nil), c.MoveLabelIDs...), SharedWireIds: append([]string(nil), c.SharedWireIDs...),
-		Blockers: append([]string(nil), c.Blockers...), IndependentBlockers: append([]string(nil), c.IndependentBlockers...),
-		Message: fmt.Sprintf("主走线 %s 存在可直线化的偏轴折返；候选将 %s 沿 %s 平移 %.0f，把两段同向主干合为一条直线并减少 2 个拐角%s",
-			c.Net, strings.Join(c.MoveDesignators, "/"), axisLabel(c.Axis), c.Shift, blocked),
+		AnchorDesignators: append([]string(nil), c.AnchoredDesignators...),
+		Blockers:          append([]string(nil), c.Blockers...), IndependentBlockers: append([]string(nil), c.IndependentBlockers...),
+		Message: fmt.Sprintf("主走线 %s 存在可直线化的偏轴折返；候选将 %s 沿 %s 平移 %.0f，把两段同向主干合为一条直线并减少 2 个拐角%s%s",
+			c.Net, strings.Join(c.MoveDesignators, "/"), axisLabel(c.Axis), c.Shift, anchored, blocked),
 	}
 }
 
@@ -233,6 +607,9 @@ func alignmentCandidateBetter(a, b alignmentCandidate) bool {
 	if len(a.Blockers) != len(b.Blockers) {
 		return len(a.Blockers) < len(b.Blockers)
 	}
+	if len(a.AnchoredDesignators) != len(b.AnchoredDesignators) {
+		return len(a.AnchoredDesignators) < len(b.AnchoredDesignators)
+	}
 	if len(a.MoveDesignators) != len(b.MoveDesignators) {
 		return len(a.MoveDesignators) > len(b.MoveDesignators)
 	}
@@ -240,7 +617,10 @@ func alignmentCandidateBetter(a, b alignmentCandidate) bool {
 }
 
 func alignmentOpportunityKey(c alignmentCandidate) string {
-	return c.Net + "|" + c.Axis + "|" + strings.Join(c.MoveDesignators, ",")
+	// A physical trunk can be observed through several flat segments or wire
+	// primitives. Keep the best proposal per net/axis, not one plan per segment;
+	// otherwise the same rigid move appears twice with different shift targets.
+	return c.Net + "|" + c.Axis
 }
 
 func axisLabel(axis string) string {
@@ -255,7 +635,7 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 	connector := segs[connectorIndex]
 	ends := [2]checkPoint{{X: connector.X0, Y: connector.Y0}, {X: connector.X1, Y: connector.Y1}}
 	armAxis := "horizontal"
-	if axis == "x" {
+	if connector.Horizontal {
 		armAxis = "vertical"
 	}
 	arms := [2][]int{}
@@ -280,8 +660,13 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 			if first == second {
 				continue
 			}
-			p0 := alignmentSegmentPoint(segs[first], 0)
-			p1 := alignmentSegmentPoint(segs[second], 0)
+			// The connector endpoint is what touches this arm, while the far
+			// endpoint carries the actual offset to be removed. Raw wire
+			// segments are not orientation-normalized, so endpoint 0 may be
+			// either the inner or outer end. Always select the endpoint opposite
+			// the shared connector before comparing arm coordinates.
+			p0 := alignmentSegmentOuterPoint(segs[first], ends[0])
+			p1 := alignmentSegmentOuterPoint(segs[second], ends[1])
 			if axis == "y" && math.Abs(p0.Y-p1.Y) < alignmentMinShift {
 				continue
 			}
@@ -291,6 +676,10 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 			if alignmentPinOrMarkerAt(comps, ends[0], alignmentTolerance) ||
 				alignmentPinOrMarkerAt(comps, ends[1], alignmentTolerance) {
 				continue
+			}
+			coordA, coordB := p0.X, p1.X
+			if axis == "y" {
+				coordA, coordB = p0.Y, p1.Y
 			}
 			sideA := alignmentCollectSide(adj, first, connectorIndex)
 			sideB := alignmentCollectSide(adj, second, connectorIndex)
@@ -319,23 +708,23 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 			case aCore && !bCore && len(partsB) >= 1 && len(partsA) <= 3:
 				move, stationary = partsB, partsA
 				moveSegments = sideB
-				targetCoord = targetArmCoordinate(segs, first)
-				shift = targetArmCoordinate(segs, first) - targetArmCoordinate(segs, second)
+				targetCoord = coordA
+				shift = coordA - coordB
 			case bCore && !aCore && len(partsA) >= 1 && len(partsB) <= 3:
 				move, stationary = partsA, partsB
 				moveSegments = sideA
-				targetCoord = targetArmCoordinate(segs, second)
-				shift = targetArmCoordinate(segs, second) - targetArmCoordinate(segs, first)
+				targetCoord = coordB
+				shift = coordB - coordA
 			case aCore && bCore && aPins > bPins && len(partsA) < len(partsB):
 				move, stationary = partsB, partsA
 				moveSegments = sideB
-				targetCoord = targetArmCoordinate(segs, first)
-				shift = targetArmCoordinate(segs, first) - targetArmCoordinate(segs, second)
+				targetCoord = coordA
+				shift = coordA - coordB
 			case aCore && bCore && bPins > aPins && len(partsB) < len(partsA):
 				move, stationary = partsA, partsB
 				moveSegments = sideA
-				targetCoord = targetArmCoordinate(segs, second)
-				shift = targetArmCoordinate(segs, second) - targetArmCoordinate(segs, first)
+				targetCoord = coordB
+				shift = coordB - coordA
 			default:
 				continue
 			}
@@ -343,9 +732,17 @@ func alignmentCandidatesForConnector(comps []layoutComp, segs []alignmentSegment
 			if net == "" {
 				continue
 			}
-			if len(move) == 1 && (!isRailLabelNet(net) || isPowerClusterGround(net) ||
-				!alignmentSideHasMarker(comps, segs, moveSegments)) {
-				continue
+			if len(move) == 1 {
+				if isPowerClusterGround(net) {
+					continue
+				}
+				if isRailLabelNet(net) {
+					if !alignmentSideHasMarker(comps, segs, moveSegments) {
+						continue
+					}
+				} else if !alignmentSinglePartMoveEligible(comps, move[0]) {
+					continue
+				}
 			}
 			bbox, ok := alignmentGroupBBox(comps, segs, moveSegments, move)
 			if !ok {
@@ -426,12 +823,17 @@ func alignmentSegmentPoint(s alignmentSegment, end int) checkPoint {
 	return checkPoint{X: s.X1, Y: s.Y1}
 }
 
-func targetArmCoordinate(segs []alignmentSegment, index int) float64 {
-	a, b := segs[index], segs[index]
-	if a.Horizontal {
-		return (b.Y0 + b.Y1) / 2
+func alignmentSegmentOuterPoint(s alignmentSegment, connector checkPoint) checkPoint {
+	if pointsClose(s.X0, s.Y0, connector.X, connector.Y, alignmentTolerance) {
+		return checkPoint{X: s.X1, Y: s.Y1}
 	}
-	return (a.X0 + a.X1) / 2
+	if pointsClose(s.X1, s.Y1, connector.X, connector.Y, alignmentTolerance) {
+		return checkPoint{X: s.X0, Y: s.Y0}
+	}
+	// Callers only pass adjacent segments, so this is an invariant failure
+	// fallback rather than the normal path. Use the row's second endpoint to
+	// keep the failure deterministic if malformed geometry slips through.
+	return alignmentSegmentPoint(s, 1)
 }
 
 func alignmentCollectSide(adj [][]int, start, blocked int) map[int]bool {
@@ -567,6 +969,19 @@ func alignmentSideHasMarker(comps []layoutComp, segs []alignmentSegment, indexes
 				return true
 			}
 		}
+	}
+	return false
+}
+
+func alignmentSinglePartMoveEligible(comps []layoutComp, designator string) bool {
+	for _, comp := range comps {
+		if comp.Designator != designator || alignmentActivePart(comp) {
+			continue
+		}
+		// A single two-terminal passive can be moved on a signal net when the
+		// trunk itself supplies the connectivity evidence. Larger or active
+		// bodies still require a complete local functional group.
+		return len(comp.Pins) == 2
 	}
 	return false
 }

@@ -102,16 +102,17 @@ type checkFinding struct {
 	OverlapY         float64           `json:"overlapY,omitempty"`
 	// Layout-straightening advisory: a same-net H-V-H/V-H-V jog can be removed
 	// by translating one complete functional group. This is never a hard finding.
-	AlignmentAxis   string   `json:"alignmentAxis,omitempty"` // x | y
-	ShiftX          float64  `json:"shiftX,omitempty"`
-	ShiftY          float64  `json:"shiftY,omitempty"`
-	BendReduction   int      `json:"bendReduction,omitempty"`
-	MoveDesignators []string `json:"moveDesignators,omitempty"`
-	MoveWireIds     []string `json:"moveWireIds,omitempty"`
-	MoveMarkerIds   []string `json:"moveMarkerIds,omitempty"`
-	MoveLabelIds    []string `json:"moveLabelIds,omitempty"`
-	SharedWireIds   []string `json:"sharedWireIds,omitempty"`
-	Blockers        []string `json:"blockers,omitempty"`
+	AlignmentAxis     string   `json:"alignmentAxis,omitempty"` // x | y
+	ShiftX            float64  `json:"shiftX,omitempty"`
+	ShiftY            float64  `json:"shiftY,omitempty"`
+	BendReduction     int      `json:"bendReduction,omitempty"`
+	MoveDesignators   []string `json:"moveDesignators,omitempty"`
+	MoveWireIds       []string `json:"moveWireIds,omitempty"`
+	MoveMarkerIds     []string `json:"moveMarkerIds,omitempty"`
+	MoveLabelIds      []string `json:"moveLabelIds,omitempty"`
+	SharedWireIds     []string `json:"sharedWireIds,omitempty"`
+	AnchorDesignators []string `json:"anchorDesignators,omitempty"`
+	Blockers          []string `json:"blockers,omitempty"`
 	// Blockers sharing no movable local net can be handled as separate prerequisite groups.
 	IndependentBlockers []string `json:"independentBlockers,omitempty"`
 }
@@ -494,7 +495,7 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 		fmt.Fprintln(w, "→ direct-connect-opportunity: labels on different islands have a clear short L route; prefer a real wire and remove the labels")
 	}
 	if s.AlignmentOpportunities > 0 {
-		fmt.Fprintln(w, "→ alignment-opportunity: a same-net main run has a removable H-V-H/V-H-V offset — verify the complete functional group, then align the trunk; length alone is not a reason to move")
+		fmt.Fprintln(w, "→ alignment-opportunity: verify the complete functional group; if the rigid group would leave its frame or collide, run alignment-plan and keep the reported anchorDesignators fixed while every shared boundary net is rebuilt; length alone is not a reason to move")
 	}
 	if s.PowerClusterCandidates > 0 {
 		fmt.Fprintln(w, "→ power-cluster-candidate: 消费电源脚与本地被动件分属多个线岛、各有同名电源符号 — 先物理接入消费脚，再合并为一个符号；不要直接删符号")

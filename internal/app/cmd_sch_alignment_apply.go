@@ -69,15 +69,16 @@ Without --apply this command only validates and prints the execution envelope.`,
 }
 
 type alignmentApplyReport struct {
-	SchemaVersion int                 `json:"schemaVersion"`
-	DocumentID    string              `json:"documentId"`
-	PlanID        string              `json:"planId"`
-	Net           string              `json:"net"`
-	Status        string              `json:"status"`
-	Apply         bool                `json:"apply"`
-	Save          bool                `json:"save"`
-	Move          []alignmentApplyPin `json:"moveComponents"`
-	Boundary      alignmentBoundary   `json:"boundary"`
+	SchemaVersion     int                 `json:"schemaVersion"`
+	DocumentID        string              `json:"documentId"`
+	PlanID            string              `json:"planId"`
+	Net               string              `json:"net"`
+	Status            string              `json:"status"`
+	Apply             bool                `json:"apply"`
+	Save              bool                `json:"save"`
+	AnchorDesignators []string            `json:"anchorDesignators,omitempty"`
+	Move              []alignmentApplyPin `json:"moveComponents"`
+	Boundary          alignmentBoundary   `json:"boundary"`
 }
 
 type alignmentApplyPin struct {
@@ -124,10 +125,19 @@ func freshAlignmentApplyPlan(pinned *appConfig, win, doc, netFilter, planID stri
 	if err := json.Unmarshal(raw, &vision); err != nil {
 		return alignmentPlanItem{}, nil, fmt.Errorf("alignment-apply: parse visible text: %w", err)
 	}
+	surveyValue, err := fetchSchVisualSurvey(pinned, win, comps)
+	if err != nil {
+		return alignmentPlanItem{}, nil, fmt.Errorf("alignment-apply: functional-frame geometry unavailable: %w", err)
+	}
+	survey, err := parseSchFrameSurvey(surveyValue)
+	if err != nil {
+		return alignmentPlanItem{}, nil, fmt.Errorf("alignment-apply: parse functional frames: %w", err)
+	}
+	frames := schModuleFrames(survey)
 	sheet := sheetBBoxOf(comps)
 	titleBlock, _ := titleBlockKeepoutWithSource(sheet)
-	candidates := alignmentOpportunityCandidates(vision.Items, comps, wires, sheet, titleBlock)
-	report := buildAlignmentPlanReport(doc, netFilter, candidates, comps, vision.Items, wires, sheet, titleBlock)
+	candidates := alignmentOpportunityCandidatesWithFrames(vision.Items, comps, wires, sheet, titleBlock, frames)
+	report := buildAlignmentPlanReportWithFrames(doc, netFilter, candidates, comps, vision.Items, wires, sheet, titleBlock, frames)
 	var matches []alignmentPlanItem
 	for _, item := range report.Plans {
 		if planID != "" && item.ID != planID {
@@ -144,7 +154,7 @@ func freshAlignmentApplyPlan(pinned *appConfig, win, doc, netFilter, planID stri
 func alignmentApplyEnvelope(item alignmentPlanItem, comps []layoutComp, apply, save bool) (alignmentApplyReport, error) {
 	report := alignmentApplyReport{
 		SchemaVersion: 1, PlanID: item.ID, Net: item.Net, Status: item.Status,
-		Apply: apply, Save: save,
+		Apply: apply, Save: save, AnchorDesignators: append([]string(nil), item.AnchorDesignators...),
 	}
 	if item.Status != "rewire-required" {
 		return report, fmt.Errorf("alignment-apply: plan %s is %s; only rewire-required plans are executable", item.ID, item.Status)

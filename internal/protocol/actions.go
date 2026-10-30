@@ -377,7 +377,7 @@ func AllActions() []ActionSpec {
 			Mutates:      true,
 			NeedsWindow:  true,
 			NeedsConfirm: true,
-			Description:  "Delete schematic primitives of ANY type by id (components, net flags/ports/labels, wires, buses, graphics, reference images) — generalizes schematic.component.delete beyond components by routing each id to its owning sch_Primitive* class. Reference images (sch_PrimitiveObject, schematic.image.*) are indexed under key 'objects' (fixed 2026-09-30 — they were previously absent from this action's by-id lookup entirely, so a real host returned notFound for every image id even though schematic.image.list could see it). primitiveIds is required: deleting the canvas selection is not supported (it may be the user's, and bypassed the CLI sheet guard). No undo.",
+			Description:  "Delete schematic primitives of ANY type by id (components, net flags/ports/labels, wires, buses, graphics, reference images, and explicitly named attributes). Reference images are indexed under key 'objects'; root-owned `_NETLABEL_` attributes omitted by bulk attribute enumeration are resolved only through an explicit get(id), then deleted through the official instance delete method and rechecked by id. primitiveIds is required: deleting the canvas selection is not supported (it may be the user's, and bypassed the CLI sheet guard). No undo.",
 			Inputs:       []string{"primitiveIds (string or string[]; required, non-empty)"},
 			Outputs:      []string{"deleted (counts by primitive type)", "total", "notFound", "deletedIds"},
 			VerifyWith:   []string{"schematic.components.list"},

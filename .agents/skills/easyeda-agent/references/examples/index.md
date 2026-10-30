@@ -17,6 +17,7 @@
 |---|---|---|
 | [原理图与 PCB 参考图片](image-import/README.md) | 自生成透明 PNG；raw/mil 单位、物理尺寸和源图比例；纯本地 dry-run，不连接 EDA | `offline-verified` 仅素材、解析与尺寸参数；本轮无现场导入，不认证制造丝印 |
 | [原理图部分写入后的精确恢复](schematic-partial-recovery/README.md) | fresh 核对失败对象、保护引脚属性、真实 unwired 重算及图签修正 | `live-verified` 仅精确恢复子例，有限独立复核通过；不签 PCB/E2E |
+| [原理图对齐与隐藏根层网络名清理](schematic-alignment-hidden-label/README.md) | 偏轴折返的边界分解计划、frame-aware 执行、host 部分写入恢复，以及可见但批量枚举遗漏的 root-owned `_NETLABEL_` 精确删除 | `live-verified` 仅 P1 对齐和 FB1 标签清理的保存重载范围；全页既有 finding、P2/PCB 不签通过 |
 | [已有相对布局的完整组移动](pcb-group-move/README.md) | 五成员整体平移/旋转、非对称 anchor、完整成员与固定件对账；开发验证场景起点 | `offline-verified`；五成员合成几何与 CLI 已验证，现场待验证 |
 | [260919 AT32F415 总索引](260919-at32f415/index.md) | 69 个器件、15 个功能区、90×50 mm 两层板的完整 Demo | `partial-live-verified`；代表性步骤已验证，完整布线明确未完成 |
 | [260919 机器可读样例目录](260919-at32f415/example-catalog.json) | SCH/PCB/LAY/RTE/FIN 共 36 个技术点的来源、参数、步骤、观测、错误修法和待验证项 | 15 项 `live-verified`，其余保持 `offline-verified` / `source-only` |

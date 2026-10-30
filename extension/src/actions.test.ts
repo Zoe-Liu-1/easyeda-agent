@@ -2927,6 +2927,52 @@ test('prim-delete: a fully successful delete carries no partial flag', async () 
 	}
 });
 
+test('prim-delete: explicit root-owned net-label attribute is resolvable outside bulk inventory', async t => {
+	let alive = true;
+	const attribute = {
+		getState_PrimitiveId: () => 'orphan-fb1',
+		delete: async () => { alive = false; return true; },
+	};
+	const fx: any = edaWithUndeletableText([], []);
+	fx.sch_PrimitiveAttribute = {
+		getAll: async () => [],
+		getAllPrimitiveId: async () => [],
+		get: async (id: string) => id === 'orphan-fb1' && alive ? attribute : undefined,
+	};
+	(globalThis as any).eda = fx;
+	t.after(() => { delete (globalThis as any).eda; });
+
+	const res: any = await runAction('schematic.primitives.delete', { primitiveIds: ['orphan-fb1'] });
+	assert.equal(alive, false);
+	assert.equal(res.result.deleted.attributes, 1);
+	assert.deepEqual(res.result.deletedIds.attributes, ['orphan-fb1']);
+	assert.equal(res.result.notFound, undefined);
+	assert.equal(res.result.partial, undefined);
+});
+
+test('prim-delete: root-owned attribute falls back to generic primitive delete when instance delete is absent', async t => {
+	let alive = true;
+	const attribute = { getState_PrimitiveId: () => 'orphan-fb1' };
+	const fx: any = edaWithUndeletableText([], []);
+	fx.sch_PrimitiveAttribute = {
+		getAll: async () => [],
+		getAllPrimitiveId: async () => [],
+		get: async (id: string) => id === 'orphan-fb1' && alive ? attribute : undefined,
+	};
+	fx.sch_PrimitiveObject = {
+		getAll: async () => [],
+		delete: async (ids: string[]) => { if (ids.includes('orphan-fb1')) alive = false; return true; },
+	};
+	(globalThis as any).eda = fx;
+	t.after(() => { delete (globalThis as any).eda; });
+
+	const res: any = await runAction('schematic.primitives.delete', { primitiveIds: ['orphan-fb1'] });
+	assert.equal(alive, false);
+	assert.equal(res.result.deleted.attributes, 1);
+	assert.deepEqual(res.result.deletedIds.attributes, ['orphan-fb1']);
+	assert.equal(res.result.partial, undefined);
+});
+
 // Regression for a live-verified defect (2026-09-30): schematic.image.* ids
 // (sch_PrimitiveObject, #272) were never indexed by schematicPrimitivesDelete
 // — `sch prim-delete --ids <imageId>` came back 100% notFound on a real

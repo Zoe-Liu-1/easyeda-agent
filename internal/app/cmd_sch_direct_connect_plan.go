@@ -1972,7 +1972,10 @@ func groupMoveClear(delta [2]float64, movedComp, movedWire map[string]bool,
 			}
 		}
 		for _, it := range items {
-			if movedText[it.ID] || it.BBox == nil {
+			// Empty/hidden attributes can be reported with a zero bbox. They are
+			// not rendered obstacles and must not make every containing group
+			// appear to leave the sheet after translation.
+			if movedText[it.ID] || !schPositiveBBox(it.BBox) {
 				continue
 			}
 			if anyOverlap(nbG, *it.BBox) {
@@ -1998,7 +2001,7 @@ func groupMoveClear(delta [2]float64, movedComp, movedWire map[string]bool,
 	}
 
 	for _, it := range items {
-		if !movedText[it.ID] || it.BBox == nil {
+		if !movedText[it.ID] || !schPositiveBBox(it.BBox) {
 			continue
 		}
 		nb := translateLayoutBBox(*it.BBox, delta)

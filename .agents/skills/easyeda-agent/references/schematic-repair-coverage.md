@@ -32,6 +32,24 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 若在同树同名上形成重复，报告 `NewNameDuplicates` 并拒绝把操作判成完成，避免完整网表
 通过却把视觉重复留在页面上。
 
+### 批量枚举之外的真实对象
+
+root-owned `_NETLABEL_` 可能被导出和重绘，却不在
+`sch_PrimitiveAttribute.getAll()` / `getAllPrimitiveId()` 或
+`schematic.visible_text.bboxes` 中。结构化属性/文字数组为空或没有某对象，不能证明
+页面上不存在；必须再核对原生页面原语、工程源记录和实际渲染。只有源记录给出精确 ID、
+父对象和内容，且能证明该对象是陈旧根层名称时，才可走连接器 `1.14.19+` 的：
+
+```text
+sch prim-delete --doc <page> --ids <explicit-id> --apply --save
+```
+
+删除器只处理调用方点名的 ID：先 `get(id)`，优先调用属性实例 `delete()`，实例方法不可用时
+回退到官方 `sch_PrimitiveObject.delete([id])`。禁止按 `_NETLABEL_` 前缀或页面范围批量清扫。
+调用返回成功、`deleted.attributes:1` 都不够；还须直接按 ID 回读为不存在，比较删除前后
+完整 pin→net，并完成 save → close/reopen → fresh readback/render。陈旧根层标签消失，
+但同一线岛真正承载连接的可见名称仍在时，删除才成立；不能借“清理孤儿”删掉最后一个名称。
+
 若线树重建在删除成功后中断，只能从删除前的完整 `Line/style + marker/label ID` 快照恢复。
 恢复入口必须先用新鲜回读证明旧 ID 仍缺失，再按小批次创建无 `Net` 属性几何。EasyEDA 会把
 共线相接的新段合并并替换 primitive ID，因此验收口径是“每个目标线段都被回读几何完整覆盖”，
@@ -52,7 +70,7 @@ sch marker-clean --doc <page> --delete <explicit-ids> --apply --save
 | `marker-overlap` | 直接执行 | `sch destagger --apply` 只处理可安全换向/改短桩的 marker；跳过项必须读出 |
 | `direct-connect-opportunity` | 直接执行或显式移动执行 | `already-clear` 用 `sch direct-connect-apply`；文字、单桩 marker、part/group 候选用 `sch direct-connect-fix --allow-move`，移动后必须重新规划成唯一 clear 路径再建线删标签 |
 | `cross-chip-direct-wire` | 直接执行或显式阻断 | `sch cross-chip-label-fix` 按物理线树把全部相关芯片引脚改成向外短线 + 同名 `net_label`；有现成 marker、混合网名、未解析引脚或没有安全标签槽时 blocked |
-| `alignment-opportunity` | 显式计划 | `alignment-plan` 完整后执行：无阻塞的 ready/边界方案可走 `alignment-fix` 或 `alignment-apply`；存在独立阻塞组时仅当全部为 `ready` 才由 `alignment-fix` 先移阻塞、逐步重算再移主组 |
+| `alignment-opportunity` | 显式计划 | `alignment-plan` 完整后执行。完整刚体方案越框或自身碰撞时，planner 先搜索“移动子组 + 最多 4 个固定边界锚点”，把跨锚点网络列入 `sharedWireIds` 并按移动后引脚重建；不得仅挪器件留下断线。无阻塞的 ready/边界方案可走 `alignment-fix` 或 `alignment-apply`；存在独立阻塞组时仅当全部为 `ready` 才由 `alignment-fix` 先移阻塞、逐步重算再移主组。移动后的 body、pins、专属线段和有面积文字均须留在原功能框，零尺寸空属性不阻止移动 |
 | `pin-outside-frame` / `wire-outside-frame` | 直接执行或显式阻断 | `sch frame-route-fix` 从 live pins/wires/frames 生成框内正交重布。引脚越框时先搜索单件 5 raw 网格落点，再重接共享网；纯线树越框时删除整树并从各引脚外向 lead 重建。真实跨框树、框归属不唯一、无可通行框内路径、复杂多件边界或网表/bridge 回归时保持 blocked |
 | `power-cluster-candidate` | 显式计划 | 每个被动件按最近单个消费脚判断；已同岛即局部完成，不要求同芯片其他电源/GND 脚并入同树。先由 `power-cluster-plan` 生成接线与“先接后删”顺序；路径必须无器件/文字/异网线和 90° 交叉，不能直接删符号。playbook 以目标网表和 bridge 增量验收，不被无关的既有整页 finding 阻断 |
 | 远置电源被动件 | 显式计划 | 先用 `power-cluster-relocate-plan` 选定同组、同网消费脚并搜索无碰撞刚体平移；目标不唯一时必须用 `--pair`。执行“平移 → fresh readback → 重新运行 `power-cluster-plan` → 接线/删除新 flag”。移动前 flag ID 在移动后失效，不能直接跨阶段删除 |

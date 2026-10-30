@@ -2726,6 +2726,17 @@ export async function verifySchPrimitiveDeletion(
 		const kind = SCH_PAGE_PRIMITIVE_KINDS.find(k => k.key === key);
 		try {
 			await assertSchDeletionContext(context);
+			if (key === 'attributes') {
+				const alive = new Set<string>();
+				for (const id of ids) {
+					const attribute = await eda.sch_PrimitiveAttribute.get(id);
+					if (attribute?.getState_PrimitiveId() === id) alive.add(id);
+				}
+				await assertSchDeletionContext(context);
+				survived[key] = ids.filter(id => alive.has(id));
+				deleted[key] = ids.filter(id => !alive.has(id));
+				continue;
+			}
 			// 'objects' (reference images, #272) is the sch_PrimitiveObject class,
 			// not one of SCH_PAGE_PRIMITIVE_KINDS — see the matching branch in
 			// deleteSchGroup.
@@ -2749,6 +2760,26 @@ async function deleteSchGroup(key: string, ids: Array<string>, context?: SchDele
 	for (let i = 0; i < ids.length; i += SCH_DELETE_BATCH) {
 		if (context) await waitForSchematicReady(context, 5000, context.readiness);
 		const batch = ids.slice(i, i + SCH_DELETE_BATCH);
+		if (key === 'attributes') {
+			// Attribute deletion is an instance method, and root-owned
+			// `_NETLABEL_` entries are intentionally absent from bulk inventory.
+			// The caller supplied exact IDs; fetch each one and verify its id.
+			for (const id of batch) {
+				const attribute = await eda.sch_PrimitiveAttribute.get(id);
+				if (!attribute || attribute.getState_PrimitiveId() !== id) continue;
+				const deleteAttribute = (attribute as unknown as {
+					delete?: () => boolean | Promise<boolean>;
+				}).delete;
+				if (typeof deleteAttribute === 'function') {
+					await deleteAttribute.call(attribute);
+				}
+				else if (!await deleteSchPagePrimitives([id])) {
+					throw new ActionError(ErrorCodes.EDA_API_UNAVAILABLE,
+						'Official attribute and generic primitive delete APIs are unavailable.');
+				}
+			}
+			continue;
+		}
 		// 'objects' (reference images, #272) is not in SCH_PAGE_PRIMITIVE_KINDS —
 		// it's the SAME sch_PrimitiveObject class deleteSchPagePrimitives already
 		// targets, so route it there directly rather than falling through to the
@@ -3112,6 +3143,19 @@ const schematicPrimitivesDelete: Handler = async (payload) => {
 		for (const id of checkedSchPrimitiveIds(await eda.sch_PrimitiveObject.getAll())) index.set(id, 'objects');
 	}
 	catch (err) { enumerationWarnings.push(warnText('enumerate objects', err)); }
+	// Root-owned `_NETLABEL_` attributes can exist even though
+	// getAll()/getAllPrimitiveId() omit them. Resolve only explicitly requested
+	// IDs through the official get(id) call; this is not an inventory fallback.
+	for (const id of requested) {
+		if (index.has(id)) continue;
+		try {
+			const attribute = await eda.sch_PrimitiveAttribute.get(id);
+			if (attribute?.getState_PrimitiveId() === id) index.set(id, 'attributes');
+		}
+		catch (err) {
+			enumerationWarnings.push(warnText(`resolve explicit attribute ${id}`, err));
+		}
+	}
 
 	await assertSchDeletionContext(deleteContext);
 	let targets = requested;

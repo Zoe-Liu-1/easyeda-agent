@@ -218,7 +218,7 @@ func visibleTextFindingsWithFrames(cfg *appConfig, window string, sheet *layoutB
 	out = append(out, netLabelEconomyFindings(parsed.Items, wires)...)
 	out = append(out, crossKindLabelEconomyFindings(parsed.Items, comps, wires)...)
 	out = append(out, labelDistanceFindings(parsed.Items, comps, wires, 50)...)
-	out = append(out, alignmentOpportunityFindings(parsed.Items, comps, wires, sheet, titleBlock)...)
+	out = append(out, alignmentOpportunityFindingsWithFrames(parsed.Items, comps, wires, sheet, titleBlock, frames)...)
 	out = append(out, directConnectOpportunityFindings(parsed.Items, comps, wires, sheet, titleBlock)...)
 	if n := len(parsed.Unmeasured); n > 0 {
 		out = append(out, checkFinding{Type: "visible-text-unverified", Level: "ERROR",

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.14.19] - 2026-10-29
+
+- 显式 ID 删除 root-owned `_NETLABEL_` 属性时，优先使用属性实例 `delete()`；宿主未暴露该实例方法时，回退到官方通用 `sch_PrimitiveObject.delete([id])`。删除后仍按显式 ID 回读，调用返回 `true` 不算删除证据。
+
+## [1.14.18] - 2026-10-29
+
+- `schematic.primitives.delete` 支持按显式 ID 删除 root-owned `_NETLABEL_` 属性：该属性可见并会进入导出图，但可能不被 `sch_PrimitiveAttribute.getAll()` / `getAllPrimitiveId()` 枚举。现在仅对调用方点名的 ID 使用 `get(id)` 和实例 `delete()`，并按 ID 回读证明删除，不会扩大为全页孤儿清理。
+
 ## [1.14.17] - 2026-10-25
 
 - `schematic.check` 新增 `summary.wireContacts`，把异网导线端点/T 接/共线重叠的真实接触与 `wire-crossing` 分开计数。

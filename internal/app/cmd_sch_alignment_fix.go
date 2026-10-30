@@ -149,10 +149,19 @@ func readAlignmentFixScene(pinned *appConfig, win, doc, netFilter string) (align
 	if err := json.Unmarshal(raw, &vision); err != nil {
 		return alignmentFixScene{}, fmt.Errorf("alignment-fix: parse visible text: %w", err)
 	}
+	surveyValue, err := fetchSchVisualSurvey(pinned, win, comps)
+	if err != nil {
+		return alignmentFixScene{}, fmt.Errorf("alignment-fix: functional-frame geometry unavailable: %w", err)
+	}
+	survey, err := parseSchFrameSurvey(surveyValue)
+	if err != nil {
+		return alignmentFixScene{}, fmt.Errorf("alignment-fix: parse functional frames: %w", err)
+	}
+	frames := schModuleFrames(survey)
 	sheet := sheetBBoxOf(comps)
 	titleBlock, _ := titleBlockKeepoutWithSource(sheet)
-	candidates := alignmentOpportunityCandidates(vision.Items, comps, wires, sheet, titleBlock)
-	report := buildAlignmentPlanReport(doc, netFilter, candidates, comps, vision.Items, wires, sheet, titleBlock)
+	candidates := alignmentOpportunityCandidatesWithFrames(vision.Items, comps, wires, sheet, titleBlock, frames)
+	report := buildAlignmentPlanReportWithFrames(doc, netFilter, candidates, comps, vision.Items, wires, sheet, titleBlock, frames)
 	projectID := ""
 	if geom.Context != nil {
 		projectID = geom.Context.ProjectUUID
