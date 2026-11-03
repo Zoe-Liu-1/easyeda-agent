@@ -67,6 +67,7 @@ sch prim-delete --doc <page> --ids <explicit-id> --apply --save
 |---|---|---|
 | `duplicate-net-marker` / `redundant-net-marker` | 显式计划 | `sch marker-clean`；保留对象需要基线或明确选择 |
 | `label-economy` / `cross-kind-label-economy` | 显式计划 | `sch marker-clean`；同一线岛至少留一个可见名称。共享 ID 的候选行按同一线岛合并判断；Power/GND 符号可保留而删除同岛导线 Name。优先用 typed `schematic.net_label.delete`；宿主缺该方法时可显式 `--rebuild-wire-trees`，但只接受单网名且有可见保留符号的完整线树，必须保存原 Line/style、事务重建、恢复失败回滚并复验 pin→net/bridge |
+| `label-stub` | 直接执行或显式阻断 | `sch label-stub-fix` 删除“只为挂 Name 而从主干伸出的叶枝”，重建剩余导线后用 `expectedParentWireId` 将标签直挂主干。自动执行限单 primitive、单可见 Name；引脚/marker 在 alleged 叶枝上、多 primitive 树、多标签、父线歧义、无可重建几何或写后仍命中时 blocked |
 | `marker-overlap` | 直接执行 | `sch destagger --apply` 只处理可安全换向/改短桩的 marker；跳过项必须读出 |
 | `direct-connect-opportunity` | 直接执行或显式移动执行 | `already-clear` 用 `sch direct-connect-apply`；文字、单桩 marker、part/group 候选用 `sch direct-connect-fix --allow-move`，移动后必须重新规划成唯一 clear 路径再建线删标签 |
 | `cross-chip-direct-wire` | 直接执行或显式阻断 | `sch cross-chip-label-fix` 按物理线树把全部相关芯片引脚改成向外短线 + 同名 `net_label`；有现成 marker、混合网名、未解析引脚或没有安全标签槽时 blocked |

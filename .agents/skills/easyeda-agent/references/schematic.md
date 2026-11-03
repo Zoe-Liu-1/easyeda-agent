@@ -416,6 +416,12 @@ planner 必须搜索最多 4 个 `anchorDesignators` 的分解。锚定件保留
 `visible-text-overlap`、pin→net 或 bridge 变化时逆序回滚。
 `--allow-partial` 会先为写后发现的冲突文字搜索 60 单位内安全槽，成功项保留移动，
 无法安全放置的项恢复原属性并登记 blocked。
+`sch label-stub-fix` 消费 `label-stub`：当 wire Name 挂在“从既有主干分出的纯标注叶枝”
+末端时，保存原线树与标签，删除父线后重建不含该叶枝的几何，再用
+`schematic.netflag.create + expectedParentWireId` 把 Name 直接挂到剩余主干；
+写后必须证明新标签不再命中 `label-stub`、可见文字无碰撞、完整 pin→net 与 bridge 不变。
+当前自动执行限定单个 wire primitive、单个可见 Name；多 primitive 线树或多标签保持
+blocked，先人工合并/拆分证明拓扑。
 `sch power-orientation-fix` 把电源 netflag 重接到 body-up、GND 重接到 body-down。
 单段桩优先从实测引脚外向重走本地正交折线；共享/分支树无法安全重走时，可从端口原锚点
 或有界 A* 正交通道接到安全竖排锚点，再把符号替换到新目标；叶端点不能在父线树上移挂，

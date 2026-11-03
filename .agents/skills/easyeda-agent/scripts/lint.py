@@ -564,6 +564,91 @@ for (net, root), group in labels_by_island.items():
             f"线岛 {root} 上网络 '{net}' 有 {len(group)} 个同名标签 — 只保留一个："
             + ", ".join(f"@{t['bbox'][0]:g},{t['bbox'][1]:g}" for t in group))
 
+# ---- Check 10e1b: wire Name must not sit on a decorative T-tail ----
+def _same_point(a, b):
+    return abs(a[0]-b[0]) <= 0.5 and abs(a[1]-b[1]) <= 0.5
+
+def _point_on_segment(p, a, b):
+    return seg_dist_point(p[0], p[1], a, b) <= 0.5 and (
+        min(a[0], b[0])-0.5 <= p[0] <= max(a[0], b[0])+0.5 and
+        min(a[1], b[1])-0.5 <= p[1] <= max(a[1], b[1])+0.5)
+
+def _physical_wire_tree(start_pid):
+    selected = {start_pid}
+    changed = True
+    while changed:
+        changed = False
+        selected_segments = [
+            (a, b) for w in wires if w.get('pid') in selected
+            for (a, b) in segs(w.get('line') or []) if a != b
+        ]
+        for w in wires:
+            if w.get('pid') in selected:
+                continue
+            candidate = [(a, b) for (a, b) in segs(w.get('line') or []) if a != b]
+            if any(_point_on_segment(p, a, b) or _point_on_segment(q, a, b)
+                   for (p, q) in candidate for (a, b) in selected_segments):
+                selected.add(w.get('pid'))
+                changed = True
+    return selected
+
+def _label_stub_geometry(t):
+    if not t.get('bbox') or t.get('visible') is False or not t.get('parentWireId'):
+        return None
+    tree = _physical_wire_tree(t['parentWireId'])
+    raw_segments = [
+        (a, b) for w in wires if w.get('pid') in tree
+        for (a, b) in segs(w.get('line') or []) if a != b
+    ]
+    cx = (t['bbox'][0] + t['bbox'][2]) / 2
+    cy = (t['bbox'][1] + t['bbox'][3]) / 2
+    anchor, best = None, None
+    for a, b in raw_segments:
+        d = seg_dist_point(cx, cy, a, b)
+        if best is None or d < best:
+            best = d
+            # Closest endpoint is enough for the decorative-tail signature.
+            anchor = min((a, b), key=lambda p: hypot(cx-p[0], cy-p[1]))
+    if anchor is None or anchor in pin_pts or anchor in flag_pts:
+        return None
+    vertices = {anchor}
+    for a, b in raw_segments:
+        vertices.add(a); vertices.add(b)
+    adjacency = defaultdict(set)
+    for a, b in raw_segments:
+        horizontal = abs(a[1]-b[1]) <= 0.5
+        on = [p for p in vertices if _point_on_segment(p, a, b)]
+        on.sort(key=(lambda p: p[0]) if horizontal else (lambda p: p[1]))
+        for left, right in zip(on, on[1:]):
+            if not _same_point(left, right):
+                adjacency[left].add(right); adjacency[right].add(left)
+    if anchor not in adjacency or len(adjacency[anchor]) != 1:
+        return None
+    previous, current = anchor, anchor
+    path_vertices = [anchor]
+    for _ in range(len(adjacency)+1):
+        nxt = next((p for p in adjacency[current] if not _same_point(p, previous) or _same_point(current, anchor)), None)
+        if nxt is None:
+            return None
+        path_vertices.append(nxt)
+        if len(adjacency[nxt]) >= 3:
+            if nxt in pin_pts or nxt in flag_pts:
+                return None
+            return {'leaf': anchor, 'junction': nxt, 'path': path_vertices}
+        if len(adjacency[nxt]) != 2:
+            return None
+        previous, current = current, nxt
+    return None
+
+for t in visible_text_boxes():
+    if t['componentType'] != 'wire' or t['key'] != 'Name' or not (t['net'] or '').strip():
+        continue
+    g = _label_stub_geometry(t)
+    if g:
+        problems['label_stub'].append(
+            f"网络标签「{t['net']}」挂在纯标注 T 形线头末端 @{g['leaf']}；"
+            "Name 必须直接落在既有导线上，不能增加额外短线")
+
 # ---- Check 10e2: cross-kind duplicates on one line island ----
 flags_by_pid = {f.get('pid'): f for f in flags if f.get('pid')}
 marker_labels = defaultdict(list)
@@ -973,7 +1058,7 @@ if SOP_SCALE:
                 f"信号网 '{n}' ({len(d['pins'])}脚, 跨度 {span}u < 250) 由分散标识连 → 同簇应本地 pin→wire→pin (SOP §3.6)")
 
 order = ['flag_on_pin','zero_wire','diagonal_wire','long_wire','dangling_wire','floating_pin','single_pin_net',
-         'flag_no_wire','marker_wire_overlap','wire_over_pin_lead','cross_chip_direct_wire','text_wire_overlap','label_visibility','label_vertical','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
+         'flag_no_wire','marker_wire_overlap','wire_over_pin_lead','cross_chip_direct_wire','text_wire_overlap','label_visibility','label_vertical','label_stub','redundant_label','direct_connect_opportunity','orientation','power_ground_orientation','bbox_overlap','dup_designator','decap_far',
          'netport_hop','local_net_as_flag','flag_density','collinear_flags','unnamed_net','off_grid',
          'cross_kind_label_economy','label_distance','signal_marker_type','signal_port_exempt',
          'visible_text_overlap','titleblock_overlap','out_of_sheet','alignment_opportunity']
@@ -989,6 +1074,7 @@ labels = {
   'text_wire_overlap':'🟠 可见文字被导线穿过',
   'label_visibility':'🟠 名称隐藏/为空',
   'label_vertical':'🟡 网络标签竖排/折叠',
+  'label_stub':'🔴 网络标签挂在装饰性 T 形线头上',
   'redundant_label':'🟡 同线岛重复网络标签',
   'cross_kind_label_economy':'🟡 同岛导线标签与标识混用重复',
   'label_distance':'🟡 网络名称离所属对象过远',

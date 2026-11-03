@@ -215,6 +215,7 @@ func visibleTextFindingsWithFrames(cfg *appConfig, window string, sheet *layoutB
 	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, wires, eps)...)
 	out = append(out, netLabelVisibilityFindings(parsed.Items)...)
 	out = append(out, netLabelOrientationFindings(parsed.Items)...)
+	out = append(out, netLabelStubFindings(parsed.Items, comps, wires)...)
 	out = append(out, netLabelEconomyFindings(parsed.Items, wires)...)
 	out = append(out, crossKindLabelEconomyFindings(parsed.Items, comps, wires)...)
 	out = append(out, labelDistanceFindings(parsed.Items, comps, wires, 50)...)

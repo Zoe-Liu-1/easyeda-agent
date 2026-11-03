@@ -44,9 +44,13 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 先保存并回读，不能盲重试或仅因返回空而删除桩线。
 兼容性与验证说明见 [schematic.md](schematic.md#原生-net_label-超时191)。
 
-**网络标签必须经 `sch connect --kind net_label` 带短桩创建。** 裸 `sch netflag --kind net_label`
-（无线）是部分写入：只留下一条带网名的导线、没有可见的 Name 文字，且返回
-`verified:false`；不要用它。网络标签只在本页内按名字连通，跨页信号用 `net_port`。
+**网络标签必须直接落在承载连接的导线上。** 已有导线用
+`sch netflag --kind net_label --parent-wire <wireId> --x <点> --y <点> --net <name>`
+创建 Name 属性；不得先为挂名另拉一个 T 形短线。只有目标引脚当前尚无导线、
+确实需要建立“pin → 非零短桩 → 标签”时，才使用 `sch connect --kind net_label`。
+`sch connect` 对显式 `--x/--y` 且该点已落在导线上时，会自动改为直接挂到父线；
+`label-stub` 检查会拒绝历史上遗留的“主干上伸出一根只为标签存在的线头”。
+网络标签只在本页内按名字连通，跨页信号用 `net_port`。
 
 **直连优先（现场执行口径）。** 同一功能块、同一网络，存在正交、不穿器件/文字、不与其他
 网络交叉的短路径时，先用真实导线；只有跨块/跨页/远距离、引脚首段方向不允许，或直连必然
@@ -60,6 +64,8 @@ netflag 或带箭头的 netport 均为 WARN；确属模块边界
 INFO 审计，不再静默放过。跨芯片线树由 `cross-chip-direct-wire` 报 WARN，
 `direct-connect-plan` 和 `alignment-plan` 都跳过它，必须先把长线拆成标签连接，不能通过
 移动芯片继续优化这根线。
+标签文字锚在既有导线或引脚必要短桩上；从主干额外分叉一根只为放 Name 的线头属于
+`label-stub` ERROR，不能以“标签可见”或“电气仍是同网”放行。
 
 **同框引脚和整棵局部线树必须留在功能框内。** `pin-outside-frame` 检查实测引脚端点，
 `wire-outside-frame` 检查线树全部 flat segments；器件 body 在框内不能替代这两项。
@@ -75,7 +81,8 @@ INFO 审计，不再静默放过。跨芯片线树由 `cross-chip-direct-wire` �
 
 **局部电源/地不要用 `sch wire --net` 重复显示网名。** 导线本身不命名，末端 netflag 定义
 网名；否则 `--net` 会把网名画在导线上，与 netflag 名称重复并增加压字。信号网的
-`net_label` 仍按上面的 `sch connect --kind net_label` 创建。
+`net_label` 若落在既有导线上，按上面的 `sch netflag --kind net_label --parent-wire`
+直接挂接；只有从尚无导线的引脚新建必要短桩时才用 `sch connect --kind net_label`。
 
 **远置本地被动件先重定位，再直连。** `sch power-cluster-relocate-plan` 对已登记功能组内
 用独立电源符号表示的 2 脚被动件，按同网消费脚搜索目标附近的 5 raw 网格落点，并要求

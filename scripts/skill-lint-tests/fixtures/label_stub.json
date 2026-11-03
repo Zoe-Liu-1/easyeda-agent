@@ -1,0 +1,20 @@
+{
+  "_intent": "A wire Name is attached to a decorative T-tail rather than directly to the existing trunk.",
+  "parts": [],
+  "flags": [],
+  "wires": [
+    { "pid": "w1", "net": "FB1", "line": [0, 0, 100, 0, 50, 0, 50, 20] }
+  ],
+  "visible_text": [
+    {
+      "pid": "t1",
+      "kind": "attribute",
+      "componentType": "wire",
+      "parentWireId": "w1",
+      "key": "Name",
+      "value": "FB1",
+      "rotation": 0,
+      "bbox": [45, 20, 60, 28]
+    }
+  ]
+}

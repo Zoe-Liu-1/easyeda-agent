@@ -150,6 +150,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchFrameRouteFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchMarkerCleanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchLabelFixCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchLabelStubFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchPowerOrientationFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchVisualTextFixCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchDesignatorFixCmd(cfg, &window, stdout, stderr))
@@ -1441,7 +1442,7 @@ pull fresh ids before any follow-up mutation on it.`,
 	// ── netflag ───────────────────────────────────────────────────────────
 	// schematic.netflag.create
 	{
-		var kind, net string
+		var kind, net, parentWire string
 		var x, y, rotation float64
 		c := &cobra.Command{
 			Use:   "netflag",
@@ -1469,6 +1470,12 @@ pull fresh ids before any follow-up mutation on it.`,
 				if cmd.Flags().Changed("rotation") {
 					payload["rotation"] = rotation
 				}
+				if parentWire != "" {
+					if canonicalKind != "net_label" {
+						return fmt.Errorf("--parent-wire is only valid with --kind net_label")
+					}
+					payload["expectedParentWireId"] = parentWire
+				}
 				return dispatch(cfg, "schematic.netflag.create", window, payload, stdout, stderr)
 			},
 		}
@@ -1477,6 +1484,8 @@ pull fresh ids before any follow-up mutation on it.`,
 		c.Flags().Float64Var(&x, "x", 0, "X coordinate")
 		c.Flags().Float64Var(&y, "y", 0, "Y coordinate")
 		c.Flags().Float64Var(&rotation, "rotation", 0, "rotation in degrees")
+		c.Flags().StringVar(&parentWire, "parent-wire", "",
+			"existing wire primitiveId for --kind net_label; attach the Name directly without creating a stub")
 		sch.AddCommand(c)
 	}
 
@@ -1513,6 +1522,34 @@ pull fresh ids before any follow-up mutation on it.`,
 					}
 					pin = &resolved
 					x, y = resolved.X, resolved.Y
+				}
+				// A net label attached to an existing wire must not create a
+				// decorative T-tail. Explicit-coordinate label calls are therefore
+				// attached to the live parent wire directly. Pin calls still use
+				// connect_pin because the pin may have no wire yet.
+				if pinRef == "" && canonicalKind == "net_label" {
+					pinned, targetWin, doc, pinErr := pinZonePage(cfg, window)
+					if pinErr != nil {
+						return pinErr
+					}
+					parent, attachErr := existingWireAtPoint(pinned, targetWin, doc, x, y, net)
+					if attachErr != nil {
+						return attachErr
+					}
+					if parent != nil {
+						direct := map[string]any{
+							"kind":                 "net_label",
+							"net":                  net,
+							"x":                    x,
+							"y":                    y,
+							"expectedParentWireId": parent.ID,
+						}
+						if dispErr := dispatchTimed(pinned, "schematic.netflag.create", targetWin, direct,
+							acConnectPinTimeout, stdout, stderr); dispErr != nil {
+							return dispErr
+						}
+						return nil
+					}
 				}
 				payload := map[string]any{
 					"pinX": x,

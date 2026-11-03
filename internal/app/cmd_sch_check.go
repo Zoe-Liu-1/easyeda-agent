@@ -151,6 +151,7 @@ type checkSummary struct {
 	// Visible wire-name label economy/orientation (Go-side, net-label data).
 	LabelVisibility            int `json:"labelVisibility"`
 	LabelEconomy               int `json:"labelEconomy"`
+	LabelStubs                 int `json:"labelStubs"`
 	LabelOrientations          int `json:"labelOrientations"`
 	LabelDistance              int `json:"labelDistance"`
 	CrossKindLabelEconomy      int `json:"crossKindLabelEconomy"`
@@ -387,8 +388,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-contact(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d long-wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d text-frame-crossing(s), %d pin-outside-frame(s), %d wire-outside-frame(s), %d label-visibility(s), %d label-economy(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireContacts, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.LongWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.TextFrameCrossings, s.PinOutOfFrames, s.WireOutOfFrames, s.LabelVisibility, s.LabelEconomy, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-contact(s), %d wire-over-pin(s), %d cross-chip-direct-wire(s), %d non-orthogonal-wire(s), %d zero-length wire(s), %d dangling wire(s), %d long-wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d out-of-sheet, %d marker-overlap(s), %d marker-wire-overlap(s), %d visible-text-overlap(s), %d text-frame-crossing(s), %d pin-outside-frame(s), %d wire-outside-frame(s), %d label-visibility(s), %d label-economy(s), %d label-stub(s), %d cross-kind-label-economy(s), %d label-orientation(s), %d label-distance(s), %d direct-connect-opportunity(s), %d alignment-opportunity(s), %d power-cluster(s), %d power-cluster-exempted, %d signal-marker-type(s), %d zones-not-claimed, %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d power-ground-orientation(s), %d orientation-exempted, %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireContacts, s.WireOverPins, s.CrossChipDirectWires, s.NonOrthogonalWires, s.ZeroLengthWires, s.DanglingWires, s.LongWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.OutOfSheet, s.MarkerOverlaps, s.MarkerWireOverlaps, s.VisibleTextOverlaps, s.TextFrameCrossings, s.PinOutOfFrames, s.WireOutOfFrames, s.LabelVisibility, s.LabelEconomy, s.LabelStubs, s.CrossKindLabelEconomy, s.LabelOrientations, s.LabelDistance, s.DirectConnectOpportunities, s.AlignmentOpportunities, s.PowerClusterCandidates, s.PowerClusterExempted, s.SignalMarkerTypes, s.ZonesNotClaimed, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PowerGroundOrientation, s.OrientationExempted, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -472,6 +473,9 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	}
 	if s.LabelEconomy > 0 {
 		fmt.Fprintln(w, "→ label-economy: one label per line island; run `sch marker-clean` to review candidates, then pass explicit `--delete` IDs")
+	}
+	if s.LabelStubs > 0 {
+		fmt.Fprintln(w, "→ label-stub: a wire Name sits at the end of a decorative branch; attach the Name to the existing wire with `sch netflag --parent-wire`, or repair with `sch label-stub-fix --apply --save`")
 	}
 	if s.CrossKindLabelEconomy > 0 {
 		fmt.Fprintln(w, "→ cross-kind-label-economy: same net has both a wire label and a marker on one island — run `sch marker-clean`, choose the survivor from source evidence, then pass explicit `--delete` IDs")

@@ -724,6 +724,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.WireOutOfFrames++
 		case "label-economy":
 			rep.Summary.LabelEconomy++
+		case "label-stub":
+			rep.Summary.LabelStubs++
 		case "cross-kind-label-economy":
 			rep.Summary.CrossKindLabelEconomy++
 		case "label-visibility":
