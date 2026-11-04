@@ -78,6 +78,18 @@ func TestSchGeomSnapshot_ConnectivitySummaryNeedsExplicitSuperset(t *testing.T) 
 	}
 }
 
+func TestSchGeomSnapshot_PagePrimitivesNeedExplicitSuperset(t *testing.T) {
+	s := &schGeomSnapshot{comps: []layoutComp{{}}, withPins: true}
+	want := map[string]any{"includePins": true, "includePagePrimitives": true}
+	if s.covers(want) {
+		t.Fatal("pins-only snapshot cannot prove exact label anchors")
+	}
+	s.withPagePrimitives = true
+	if !s.covers(want) || !s.covers(map[string]any{"includePins": true}) {
+		t.Fatal("page-primitive snapshot should cover itself and narrower requests")
+	}
+}
+
 var errStub = stubErr("read failed")
 
 type stubErr string

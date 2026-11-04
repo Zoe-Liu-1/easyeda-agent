@@ -611,6 +611,11 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	payload := map[string]any{"includeBBox": true, "includePins": true, "includePinNets": true}
 	if allPages {
 		payload["allPages"] = true
+	} else {
+		// Visible-text bbox centers are not label anchors. The page primitive
+		// inventory carries the exact X/Y of each wire Name and is required to
+		// distinguish a label on a trunk from a label at a decorative tail's leaf.
+		payload["includePagePrimitives"] = true
 	}
 	geometryResult, perr := geom.resultOr(cfg, window, payload)
 	var comps []layoutComp
@@ -665,7 +670,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 				geo = append(geo, frameRouteFindings(comps, visualWires, visualFrames, overlapEps)...)
 			}
 		}
-		visible := visibleTextFindingsWithFrames(cfg, window, sheetBBoxOf(comps), comps, visualWires, visualFrames, overlapEps, stderr)
+		visible := visibleTextFindingsWithFrames(cfg, window, sheetBBoxOf(comps), comps, visualWires,
+			visualFrames, parseVisibleAttributeAnchors(geometryResult.Result), overlapEps, stderr)
 		if surveyOK && !findingsContainType(visible, "visible-text-unverified") {
 			// The complete visible-text inventory supersedes the free-text-only
 			// survey for collision and frame-crossing findings. Dropping the

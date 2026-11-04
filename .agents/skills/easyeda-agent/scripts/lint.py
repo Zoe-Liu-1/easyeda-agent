@@ -418,6 +418,7 @@ def visible_text_boxes():
         label = (item.get('label') or item.get('text') or item.get('content')
                  or item.get('value') or item.get('key') or f"text{i+1}")
         out.append({'label': str(label), 'bbox': box,
+                    'x': item.get('x'), 'y': item.get('y'),
                     'parentWireId': (item.get('parentWireId') or item.get('parent_wire')
                                      or item.get('parentId')),
                     'componentType': item.get('componentType'),
@@ -600,15 +601,20 @@ def _label_stub_geometry(t):
         (a, b) for w in wires if w.get('pid') in tree
         for (a, b) in segs(w.get('line') or []) if a != b
     ]
-    cx = (t['bbox'][0] + t['bbox'][2]) / 2
-    cy = (t['bbox'][1] + t['bbox'][3]) / 2
-    anchor, best = None, None
-    for a, b in raw_segments:
-        d = seg_dist_point(cx, cy, a, b)
-        if best is None or d < best:
-            best = d
-            # Closest endpoint is enough for the decorative-tail signature.
-            anchor = min((a, b), key=lambda p: hypot(cx-p[0], cy-p[1]))
+    # The exact attribute anchor is authoritative. Bbox center falls in the
+    # middle of an offset label leader and must only be a compatibility fallback.
+    if isinstance(t.get('x'), (int, float)) and isinstance(t.get('y'), (int, float)):
+        anchor = (float(t['x']), float(t['y']))
+    else:
+        cx = (t['bbox'][0] + t['bbox'][2]) / 2
+        cy = (t['bbox'][1] + t['bbox'][3]) / 2
+        anchor = None
+        best = None
+        for a, b in raw_segments:
+            d = seg_dist_point(cx, cy, a, b)
+            if best is None or d < best:
+                best = d
+                anchor = min((a, b), key=lambda p: hypot(cx-p[0], cy-p[1]))
     if anchor is None or anchor in pin_pts or anchor in flag_pts:
         return None
     vertices = {anchor}

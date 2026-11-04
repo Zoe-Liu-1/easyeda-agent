@@ -419,6 +419,8 @@ planner 必须搜索最多 4 个 `anchorDesignators` 的分解。锚定件保留
 `sch label-stub-fix` 消费 `label-stub`：当 wire Name 挂在“从既有主干分出的纯标注叶枝”
 末端时，保存原线树与标签，删除父线后重建不含该叶枝的几何，再用
 `schematic.netflag.create + expectedParentWireId` 把 Name 直接挂到剩余主干；
+判断锚点必须使用 `pagePrimitives.attributes[].X/Y` 的原生属性锚点，不能用可见文字
+bbox 中心替代；文字相对锚点的偏移会让 bbox 中心落在短枝中段并造成漏检。
 写后必须证明新标签不再命中 `label-stub`、可见文字无碰撞、完整 pin→net 与 bridge 不变。
 当前自动执行限定单个 wire primitive、单个可见 Name；多 primitive 线树或多标签保持
 blocked，先人工合并/拆分证明拓扑。

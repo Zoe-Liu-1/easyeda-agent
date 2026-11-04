@@ -33,17 +33,22 @@ type schGeomSnapshot struct {
 	withPins                bool
 	withWires               bool
 	withConnectivitySummary bool
+	withPagePrimitives      bool
 	allPages                bool
 }
 
 // gatePreloadGeometry 预读一次最宽的几何(bbox + pins + wires + inventory)。读失败**不报错**:
 // 各 stage 会各自去读并给出它自己的错误信息 —— 预读只是优化,不是新的失败点。
 func gatePreloadGeometry(cfg *appConfig, window string, allPages bool) *schGeomSnapshot {
-	payload := map[string]any{"includeBBox": true, "includePins": true, "includeWires": true, "includeConnectivitySummary": true}
+	payload := map[string]any{"includeBBox": true, "includePins": true, "includeWires": true,
+		"includeConnectivitySummary": true}
 	if allPages {
 		payload["allPages"] = true
+	} else {
+		payload["includePagePrimitives"] = true
 	}
-	snap := &schGeomSnapshot{withPins: true, withWires: true, withConnectivitySummary: true, allPages: allPages}
+	snap := &schGeomSnapshot{withPins: true, withWires: true, withConnectivitySummary: true,
+		withPagePrimitives: !allPages, allPages: allPages}
 	res, err := requestAction(cfg, "schematic.components.list", window, payload)
 	if err != nil {
 		snap.err = err
@@ -74,8 +79,12 @@ func (s *schGeomSnapshot) covers(payload map[string]any) bool {
 		return false
 	}
 	wantPins, _ := payload["includePins"].(bool)
+	wantPagePrimitives, _ := payload["includePagePrimitives"].(bool)
 	wantAll, _ := payload["allPages"].(bool)
 	if wantPins && !s.withPins {
+		return false
+	}
+	if wantPagePrimitives && !s.withPagePrimitives {
 		return false
 	}
 	return wantAll == s.allPages

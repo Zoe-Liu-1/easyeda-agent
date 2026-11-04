@@ -40,11 +40,12 @@ type labelStubFixProposal struct {
 }
 
 type labelStubFixScene struct {
-	Comps  []layoutComp
-	Wires  []schGroupWire
-	Items  []visibleTextItem
-	Styles map[string]map[string]any
-	Geos   []labelStubGeometry
+	Comps   []layoutComp
+	Wires   []schGroupWire
+	Items   []visibleTextItem
+	Anchors map[string]checkPoint
+	Styles  map[string]map[string]any
+	Geos    []labelStubGeometry
 }
 
 func newSchLabelStubFixCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
@@ -157,10 +158,12 @@ func readLabelStubFixScene(pinned *appConfig, win, doc string) (labelStubFixScen
 	if err := json.Unmarshal(raw, &vision); err != nil {
 		return labelStubFixScene{}, fmt.Errorf("parse visible text: %w", err)
 	}
+	anchors := parseVisibleAttributeAnchors(geom.Result)
 	return labelStubFixScene{
 		Comps: comps, Wires: wires, Items: vision.Items,
-		Styles: markerCleanWireStyles(geom.Result),
-		Geos:   labelStubGeometries(vision.Items, comps, wires),
+		Anchors: anchors,
+		Styles:  markerCleanWireStyles(geom.Result),
+		Geos:    labelStubGeometriesWithAnchors(vision.Items, comps, wires, anchors),
 	}, nil
 }
 

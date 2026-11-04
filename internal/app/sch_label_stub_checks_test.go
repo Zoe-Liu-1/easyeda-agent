@@ -98,6 +98,27 @@ func TestNetLabelStubFindingAcrossConnectedWirePrimitives(t *testing.T) {
 	}
 }
 
+func TestNetLabelStubUsesExactAttributeAnchorInsteadOfTextCenter(t *testing.T) {
+	wires := []schGroupWire{{
+		ID: "wire", Net: "VOUT3",
+		ObservedSegments: [][4]float64{
+			{480, 420, 630, 420},
+			{510, 400, 510, 420},
+		},
+	}}
+	items := []visibleTextItem{{
+		ID: "label", Kind: "attribute", ComponentType: "wire", Key: "Name",
+		Value: "VOUT3", ParentID: "wire",
+		// Text center lies on the vertical spur rather than at its leaf.
+		BBox: &layoutBBox{MinX: 510, MinY: 402, MaxX: 540, MaxY: 410},
+	}}
+	anchors := map[string]checkPoint{"label": {X: 510, Y: 400}}
+	got := netLabelStubFindingsWithAnchors(items, nil, wires, anchors)
+	if len(got) != 1 || got[0].Type != "label-stub" {
+		t.Fatalf("exact label anchor at the leaf must be detected, got %+v", got)
+	}
+}
+
 func TestChooseLabelStubDirectAnchorSkipsPredictedTextCollision(t *testing.T) {
 	p := labelStubFixProposal{
 		Net: "FB1", Leaf: checkPoint{X: 0, Y: 0}, Junction: checkPoint{X: 0, Y: 0},

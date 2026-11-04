@@ -32,7 +32,12 @@ type labelStubGeometry struct {
 // endpoint is not reported when the endpoint is a pin/marker, or when the path
 // does not branch off a larger connected wire.
 func netLabelStubFindings(items []visibleTextItem, comps []layoutComp, wires []schGroupWire) []checkFinding {
-	geometries := labelStubGeometries(items, comps, wires)
+	return netLabelStubFindingsWithAnchors(items, comps, wires, nil)
+}
+
+func netLabelStubFindingsWithAnchors(items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, anchors map[string]checkPoint) []checkFinding {
+	geometries := labelStubGeometriesWithAnchors(items, comps, wires, anchors)
 	out := make([]checkFinding, 0, len(geometries))
 	for _, g := range geometries {
 		out = append(out, checkFinding{
@@ -57,6 +62,11 @@ func netLabelStubFindings(items []visibleTextItem, comps []layoutComp, wires []s
 }
 
 func labelStubGeometries(items []visibleTextItem, comps []layoutComp, wires []schGroupWire) []labelStubGeometry {
+	return labelStubGeometriesWithAnchors(items, comps, wires, nil)
+}
+
+func labelStubGeometriesWithAnchors(items []visibleTextItem, comps []layoutComp,
+	wires []schGroupWire, anchors map[string]checkPoint) []labelStubGeometry {
 	byID := make(map[string]schGroupWire, len(wires))
 	for _, wire := range wires {
 		byID[wire.ID] = wire
@@ -89,7 +99,8 @@ func labelStubGeometries(items []visibleTextItem, comps []layoutComp, wires []sc
 				treeSegments = append(treeSegments, labelWireSegments(wires[i])...)
 			}
 		}
-		if g, ok := labelStubGeometryFor(item, wire, comps, treeSegments); ok {
+		anchor, hasAnchor := anchors[item.ID]
+		if g, ok := labelStubGeometryFor(item, wire, comps, treeSegments, anchor, hasAnchor); ok {
 			out = append(out, g)
 		}
 	}
@@ -142,23 +153,27 @@ func labelStubWiresTouch(a, b schGroupWire) bool {
 }
 
 func labelStubGeometryFor(item visibleTextItem, wire schGroupWire, comps []layoutComp,
-	segments [][4]float64) (labelStubGeometry, bool) {
+	segments [][4]float64, exactAnchor checkPoint, hasExactAnchor bool) (labelStubGeometry, bool) {
 	if len(segments) < 2 {
 		return labelStubGeometry{}, false
 	}
-	cx := (item.BBox.MinX + item.BBox.MaxX) / 2
-	cy := (item.BBox.MinY + item.BBox.MaxY) / 2
 	var anchor labelStubPoint
-	best := math.Inf(1)
-	for _, seg := range segments {
-		x, y, d := closestPointOnSegment(cx, cy, seg[0], seg[1], seg[2], seg[3])
-		if d < best {
-			best = d
-			anchor = labelStubPoint{X: round2(x), Y: round2(y)}
+	if hasExactAnchor {
+		anchor = labelStubPoint{X: round2(exactAnchor.X), Y: round2(exactAnchor.Y)}
+	} else {
+		cx := (item.BBox.MinX + item.BBox.MaxX) / 2
+		cy := (item.BBox.MinY + item.BBox.MaxY) / 2
+		best := math.Inf(1)
+		for _, seg := range segments {
+			x, y, d := closestPointOnSegment(cx, cy, seg[0], seg[1], seg[2], seg[3])
+			if d < best {
+				best = d
+				anchor = labelStubPoint{X: round2(x), Y: round2(y)}
+			}
 		}
-	}
-	if math.IsInf(best, 1) {
-		return labelStubGeometry{}, false
+		if math.IsInf(best, 1) {
+			return labelStubGeometry{}, false
+		}
 	}
 
 	nodes := labelStubVertices(segments, anchor)

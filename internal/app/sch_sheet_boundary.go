@@ -181,11 +181,11 @@ func visibleTextTitleblockFindings(items []visibleTextItem, comps []layoutComp,
 // could not measure all produce an ERROR finding. Missing evidence is never
 // treated as "inside" or otherwise clean.
 func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps []layoutComp, wires []schGroupWire, eps float64, stderr io.Writer) []checkFinding {
-	return visibleTextFindingsWithFrames(cfg, window, sheet, comps, wires, nil, eps, stderr)
+	return visibleTextFindingsWithFrames(cfg, window, sheet, comps, wires, nil, nil, eps, stderr)
 }
 
 func visibleTextFindingsWithFrames(cfg *appConfig, window string, sheet *layoutBBox, comps []layoutComp, wires []schGroupWire,
-	frames []schFrameSpec, eps float64, stderr io.Writer) []checkFinding {
+	frames []schFrameSpec, anchors map[string]checkPoint, eps float64, stderr io.Writer) []checkFinding {
 	if sheet == nil {
 		return nil
 	}
@@ -215,7 +215,7 @@ func visibleTextFindingsWithFrames(cfg *appConfig, window string, sheet *layoutB
 	out = append(out, visibleTextOverlapFindings(parsed.Items, comps, wires, eps)...)
 	out = append(out, netLabelVisibilityFindings(parsed.Items)...)
 	out = append(out, netLabelOrientationFindings(parsed.Items)...)
-	out = append(out, netLabelStubFindings(parsed.Items, comps, wires)...)
+	out = append(out, netLabelStubFindingsWithAnchors(parsed.Items, comps, wires, anchors)...)
 	out = append(out, netLabelEconomyFindings(parsed.Items, wires)...)
 	out = append(out, crossKindLabelEconomyFindings(parsed.Items, comps, wires)...)
 	out = append(out, labelDistanceFindings(parsed.Items, comps, wires, 50)...)
