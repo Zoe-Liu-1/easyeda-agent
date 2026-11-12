@@ -138,3 +138,38 @@ func TestPeripheralDirectSkipsPassiveOnlyTile(t *testing.T) {
 		t.Fatal("the same unwired passives in an ordinary block must still fail peripheral-direct")
 	}
 }
+
+func TestPeripheralDirectAcceptsPeripheralAttachedToAnyPeerCore(t *testing.T) {
+	pin := func(number, net string, x, y float64) map[string]any {
+		return map[string]any{
+			"pinNumber": number, "net": net, "noConnected": false, "x": x, "y": y,
+		}
+	}
+	part := func(ref string, pins []any) map[string]any {
+		return map[string]any{
+			"componentType": "part", "designator": ref,
+			"pinsAvailable": true, "pins": pins,
+		}
+	}
+	page := map[string]any{
+		"components": []any{
+			part("U1", []any{
+				pin("1", "", 0, 0), pin("2", "", 0, 10), pin("3", "", 0, 20),
+				pin("4", "", 0, 30), pin("5", "", 0, 40),
+			}),
+			part("U2", []any{
+				pin("1", "SIG", 100, 100), pin("2", "", 100, 110),
+				pin("3", "", 100, 120), pin("4", "", 100, 130),
+				pin("5", "", 100, 140),
+			}),
+			part("C1", []any{pin("1", "SIG", 140, 100), pin("2", "", 140, 80)}),
+		},
+		"wires": []any{
+			map[string]any{"x0": 100, "y0": 100, "x1": 140, "y1": 100, "net": ""},
+		},
+	}
+	groups := []*schGroup{{ID: "g1", Name: "dual-monitor", Members: []string{"U1", "U2", "C1"}}}
+	if got := peripheralDirectFindingsFor(page, groups); len(got) != 0 {
+		t.Fatalf("a peripheral attached to the second peer core must pass, got %+v", got)
+	}
+}

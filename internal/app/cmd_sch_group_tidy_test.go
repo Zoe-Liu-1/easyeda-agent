@@ -99,7 +99,9 @@ func TestTidyNetClass(t *testing.T) {
 		{"VBAT", "power"}, {"VIN", "power"}, {"VCC_IO", "power"},
 		{"3V3", "power"}, {"3.3V", "power"}, {"5V", "power"},
 		{"+5V", "power"}, {"-5V", "power"}, {"12V0", "power"},
+		{"DC55", "power"}, {"dc_12v", "power"},
 		{"LED_CTRL", "signal"}, {"UART_TX", "signal"}, {"V", "signal"},
+		{"DCLK", "signal"}, {"DC_ENABLE", "signal"},
 		{"", ""},
 	}
 	for _, tc := range cases {

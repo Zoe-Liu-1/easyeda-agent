@@ -79,7 +79,7 @@ The command is read-only: it never calls modify, wire, connect, prim-delete or s
 			if err != nil {
 				return err
 			}
-			vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+			vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 			if err != nil {
 				return err
 			}

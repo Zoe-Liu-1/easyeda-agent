@@ -144,7 +144,7 @@ func readLabelFixScene(pinned *appConfig, win, doc string, stderr io.Writer) (la
 	if err != nil {
 		return labelFixScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return labelFixScene{}, err
 	}

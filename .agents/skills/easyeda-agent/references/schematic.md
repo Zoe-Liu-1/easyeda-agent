@@ -187,6 +187,10 @@ Web 宿主导出网表后可能仍运行 `RealTimeSync`，此时官方删除 API
   `sch gate` 可用于兼容旧脚本的聚合显示，但不作为写入许可。`fail` 表示发现问题，
   `blocked` 表示检查未完成；两者都要列出对象、证据和待修项。
 - 上述检查不能证明设计意图。另将实际 connectivity 的组件 ID、pin→net 与 NC 对照目标图。
+- 大页面检查与修复共用重负载读取预算：`schematic.check`、`schematic.read`、
+  `schematic.visible_text.bboxes` 及受保护几何写入默认允许 60 秒；`bridge-check`
+  使用 150 秒引脚读取预算。超时表示结果未知/未完成，既不能当作零问题，也不应把正常的
+  全页枚举误报成连接器失效。
 - `layout-lint --strict` 要求完整的单页本体、引脚和图纸几何，不能和 `--all-pages`
   合用。它不覆盖全部外置位号；需补位号与 marker 数据检查，非位号属性不参与布局判定。
   器件 tight-spacing 复用本页显式 zone/功能组 ownership：同一功能区内的紧贴不阻断，
@@ -301,6 +305,13 @@ rotation 与 body bbox 重建 pin→body 的 lead 区间：正常外向桩线只
 电源/地可局部命名，但不能让去耦等外围所有端点均为独立标签而失去实体归属路径。
 缺 owner、缺实际几何或只用期望标记伪装读回都不能通过。无源 ownership 的裸 `check`
 不能证明外围语义归属；不得将它的零 findings 当作此项通过。
+
+同一功能组允许存在多个并列核心：多脚 `U/Q/IC` 都是核心候选，三脚以上 `J` 连接器是
+接口/电源边界锚点。外围只要接到其中任一核心即可；多核心共享信号允许按核心分成多个
+物理分支并用同名标签跨芯片连接，但不得留下只含外围、未触及任何核心的孤岛分支。
+`DC` 后接数字/小数/电压形式（如 `DC55`、`DC_12V`、`DC5V`）按电源轨处理；
+`DCLK`、`DC_ENABLE` 等不是电压形态的名称仍是信号网。该分类同时供外围归属、电源簇、
+电源符号朝向和标签类型检查使用。
 
 `sch check` 的图纸边界规则对全部图元（器件、标识、导线）判 `out-of-sheet`（超出图纸可用区，ERROR），并把导线穿入图签区也计入 `titleblock-overlap`；与 `sch clusters`、`layout-lint` 共用同一图纸边框、可用区与图签 keep-out。
 `sch check` 同时读取现场分区矩形和全部可见文字的真实 bbox：旧框重合报

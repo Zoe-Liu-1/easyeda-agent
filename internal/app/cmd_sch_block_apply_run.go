@@ -1278,7 +1278,7 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 // "DESIGNATOR.NUMBER" members, plus each component's pin name/number → number
 // map (plan members reference pins by NAME; the netlist speaks numbers).
 func readLiveNets(cfg *appConfig, window string) (map[string]map[string]bool, map[string]map[string][]string, error) {
-	res, err := requestAction(cfg, "schematic.read", window, map[string]any{"includeCheck": false})
+	res, err := requestActionTimed(cfg, "schematic.read", window, map[string]any{"includeCheck": false}, schemCheckRequestBudget)
 	if err != nil {
 		return nil, nil, err
 	}

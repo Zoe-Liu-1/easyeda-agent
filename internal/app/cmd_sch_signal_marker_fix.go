@@ -153,7 +153,7 @@ func readSignalMarkerScene(pinned *appConfig, win, doc string) (signalMarkerScen
 	if err != nil {
 		return signalMarkerScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return signalMarkerScene{}, err
 	}

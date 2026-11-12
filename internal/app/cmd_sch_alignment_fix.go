@@ -137,7 +137,7 @@ func readAlignmentFixScene(pinned *appConfig, win, doc, netFilter string) (align
 	if err != nil {
 		return alignmentFixScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return alignmentFixScene{}, err
 	}

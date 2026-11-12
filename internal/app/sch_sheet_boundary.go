@@ -180,6 +180,14 @@ func visibleTextTitleblockFindings(items []visibleTextItem, comps []layoutComp,
 // An older connector without the action, a failed read, and items the host
 // could not measure all produce an ERROR finding. Missing evidence is never
 // treated as "inside" or otherwise clean.
+//
+// Repair planners consume the same full visible-text inventory as sch check.
+// Keep their action budget aligned so a large page is not misreported as an
+// unresponsive connector after the generic 20-second action timeout.
+func requestSchematicVisibleTextBBoxes(cfg *appConfig, window string) (*actionResult, error) {
+	return requestActionTimed(cfg, "schematic.visible_text.bboxes", window, map[string]any{}, schemCheckRequestBudget)
+}
+
 func visibleTextFindings(cfg *appConfig, window string, sheet *layoutBBox, comps []layoutComp, wires []schGroupWire, eps float64, stderr io.Writer) []checkFinding {
 	return visibleTextFindingsWithFrames(cfg, window, sheet, comps, wires, nil, nil, eps, stderr)
 }
@@ -189,7 +197,10 @@ func visibleTextFindingsWithFrames(cfg *appConfig, window string, sheet *layoutB
 	if sheet == nil {
 		return nil
 	}
-	res, err := requestAction(cfg, "schematic.visible_text.bboxes", window, map[string]any{})
+	// Visible-text enumeration walks every rendered attribute and wire label on
+	// the page. It is part of the same 60-second full-check budget as the base
+	// schematic.check request, rather than the generic short action timeout.
+	res, err := requestActionTimed(cfg, "schematic.visible_text.bboxes", window, map[string]any{}, schemCheckRequestBudget)
 	if err != nil {
 		if res != nil && res.errorCode == "UNKNOWN_ACTION" {
 			fmt.Fprintln(stderr, "sch check: visible-text out-of-sheet skipped — connector predates schematic.visible_text.bboxes")

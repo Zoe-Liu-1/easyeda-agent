@@ -154,7 +154,7 @@ func readCrossChipFixScene(pinned *appConfig, win, doc string, stderr io.Writer)
 	if err != nil {
 		return crossChipFixScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return crossChipFixScene{}, err
 	}

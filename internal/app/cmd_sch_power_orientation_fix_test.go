@@ -48,6 +48,24 @@ func TestBuildPowerOrientationPlanTargetsGroundDown(t *testing.T) {
 	}
 }
 
+func TestPowerOrientationRecognizesTwoSegmentLStub(t *testing.T) {
+	rot := 0.0
+	flag := layoutComp{
+		ID: "flag", ComponentType: "netflag", Net: "GND", X: 10, Y: 70,
+		Rotation: &rot, AnchorAvailable: true,
+		BBox: &layoutBBox{MinX: 5, MinY: 65, MaxX: 15, MaxY: 75},
+	}
+	wires := []schGroupWire{{
+		ID: "l-stub", Net: "GND",
+		Points: []float64{20, 50, 10, 50, 10, 50, 10, 70},
+	}}
+	stub, reason := powerOrientationStubOfMarker(flag, wires)
+	if stub == nil || reason != "" || stub.WireID != "l-stub" ||
+		stub.HostX != 20 || stub.HostY != 50 || stub.Dir != "left" {
+		t.Fatalf("two-segment L stub = %+v reason=%s", stub, reason)
+	}
+}
+
 func TestPlanAdapterPowerOrientationPreservesParentWire(t *testing.T) {
 	rot := flagBodyRotation["power"]["right"]
 	flag := layoutComp{

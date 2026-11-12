@@ -2,7 +2,11 @@ package protocol
 
 import "time"
 
-const SchematicGeometryReadBudget = 20 * time.Second
+// Large schematic pages can legitimately take longer than 20s to enumerate
+// complete component, pin, bbox and wire geometry through the web connector.
+// Keep the guard fail-closed, but allow a caller that explicitly grants a longer
+// action budget to fund the corresponding preflight/readback observation.
+const SchematicGeometryReadBudget = 60 * time.Second
 const SchematicWirePublicationBudget = 2 * time.Second
 
 // SchematicGeometryOverhead keeps CLI and daemon end-to-end budgets aligned.

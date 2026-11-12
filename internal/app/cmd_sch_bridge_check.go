@@ -95,7 +95,7 @@ func runSchBridgeCheck(cfg *appConfig, window string, allPages, asJSON bool, std
 	if allPages {
 		payload["allPages"] = true
 	}
-	res, err := requestAction(cfg, "schematic.bridgeCheck", window, payload)
+	res, err := requestActionTimed(cfg, "schematic.bridgeCheck", window, payload, schematicPinsReadBudget)
 	if err != nil {
 		return err
 	}

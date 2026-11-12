@@ -140,6 +140,32 @@ func isPowerClusterPassive(designator string) bool {
 	return false
 }
 
+// powerClusterThreePinSelectorMiddle applies the documented three-pin selector
+// exception to local power-cluster advice as well. The middle foot cannot be
+// physically joined across either neighbouring foot without shorting one of
+// them, so its single same-name label is an intentional terminal.
+func powerClusterThreePinSelectorMiddle(c layoutComp, p layoutPin) bool {
+	if !strings.HasPrefix(strings.TrimSpace(c.Designator), "J") || len(c.Pins) != 3 {
+		return false
+	}
+	horizontal, vertical := true, true
+	minX, maxX, minY, maxY := p.X, p.X, p.Y, p.Y
+	for _, other := range c.Pins {
+		minX = math.Min(minX, other.X)
+		maxX = math.Max(maxX, other.X)
+		minY = math.Min(minY, other.Y)
+		maxY = math.Max(maxY, other.Y)
+		if math.Abs(other.Y-p.Y) > 1 {
+			horizontal = false
+		}
+		if math.Abs(other.X-p.X) > 1 {
+			vertical = false
+		}
+	}
+	return (horizontal && p.X > minX+1 && p.X < maxX-1) ||
+		(vertical && p.Y > minY+1 && p.Y < maxY-1)
+}
+
 type powerClusterPassive struct {
 	c    layoutComp
 	p    layoutPin
@@ -211,6 +237,9 @@ func powerClusterFindings(comps []layoutComp, wires []schGroupWire, exempt map[s
 				radius = 150
 			}
 			if bestDist > radius {
+				continue
+			}
+			if powerClusterThreePinSelectorMiddle(best.c, best.p) {
 				continue
 			}
 			key := rail + "|" + best.c.ID + "|" + best.p.Number

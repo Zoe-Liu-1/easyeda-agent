@@ -130,6 +130,26 @@ func tidyNetClass(net string) string {
 			return "power"
 		}
 	}
+	// DC rails commonly use names such as DC55, DC_12V and DC-5V. Only treat
+	// the prefix as a supply when the remainder has a voltage-like shape; a
+	// real signal such as DCLK must continue to classify as signal.
+	if strings.HasPrefix(n, "DC") {
+		rest := strings.TrimPrefix(strings.TrimPrefix(n, "DC"), "_")
+		hasDigit := false
+		voltageLike := rest != ""
+		for _, r := range rest {
+			switch {
+			case r >= '0' && r <= '9':
+				hasDigit = true
+			case r == 'V' || r == '.':
+			default:
+				voltageLike = false
+			}
+		}
+		if voltageLike && hasDigit {
+			return "power"
+		}
+	}
 	n = strings.TrimPrefix(n, "+")
 	n = strings.TrimPrefix(n, "-")
 	digits, seenV := 0, false

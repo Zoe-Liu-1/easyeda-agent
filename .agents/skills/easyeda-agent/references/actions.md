@@ -156,7 +156,7 @@ connector 在 handler 前后核对 project/doc/type 和可选 tab；漂移、缺
 | `long-wire` | 单个真实物理段超过 `100 raw` 时的 INFO。`wireSegment` 给出最长段，`wireLength` 给出长度，`at` 为段中点。按单段而不是整棵折线包络计算；长度本身不是移动器件或拆真连线的许可。先判断完整功能组能否平移、是否有短正交直连或表示法可换，再进入 `alignment-plan` / `direct-connect-plan`。 |
 | `label-visibility` | 电源/地/端口符号或网络标签的 Name 隐藏、缺失或为空。隐藏项和空名称可由 `sch label-fix` 修复；空名称必须有父级明确网名，没有 Name 属性保持 blocked。root-owned `_NETLABEL_` 可能可见但被批量属性枚举遗漏；连接器 1.14.19 起须用精确 ID 经 `sch prim-delete` 删除并回读（实例删除不可用时走官方通用图元删除），不能按前缀批量清理。 |
 | `label-orientation` | 可见 Name 文字竖排/折叠。覆盖 wire net label、netflag、netport、netlabel；电源/地名称也检查。90/270 可由 `sch label-fix` 改为 0；符号 body 朝向仍由 `power-ground-orientation` 单独检查。 |
-| `power-ground-orientation` | 电源/地旗 body 未朝上/下。`sch power-orientation-fix` 只重接单桩 netflag，首段沿引脚外向并搜索本地正交折线；共享/分支树或反向脚保持 blocked，反向脚显式 `orientationExempt`。 |
+| `power-ground-orientation` | 电源/地旗 body 未朝上/下。`sch power-orientation-fix` 只重接单桩 netflag 或不分支的两段正交 L 形桩，首段沿引脚外向并搜索本地正交折线；共享/分支树或反向脚保持 blocked，反向脚显式 `orientationExempt`。 |
 | `label-economy` | 同一线岛重复同名标签。覆盖信号标签和电源/地导线 Name；netflag/netport 的同岛重复由 `redundant-net-marker` 负责。同名导线标签可进入 `sch marker-clean` 候选，但删除仍须显式选 ID 并验证网表。电源/轨名仍不参与“信号直连机会”的数量统计。 |
 | `label-stub` | wire Name 位于一条从既有主干分出的纯标注叶枝末端，叶枝上无引脚/marker、分支点不是连接端点。ERROR；必须用 `pagePrimitives.attributes[].X/Y` 的原生锚点判断，不能用文字 bbox 中心替代。标签应直接挂到主干。自动修复限单 primitive/单 Name，使用 `sch label-stub-fix`；多 primitive 或复杂树保持 blocked |
 | `cross-kind-label-economy` | 同一线岛同名网络同时出现导线标签和 netflag/netport/netlabel。检查只报告候选；没有移动前基线时不得按字典序猜保留对象，也不生成删除建议。用 `sch marker-clean` 显式选择幸存表示并比较完整 pin→net 表。拟保留表示自身不可见或名称为空时先恢复可见名称。 |

@@ -21,6 +21,15 @@ import (
 // peripherals that must be wired to their core (2-pin passives, 4-pin crystals).
 const schSimplePeripheralMaxPins = 4
 
+func isSchModuleCoreRef(ref string) bool {
+	d := strings.ToUpper(strings.TrimSpace(ref))
+	return strings.HasPrefix(d, "U") || strings.HasPrefix(d, "Q") || strings.HasPrefix(d, "IC")
+}
+
+func isSchModuleBoundaryRef(ref string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(ref)), "J")
+}
+
 func peripheralDirectFinding(cfg *appConfig, window string, comps []layoutComp, stderr io.Writer) []checkFinding {
 	parts := 0
 	for _, c := range comps {
@@ -102,19 +111,48 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 			}
 			return members[i] < members[j]
 		})
-		// Only simple peripherals must be wired to the core; another IC in the
-		// module (≥5 pins, e.g. an SPI flash) is joined by net labels by design and
-		// judged as its own solo module. Pin count stands in for the part class
-		// block-apply uses (bslIsSimplePeripheral): passives have 2 pins, crystals 4.
+		// Only simple peripherals must be wired to a core. Every multi-pin active
+		// device in the module is a legitimate core: a functional block can contain
+		// more than one peer IC (for example two current monitors), and a passive
+		// attached to any one of them is still physically attached inside the group.
+		// Pin count stands in for the part class block-apply uses
+		// (bslIsSimplePeripheral): passives have 2 pins, crystals 4.
+		var cores []string
+		for _, ref := range members {
+			if pinCount[ref] > schSimplePeripheralMaxPins && isSchModuleCoreRef(ref) {
+				cores = append(cores, ref)
+			}
+		}
+		// Multi-pin connectors are interface/power boundaries. Once an active
+		// core exists, they are legitimate local attachment anchors rather than
+		// peripherals that must be chased back to a chip with long wires.
+		if len(cores) > 0 {
+			for _, ref := range members {
+				if pinCount[ref] >= 3 && isSchModuleBoundaryRef(ref) {
+					cores = append(cores, ref)
+				}
+			}
+		}
 		// A frame of a tiled block made only of 2-pin parts (decoupling bank, a
 		// pull-up row) has no core: its parts join the chip through power symbols
 		// and labels, the reference-schematic convention the tile exists for.
-		if m.tile && pinCount[members[0]] <= 2 {
-			continue
+		// Ordinary passive-only groups retain the historical largest-part anchor so
+		// an incomplete module is still reported rather than silently skipped.
+		if len(cores) == 0 {
+			if m.tile {
+				continue
+			}
+			cores = []string{members[0]}
 		}
-		owned := map[string]bool{members[0]: true}
+		owned := map[string]bool{}
+		for _, ref := range cores {
+			owned[ref] = true
+		}
 		var peripherals []string
-		for _, ref := range members[1:] {
+		for _, ref := range members {
+			if owned[ref] {
+				continue
+			}
 			if pinCount[ref] <= schSimplePeripheralMaxPins {
 				owned[ref] = true
 				peripherals = append(peripherals, ref)
@@ -123,7 +161,7 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 		if len(peripherals) == 0 {
 			continue
 		}
-		mods := []connectivity.Module{{ID: m.name, CoreComponents: members[:1], PeripheralComponents: peripherals}}
+		mods := []connectivity.Module{{ID: m.name, CoreComponents: cores, PeripheralComponents: peripherals}}
 		for ref := range pinCount {
 			if !owned[ref] {
 				mods = append(mods, connectivity.Module{ID: "solo:" + ref, CoreComponents: []string{ref}})
@@ -139,7 +177,7 @@ func peripheralDirectFindingsFor(result map[string]any, groups []*schGroup) []ch
 		out = append(out, checkFinding{
 			Type: "peripheral-not-direct", Level: "warn", Designator: members[0],
 			Message: fmt.Sprintf("模块 %s(核心 %s,外围 %s)没有全部用实际导线接到核心: %v — 同名标签不算直连;按 auto-layout-sop §2 走 `sch lib-layout` → `sch compose --preserve-instances` 重建",
-				m.name, members[0], strings.Join(peripherals, ","), err),
+				m.name, strings.Join(cores, ","), strings.Join(peripherals, ","), err),
 		})
 	}
 	return out

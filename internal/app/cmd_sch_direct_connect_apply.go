@@ -93,7 +93,7 @@ func freshDirectConnectPair(pinned *appConfig, win, doc, pairArg string, maxDist
 	if err != nil {
 		return directConnectApplyReport{}, nil, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return directConnectApplyReport{}, nil, err
 	}

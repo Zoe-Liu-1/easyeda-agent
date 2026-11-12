@@ -150,3 +150,29 @@ func TestPowerClusterExempt(t *testing.T) {
 		t.Fatalf("want an explicit INFO exemption, got %+v", got)
 	}
 }
+
+func TestPowerClusterThreePinSelectorMiddleFootIsNotAClusterCandidate(t *testing.T) {
+	comps := []layoutComp{
+		{
+			ID: "j1", Designator: "J1", ComponentType: "part",
+			Pins: []layoutPin{
+				{Number: "1", X: 0, Y: 10, Net: "+5V"},
+				{Number: "2", X: 0, Y: 0, Net: "VBIAS"},
+				{Number: "3", X: 0, Y: -10, Net: "DC55"},
+			},
+		},
+		{
+			ID: "c1", Designator: "C1", ComponentType: "part",
+			Pins: []layoutPin{{Number: "1", X: 100, Y: 0, Net: "VBIAS"}},
+		},
+		{ID: "f1", ComponentType: "netflag", Net: "VBIAS", X: -10, Y: 0, AnchorAvailable: true},
+		{ID: "f2", ComponentType: "netflag", Net: "VBIAS", X: 110, Y: 0, AnchorAvailable: true},
+	}
+	wires := []schGroupWire{
+		{ID: "w1", Points: []float64{-10, 0, 0, 0}},
+		{ID: "w2", Points: []float64{100, -10, 100, 10}},
+	}
+	if got := powerClusterFindings(comps, wires, nil); len(got) != 0 {
+		t.Fatalf("three-pin selector middle-foot label must be exempt: %+v", got)
+	}
+}

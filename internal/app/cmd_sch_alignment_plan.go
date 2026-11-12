@@ -137,7 +137,7 @@ The command never calls modify, group.move, wire, connect, delete or save.`,
 			if err != nil {
 				return err
 			}
-			vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+			vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 			if err != nil {
 				return err
 			}

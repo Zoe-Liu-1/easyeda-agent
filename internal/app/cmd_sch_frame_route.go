@@ -128,7 +128,7 @@ func readFrameRouteScene(pinned *appConfig, win, doc string) (frameRouteScene, e
 	if err != nil {
 		return frameRouteScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return frameRouteScene{}, err
 	}

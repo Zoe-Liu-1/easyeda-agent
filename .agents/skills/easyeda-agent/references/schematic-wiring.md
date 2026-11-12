@@ -57,7 +57,9 @@ kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 交叉/穿器件/压字时，才用同名标签。不得为省标签绕斜线或制造交叉。标签按**线岛**计数：
 同一线岛同一网络只标一次；标签水平、可见，不压导线/引脚/器件/文字；电源、地、器件名称
 不计入标签数量。`VOUT*`、`VLOAD*` 等稳压输出/负载检测网属于信号网，不得当作电源轨继续
-使用 netflag；`DC*`、`VBIAS` 等供电轨仍按电源符号处理。**不同主动芯片之间的信号网不用长导线直连**；两块芯片各自在引脚端放置
+使用 netflag；`VBIAS` 及 `DC` 后接电压形态的网名（`DC55`、`DC_12V`、`DC5V`）属于
+电源轨，按电源符号处理；`DCLK`、`DC_ENABLE` 等非电压形态仍是信号网。
+**不同主动芯片之间的信号网不用长导线直连**；两块芯片各自在引脚端放置
 同名网络标签，只有同一芯片功能块内部的短外围才保持 wire 直连。非电源/地信号网使用
 netflag 或带箭头的 netport 均为 WARN；确属模块边界
 的 netport 需用 `sch check --signal-port-exempt <primitiveId,...>` 显式登记，登记项只保留

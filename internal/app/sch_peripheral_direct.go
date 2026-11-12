@@ -2,7 +2,9 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strings"
 
 	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
 )
@@ -118,6 +120,60 @@ func ValidateSchematicPeripheralDirect(layout *SchematicLayoutResult, modules []
 				continue
 			}
 			pins := netPins[net]
+			roots := map[int]bool{}
+			for _, pin := range pins {
+				roots[islands[pin].root] = true
+			}
+			// Some functional groups contain peer active devices (for example two
+			// current monitors). Cross-chip signals are deliberately joined by
+			// same-name labels, so requiring every pin on the net to share one
+			// physical island would reject the documented drawing convention.
+			// Instead, allow one physical branch per core, but reject any branch
+			// that contains only peripherals and therefore reaches no core.
+			coreIDs := map[string]bool{}
+			rootMembers := map[int][]schematicVariantPinIdentity{}
+			rootHasCore := map[int]bool{}
+			for _, pin := range pins {
+				root := islands[pin].root
+				rootMembers[root] = append(rootMembers[root], pin)
+				if cores[pin.component] {
+					coreIDs[pin.component] = true
+					rootHasCore[root] = true
+				}
+			}
+			if len(coreIDs) > 1 {
+				for root, members := range rootMembers {
+					if rootHasCore[root] {
+						continue
+					}
+					pin := members[0]
+					return fmt.Errorf("peripheral-direct-missing: module %s dedicated signal %s peripheral %s.%s is not physically attached to any core of the multi-core group; same-name labels cannot replace a local peripheral branch", m.ID, net, refs[pin.component], pin.number)
+				}
+				continue
+			}
+			// A three-pin selector's middle foot is the documented exception: it
+			// may be joined once by a same-name label because routing across the
+			// adjacent feet would create a real short. Ignore that foot only when
+			// its physical island contains no other pin on this signal; every
+			// remaining split branch still fails closed.
+			if len(roots) > 1 {
+				nonExceptionalRoots := map[int]bool{}
+				for root, members := range rootMembers {
+					onlyMiddleFoot := true
+					for _, pin := range members {
+						if !schematicThreePinConnectorMiddlePin(layout, refs, pin) {
+							onlyMiddleFoot = false
+							break
+						}
+					}
+					if !onlyMiddleFoot {
+						nonExceptionalRoots[root] = true
+					}
+				}
+				if len(nonExceptionalRoots) <= 1 {
+					continue
+				}
+			}
 			first := islands[pins[0]]
 			labels := make([]string, 0, len(pins))
 			for _, pin := range pins {
@@ -156,6 +212,53 @@ func ValidateSchematicPeripheralDirect(layout *SchematicLayoutResult, modules []
 		}
 	}
 	return nil
+}
+
+// schematicThreePinConnectorMiddlePin recognizes the geometric middle foot of
+// a horizontal or vertical three-pin J-prefixed selector. The reference prefix
+// and exact three-pin geometry are both required; arbitrary three-pin parts and
+// side feet do not receive the label exception.
+func schematicThreePinConnectorMiddlePin(layout *SchematicLayoutResult, refs map[string]string, target schematicVariantPinIdentity) bool {
+	if layout == nil || !strings.HasPrefix(strings.TrimSpace(refs[target.component]), "J") {
+		return false
+	}
+	for _, c := range layout.Placements {
+		if layout.ComponentIDs[c.Designator] != target.component || len(c.Pins) != 3 {
+			continue
+		}
+		var p SchematicPin
+		found := false
+		for _, candidate := range c.Pins {
+			if candidate.Number == target.number {
+				p = candidate
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+		minX, maxX, minY, maxY := p.X, p.X, p.Y, p.Y
+		for _, other := range c.Pins {
+			minX = math.Min(minX, other.X)
+			maxX = math.Max(maxX, other.X)
+			minY = math.Min(minY, other.Y)
+			maxY = math.Max(maxY, other.Y)
+		}
+		horizontal := true
+		vertical := true
+		for _, other := range c.Pins {
+			if math.Abs(other.Y-p.Y) > 1 {
+				horizontal = false
+			}
+			if math.Abs(other.X-p.X) > 1 {
+				vertical = false
+			}
+		}
+		return (horizontal && p.X > minX+1 && p.X < maxX-1) ||
+			(vertical && p.Y > minY+1 && p.Y < maxY-1)
+	}
+	return false
 }
 
 func validateSchCompositionPeripheralDirect(p *powerLayoutPlan, d connectivity.Document, moduleID string) error {

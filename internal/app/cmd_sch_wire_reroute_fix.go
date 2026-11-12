@@ -139,7 +139,7 @@ func readWireRerouteScene(pinned *appConfig, win, doc string) (wireRerouteScene,
 	if err != nil {
 		return wireRerouteScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return wireRerouteScene{}, err
 	}

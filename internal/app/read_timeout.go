@@ -27,6 +27,17 @@ func effectiveReadTimeout(action string, payload any, requested time.Duration) t
 	case "schematic.attribute.move", "schematic.attribute.modify":
 		// Before and after may each need a bounded 15s native visibility read.
 		budget = 45 * time.Second
+	case "schematic.read", "schematic.check",
+		"schematic.visible_text.bboxes", "schematic.component.modify",
+		"schematic.component.delete", "schematic.pin.disconnect",
+		"schematic.group.move", "schematic.wire.create",
+		"schematic.power.connect_pin", "schematic.netflag.create",
+		"schematic.primitives.delete":
+		// Full-page geometry and netlist operations legitimately exceed the
+		// generic 20-second budget on large schematics.
+		budget = schemCheckRequestBudget
+	case "schematic.bridgeCheck":
+		budget = schematicPinsReadBudget
 	case "document.open", "schematic.page.open":
 		budget = documentOpenReadBudget
 	case "schematic.components.list":

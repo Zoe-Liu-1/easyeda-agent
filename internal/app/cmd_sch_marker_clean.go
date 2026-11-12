@@ -133,7 +133,7 @@ func freshMarkerCleanReport(pinned *appConfig, win, doc, deleteRaw string, apply
 	if err != nil {
 		return markerCleanReport{}, nil, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return markerCleanReport{}, nil, err
 	}

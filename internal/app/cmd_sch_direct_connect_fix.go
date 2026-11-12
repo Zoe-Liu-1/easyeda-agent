@@ -149,7 +149,7 @@ func readDCFixScene(pinned *appConfig, win, doc string, maxDistance, maxMove flo
 	if err != nil {
 		return dcFixScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return dcFixScene{}, err
 	}

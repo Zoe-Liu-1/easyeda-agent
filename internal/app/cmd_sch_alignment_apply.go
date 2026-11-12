@@ -113,7 +113,7 @@ func freshAlignmentApplyPlan(pinned *appConfig, win, doc, netFilter, planID stri
 	if err != nil {
 		return alignmentPlanItem{}, nil, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return alignmentPlanItem{}, nil, err
 	}

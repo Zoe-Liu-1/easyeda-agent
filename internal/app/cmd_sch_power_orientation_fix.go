@@ -158,7 +158,7 @@ func readPowerOrientationScene(pinned *appConfig, win, doc string) (powerOrienta
 	if err != nil {
 		return powerOrientationScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return powerOrientationScene{}, err
 	}
@@ -218,7 +218,7 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 			FromRotation: *c.Rotation, ToRotation: flagBodyRotation[family][want],
 			Status: "blocked", Original: &c,
 		}
-		stub, reason := stubOfMarker(c, wires)
+		stub, reason := powerOrientationStubOfMarker(c, wires)
 		if stub == nil || reason != "" {
 			if fallback, ok, adapterReason := planAdapterPowerOrientation(c, family, want, items, comps, wires, sheet, titleBlock); ok {
 				fallback.MarkerID, fallback.Net, fallback.Family = c.ID, c.Net, family
@@ -302,6 +302,99 @@ func buildPowerOrientationProposals(comps []layoutComp, wires []schGroupWire,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].MarkerID < out[j].MarkerID })
 	return out
+}
+
+// powerOrientationStubOfMarker extends the conservative single-segment marker
+// stub recognizer to a two-segment orthogonal L. Multiple GND headers generated
+// by the normal autoconnect/de-stagger path are already an L by the time a
+// power-orientation repair sees them. The helper still requires one unbranched
+// two-segment primitive; the caller separately verifies that its free end is a
+// real component pin before replanning the route.
+func powerOrientationStubOfMarker(c layoutComp, wires []schGroupWire) (*destaggerStub, string) {
+	if stub, reason := stubOfMarker(c, wires); stub != nil || reason != "not-a-stub" {
+		return stub, reason
+	}
+	if !isSchMarker(c.ComponentType) || !c.AnchorAvailable || c.BBox == nil {
+		return nil, "not-a-stub"
+	}
+	if c.Net == "" {
+		return nil, "no-net"
+	}
+	const eps = 0.5
+	for _, w := range wires {
+		pts := w.Points
+		if len(pts) != 8 {
+			continue
+		}
+		segs := [][4]float64{
+			{pts[0], pts[1], pts[2], pts[3]},
+			{pts[4], pts[5], pts[6], pts[7]},
+		}
+		markerEnds, shared := -1, [2]float64{}
+		for i := range segs {
+			a := [2]float64{segs[i][0], segs[i][1]}
+			b := [2]float64{segs[i][2], segs[i][3]}
+			switch {
+			case pointsClose(c.X, c.Y, a[0], a[1], eps):
+				markerEnds = i
+				shared = b
+			case pointsClose(c.X, c.Y, b[0], b[1], eps):
+				markerEnds = i
+				shared = a
+			}
+		}
+		if markerEnds < 0 {
+			continue
+		}
+		other := 1 - markerEnds
+		var otherShared, host [2]float64
+		if pointsClose(shared[0], shared[1], segs[other][0], segs[other][1], eps) {
+			otherShared = [2]float64{segs[other][0], segs[other][1]}
+			host = [2]float64{segs[other][2], segs[other][3]}
+		} else if pointsClose(shared[0], shared[1], segs[other][2], segs[other][3], eps) {
+			otherShared = [2]float64{segs[other][2], segs[other][3]}
+			host = [2]float64{segs[other][0], segs[other][1]}
+		} else {
+			continue
+		}
+		if otherShared != shared {
+			continue
+		}
+		orthogonal := true
+		for _, seg := range segs {
+			dx, dy := math.Abs(seg[2]-seg[0]), math.Abs(seg[3]-seg[1])
+			if (dx < 1 && dy < 1) || (dx >= eps && dy >= eps) {
+				orthogonal = false
+				break
+			}
+		}
+		if !orthogonal {
+			continue
+		}
+		dx, dy := shared[0]-host[0], shared[1]-host[1]
+		dir := ""
+		switch {
+		case math.Abs(dx) <= eps && dy > 0:
+			dir = "up"
+		case math.Abs(dx) <= eps && dy < 0:
+			dir = "down"
+		case math.Abs(dy) <= eps && dx > 0:
+			dir = "right"
+		case math.Abs(dy) <= eps && dx < 0:
+			dir = "left"
+		default:
+			continue
+		}
+		offset := math.Abs(c.X-host[0]) + math.Abs(c.Y-host[1])
+		if offset < 1 || offset > destaggerStubMaxLen {
+			continue
+		}
+		return &destaggerStub{
+			Flag: c, WireID: w.ID, HostX: host[0], HostY: host[1],
+			Dir: dir, Offset: offset,
+		}, ""
+	}
+	return nil, "not-a-stub"
 }
 
 func powerOrientationHostPin(comps []layoutComp, x, y float64) (layoutComp, layoutPin, bool) {

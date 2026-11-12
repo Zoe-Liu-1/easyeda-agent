@@ -10,10 +10,10 @@ func TestSchematicGeometryOverhead(t *testing.T) {
 		name, action string
 		budget, want time.Duration
 	}{
-		{"wire-default", "schematic.wire.create", 0, 42 * time.Second},
-		{"wire-long", "schematic.wire.create", time.Minute, 42 * time.Second},
-		{"connect", "schematic.power.connect_pin", time.Minute, 42 * time.Second},
-		{"component", "schematic.component.modify", time.Minute, 40 * time.Second},
+		{"wire-default", "schematic.wire.create", 0, 122 * time.Second},
+		{"wire-long", "schematic.wire.create", time.Minute, 122 * time.Second},
+		{"connect", "schematic.power.connect_pin", time.Minute, 122 * time.Second},
+		{"component", "schematic.component.modify", time.Minute, 120 * time.Second},
 		{"read", "schematic.components.list", time.Minute, 0},
 		{"short-diagnostic", "schematic.wire.create", DispatchResponseGrace, 0},
 		{"bounded-wire", "schematic.wire.create", 5 * time.Second, 12 * time.Second},

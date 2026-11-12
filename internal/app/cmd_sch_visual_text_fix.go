@@ -146,7 +146,7 @@ func readVisualTextFixScene(pinned *appConfig, win, doc string, stderr io.Writer
 	if err != nil {
 		return visualTextFixScene{}, err
 	}
-	vt, err := requestAction(pinned, "schematic.visible_text.bboxes", win, nil)
+	vt, err := requestSchematicVisibleTextBBoxes(pinned, win)
 	if err != nil {
 		return visualTextFixScene{}, err
 	}

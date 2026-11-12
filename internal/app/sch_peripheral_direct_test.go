@@ -85,6 +85,39 @@ func TestPeripheralDirectOwnershipFailsClosed(t *testing.T) {
 	}
 }
 
+func TestPeripheralDirectAllowsThreePinSelectorMiddleFootLabel(t *testing.T) {
+	layout := &SchematicLayoutResult{
+		ComponentIDs: map[string]string{"U1": "core", "R1": "pullup", "J1": "selector"},
+		Placements: []SchematicPlacement{
+			{Designator: "U1", Pins: []SchematicPin{
+				{Number: "EN", Net: "EN", X: 0, Y: 0},
+				{Number: "OUT", Net: "OUT", X: 0, Y: 10},
+			}},
+			{Designator: "R1", Pins: []SchematicPin{{Number: "1", Net: "EN", X: 100, Y: 0}}},
+			{Designator: "J1", Pins: []SchematicPin{
+				{Number: "1", Net: "OUT", X: 200, Y: 10},
+				{Number: "2", Net: "EN", X: 200, Y: 0},
+				{Number: "3", Net: "ALT", X: 200, Y: -10},
+			}},
+		},
+		Wires: []SchematicWire{
+			{Net: "EN", Points: [][2]float64{{0, 0}, {100, 0}}},
+			{Net: "OUT", Points: [][2]float64{{0, 10}, {200, 10}}},
+		},
+	}
+	modules := []connectivity.Module{{ID: "M", CoreComponents: []string{"core"}, PeripheralComponents: []string{"pullup", "selector"}}}
+	if err := ValidateSchematicPeripheralDirect(layout, modules); err != nil {
+		t.Fatalf("three-pin selector middle-foot label was not exempted: %v", err)
+	}
+
+	// If the exceptional island also contains another component pin, the normal
+	// strict rule returns: only the selector's own middle foot can be labelled.
+	layout.Placements[1].Pins[0].X = 200
+	if err := ValidateSchematicPeripheralDirect(layout, modules); err == nil {
+		t.Fatal("exception swallowed a second disconnected peripheral")
+	}
+}
+
 func TestPeripheralDirectOverlappingPinsAreNotWire(t *testing.T) {
 	layout, modules := peripheralDirectFixture()
 	layout.Flags = nil
